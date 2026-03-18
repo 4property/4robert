@@ -18,7 +18,7 @@ IMAGES_ROOT_DIRNAME = "wordpress_properties"
 RAW_IMAGES_ROOT_DIRNAME = "wordpress_properties_raw"
 RAW_PHOTOS_DIRNAME = "raw_photos"
 
-DEFAULT_PHOTOS_TO_SELECT = 5
+DEFAULT_PHOTOS_TO_SELECT = 8
 DEFAULT_PROPERTY_FOLDERS = ("property-1", "property-2", "property-3")
 SELECTED_PHOTOS_DIRNAME = "selected_photos"
 
