@@ -219,6 +219,7 @@ class Property:
     latitude: float | None = None
     longitude: float | None = None
     agent_name: str | None = None
+    agent_photo_url: str | None = None
     agent_email: str | None = None
     agent_mobile: str | None = None
     agent_number: str | None = None
@@ -300,6 +301,7 @@ class Property:
             latitude=_to_float(payload.get("latitude")),
             longitude=_to_float(payload.get("longitude")),
             agent_name=_to_text(payload.get("agent_name")),
+            agent_photo_url=_to_text(payload.get("agent_photo")),
             agent_email=_to_text(payload.get("agent_email")),
             agent_mobile=_to_text(payload.get("agent_mobile")),
             agent_number=_to_text(payload.get("agent_number")),
@@ -339,7 +341,7 @@ class Property:
 
     def to_db_record(self, *, image_folder: str, fetched_at: str) -> dict[str, Any]:
         return {
-            "id": self.id,
+            "source_property_id": self.id,
             "slug": self.slug,
             "title": self.title,
             "link": self.link,
@@ -380,6 +382,7 @@ class Property:
             "latitude": self.latitude,
             "longitude": self.longitude,
             "agent_name": self.agent_name,
+            "agent_photo_url": self.agent_photo_url,
             "agent_email": self.agent_email,
             "agent_mobile": self.agent_mobile,
             "agent_number": self.agent_number,
@@ -447,6 +450,7 @@ class Property:
             "latitude": self.latitude,
             "longitude": self.longitude,
             "agent_name": self.agent_name,
+            "agent_photo_url": self.agent_photo_url,
             "agent_email": self.agent_email,
             "agent_mobile": self.agent_mobile,
             "agent_number": self.agent_number,

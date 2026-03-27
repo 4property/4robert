@@ -1,125 +1,162 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from settings.app import APP_SETTINGS, AppSettings, get_app_settings
+from settings.database import (
+    DATABASE_FILENAME as _DATABASE_FILENAME,
+    LEGACY_PROPERTY_COLUMN_DEFINITIONS,
+    PROPERTY_COLUMN_DEFINITIONS,
+    PROPERTY_UNIQUE_CONSTRAINTS,
+)
+from settings.images import (
+    DEFAULT_PROPERTY_FOLDERS,
+    IMAGE_EXTENSIONS,
+    IMAGE_HEADERS,
+    PROPERTY_MEDIA_RAW_ROOT_DIRNAME,
+    PROPERTY_MEDIA_ROOT_DIRNAME,
+    RAW_PHOTOS_DIRNAME,
+    SELECTED_PHOTOS_DIRNAME,
+)
+from settings.photo_selection import (
+    DEFAULT_PHOTOS_TO_SELECT,
+    GEMINI_API_KEY,
+    GEMINI_AREA_LABELS,
+    GEMINI_AREA_SET,
+    GEMINI_EXTERIOR_AREAS,
+    GEMINI_MODEL,
+    GEMINI_RETRY_ATTEMPTS,
+    GEMINI_SELECTION_AUDIT_FILENAME,
+    GEMINI_SERVICE_AREAS,
+    GEMINI_TIMEOUT_SECONDS,
+    GEMINI_VALID_RESULT_AREAS,
+)
+from settings.reels import (
+    ASSETS_DIRNAME,
+    REELS_ROOT_DIRNAME,
+    REEL_AUDIO_VOLUME,
+    REEL_BACKGROUND_AUDIO_FILENAME,
+    REEL_COVER_LOGO_FILENAME,
+    REEL_FPS,
+    REEL_HEIGHT,
+    REEL_INTRO_DURATION_SECONDS,
+    REEL_MAX_SLIDE_COUNT,
+    REEL_SECONDS_PER_SLIDE,
+    REEL_SUBTITLE_FONT_PATH,
+    REEL_SUBTITLE_FONT_SIZE,
+    REEL_TOTAL_DURATION_SECONDS,
+    REEL_WIDTH,
+)
+from settings.social_publishing import (
+    GO_HIGH_LEVEL_API_VERSION,
+    GO_HIGH_LEVEL_BASE_URL,
+    SOCIAL_PUBLISHING_DEFAULT_PLATFORM,
+    SOCIAL_PUBLISHING_ENABLED,
+    SOCIAL_PUBLISHING_LOCAL_ONLY,
+    SOCIAL_PUBLISHING_PROPERTY_URL_TEMPLATE,
+    SOCIAL_PUBLISHING_PROPERTY_URL_TRACKING_PARAMS,
+    SOCIAL_PUBLISHING_RETRY_ATTEMPTS,
+    SOCIAL_PUBLISHING_RETRY_BACKOFF_SECONDS,
+)
+from settings.wordpress import HTTP_HEADERS
 
-DATABASE_FILENAME = "wordpress_properties.sqlite3"
-
-WORDPRESS_LINK = "https://ckp.ie/wp-json/wp/v2/property"
-REQUEST_TIMEOUT_SECONDS = 30
-WORDPRESS_PER_PAGE = 100
-HTTP_HEADERS = {
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (compatible; CPIHED/1.0; +https://ckp.ie)",
-}
-IMAGE_HEADERS = {
-    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-    "User-Agent": "Mozilla/5.0 (compatible; CPIHED/1.0; +https://ckp.ie)",
-}
-IMAGES_ROOT_DIRNAME = "wordpress_properties"
-RAW_IMAGES_ROOT_DIRNAME = "wordpress_properties_raw"
-RAW_PHOTOS_DIRNAME = "raw_photos"
-
-DEFAULT_PHOTOS_TO_SELECT = 8
-DEFAULT_PROPERTY_FOLDERS = ("property-1", "property-2", "property-3")
-SELECTED_PHOTOS_DIRNAME = "selected_photos"
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
-HIST_BINS = (8, 8, 8)
-THUMBNAIL_SIZE = (32, 32)
-HASH_SIZE = 8
-ORB_FEATURES = 800
-MIN_ORB_KEYPOINTS = 12
-ORB_GOOD_MATCH_DISTANCE = 45
-CLUSTER_MERGE_AVERAGE_THRESHOLD = 0.62
-CLUSTER_MERGE_BEST_THRESHOLD = 0.66
-
-PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
-    ("id", "INTEGER PRIMARY KEY"),
-    ("slug", "TEXT NOT NULL"),
-    ("title", "TEXT"),
-    ("link", "TEXT"),
-    ("guid", "TEXT"),
-    ("status", "TEXT"),
-    ("resource_type", "TEXT"),
-    ("author_id", "INTEGER"),
-    ("importer_id", "TEXT"),
-    ("list_reference", "TEXT"),
-    ("date", "TEXT"),
-    ("date_gmt", "TEXT"),
-    ("modified", "TEXT"),
-    ("modified_gmt", "TEXT"),
-    ("excerpt_html", "TEXT"),
-    ("content_html", "TEXT"),
-    ("price", "TEXT"),
-    ("price_sold", "TEXT"),
-    ("price_term", "TEXT"),
-    ("property_status", "TEXT"),
-    ("property_market", "TEXT"),
-    ("property_type_label", "TEXT"),
-    ("property_county_label", "TEXT"),
-    ("property_area_label", "TEXT"),
-    ("property_size", "TEXT"),
-    ("property_land_size", "TEXT"),
-    ("property_accommodation", "TEXT"),
-    ("property_disclaimer", "TEXT"),
-    ("bedrooms", "INTEGER"),
-    ("bathrooms", "INTEGER"),
-    ("ber_rating", "TEXT"),
-    ("ber_number", "TEXT"),
-    ("energy_details", "TEXT"),
-    ("bidding_method", "TEXT"),
-    ("living_type", "TEXT"),
-    ("country", "TEXT"),
-    ("eircode", "TEXT"),
-    ("directions", "TEXT"),
-    ("latitude", "REAL"),
-    ("longitude", "REAL"),
-    ("agent_name", "TEXT"),
-    ("agent_email", "TEXT"),
-    ("agent_mobile", "TEXT"),
-    ("agent_number", "TEXT"),
-    ("agent_qualification", "TEXT"),
-    ("featured_media_id", "INTEGER"),
-    ("featured_image_url", "TEXT"),
-    ("amenities", "TEXT"),
-    ("property_order", "INTEGER"),
-    ("wppd_parent_id", "TEXT"),
-    ("property_type_ids", "TEXT"),
-    ("property_county_ids", "TEXT"),
-    ("property_area_ids", "TEXT"),
-    ("property_features", "TEXT"),
-    ("media_attachments_json", "TEXT"),
-    ("brochure_urls", "TEXT"),
-    ("floorplan_urls", "TEXT"),
-    ("tour_urls", "TEXT"),
-    ("viewing_times", "TEXT"),
-    ("image_folder", "TEXT NOT NULL DEFAULT ''"),
-    ("image_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("raw_json", "TEXT NOT NULL DEFAULT '{}'"),
-    ("fetched_at", "TEXT NOT NULL DEFAULT ''"),
-]
-
+DATABASE_FILENAME = _DATABASE_FILENAME
+WORDPRESS_LINK = APP_SETTINGS.wordpress_link
+WORDPRESS_PER_PAGE = APP_SETTINGS.wordpress_per_page
+REQUEST_TIMEOUT_SECONDS = APP_SETTINGS.request_timeout_seconds
+LEGACY_SITE_ID = APP_SETTINGS.legacy_site_id
+WEBHOOK_HOST = APP_SETTINGS.webhook_host
+WEBHOOK_PORT = APP_SETTINGS.webhook_port
+WEBHOOK_PATH = APP_SETTINGS.webhook_path
+WEBHOOK_SITE_ID_HEADER = APP_SETTINGS.webhook_site_id_header
+WEBHOOK_TIMESTAMP_HEADER = APP_SETTINGS.webhook_timestamp_header
+WEBHOOK_SIGNATURE_HEADER = APP_SETTINGS.webhook_signature_header
+WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER = APP_SETTINGS.webhook_gohighlevel_location_id_header
+WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER = APP_SETTINGS.webhook_gohighlevel_access_token_header
+WEBHOOK_DISABLE_SECURITY = APP_SETTINGS.webhook_disable_security
+WEBHOOK_WORKER_COUNT = APP_SETTINGS.webhook_worker_count
+WEBHOOK_JOB_MAX_ATTEMPTS = APP_SETTINGS.webhook_job_max_attempts
+WEBHOOK_JOB_RETRY_BACKOFF_SECONDS = APP_SETTINGS.webhook_job_retry_backoff_seconds
+WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS = APP_SETTINGS.webhook_queue_poll_interval_seconds
+WEBHOOK_QUEUE_LEASE_SECONDS = APP_SETTINGS.webhook_queue_lease_seconds
+WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS = APP_SETTINGS.webhook_shutdown_timeout_seconds
+WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = APP_SETTINGS.webhook_timestamp_tolerance_seconds
+WEBHOOK_MAX_PAYLOAD_BYTES = APP_SETTINGS.webhook_max_payload_bytes
+WEBHOOK_SITE_SECRETS = dict(APP_SETTINGS.webhook_site_secrets)
+SQLITE_BUSY_TIMEOUT_MS = APP_SETTINGS.sqlite_busy_timeout_ms
+LOG_LEVEL = APP_SETTINGS.log_level
 
 __all__ = [
-    "CLUSTER_MERGE_AVERAGE_THRESHOLD",
-    "CLUSTER_MERGE_BEST_THRESHOLD",
+    "APP_SETTINGS",
+    "ASSETS_DIRNAME",
+    "AppSettings",
     "DATABASE_FILENAME",
     "DEFAULT_PHOTOS_TO_SELECT",
     "DEFAULT_PROPERTY_FOLDERS",
-    "HASH_SIZE",
-    "HIST_BINS",
+    "GO_HIGH_LEVEL_BASE_URL",
+    "GO_HIGH_LEVEL_API_VERSION",
+    "GEMINI_API_KEY",
+    "GEMINI_AREA_LABELS",
+    "GEMINI_AREA_SET",
+    "GEMINI_EXTERIOR_AREAS",
+    "GEMINI_MODEL",
+    "GEMINI_RETRY_ATTEMPTS",
+    "GEMINI_SELECTION_AUDIT_FILENAME",
+    "GEMINI_SERVICE_AREAS",
+    "GEMINI_TIMEOUT_SECONDS",
+    "GEMINI_VALID_RESULT_AREAS",
     "HTTP_HEADERS",
     "IMAGE_EXTENSIONS",
     "IMAGE_HEADERS",
-    "IMAGES_ROOT_DIRNAME",
-    "MIN_ORB_KEYPOINTS",
-    "ORB_FEATURES",
-    "ORB_GOOD_MATCH_DISTANCE",
+    "PROPERTY_MEDIA_RAW_ROOT_DIRNAME",
+    "PROPERTY_MEDIA_ROOT_DIRNAME",
+    "LEGACY_PROPERTY_COLUMN_DEFINITIONS",
+    "LEGACY_SITE_ID",
+    "LOG_LEVEL",
     "PROPERTY_COLUMN_DEFINITIONS",
-    "RAW_IMAGES_ROOT_DIRNAME",
+    "PROPERTY_UNIQUE_CONSTRAINTS",
     "RAW_PHOTOS_DIRNAME",
+    "REELS_ROOT_DIRNAME",
+    "REEL_AUDIO_VOLUME",
+    "REEL_BACKGROUND_AUDIO_FILENAME",
+    "REEL_COVER_LOGO_FILENAME",
+    "REEL_FPS",
+    "REEL_HEIGHT",
+    "REEL_INTRO_DURATION_SECONDS",
+    "REEL_MAX_SLIDE_COUNT",
+    "REEL_SECONDS_PER_SLIDE",
+    "REEL_SUBTITLE_FONT_PATH",
+    "REEL_SUBTITLE_FONT_SIZE",
+    "REEL_TOTAL_DURATION_SECONDS",
+    "REEL_WIDTH",
     "REQUEST_TIMEOUT_SECONDS",
     "SELECTED_PHOTOS_DIRNAME",
-    "THUMBNAIL_SIZE",
+    "SOCIAL_PUBLISHING_DEFAULT_PLATFORM",
+    "SOCIAL_PUBLISHING_ENABLED",
+    "SOCIAL_PUBLISHING_LOCAL_ONLY",
+    "SOCIAL_PUBLISHING_PROPERTY_URL_TEMPLATE",
+    "SOCIAL_PUBLISHING_PROPERTY_URL_TRACKING_PARAMS",
+    "SOCIAL_PUBLISHING_RETRY_ATTEMPTS",
+    "SOCIAL_PUBLISHING_RETRY_BACKOFF_SECONDS",
+    "SQLITE_BUSY_TIMEOUT_MS",
+    "WEBHOOK_HOST",
+    "WEBHOOK_DISABLE_SECURITY",
+    "WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER",
+    "WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER",
+    "WEBHOOK_JOB_MAX_ATTEMPTS",
+    "WEBHOOK_JOB_RETRY_BACKOFF_SECONDS",
+    "WEBHOOK_MAX_PAYLOAD_BYTES",
+    "WEBHOOK_PATH",
+    "WEBHOOK_PORT",
+    "WEBHOOK_QUEUE_LEASE_SECONDS",
+    "WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS",
+    "WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS",
+    "WEBHOOK_SIGNATURE_HEADER",
+    "WEBHOOK_SITE_ID_HEADER",
+    "WEBHOOK_SITE_SECRETS",
+    "WEBHOOK_TIMESTAMP_HEADER",
+    "WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS",
+    "WEBHOOK_WORKER_COUNT",
     "WORDPRESS_LINK",
     "WORDPRESS_PER_PAGE",
+    "get_app_settings",
 ]
+

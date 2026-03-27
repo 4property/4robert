@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from settings.app import APP_SETTINGS
+
+
+ASSETS_DIRNAME = "assets"
+REEL_BER_ICONS_DIRNAME = "ber-icons"
+
+REELS_ROOT_DIRNAME = "generated_reels"
+REEL_COVER_LOGO_FILENAME = "ckp-logo.png"
+REEL_BACKGROUND_AUDIO_FILENAME = "ncs-music.mp3"
+REEL_WIDTH = 1080
+REEL_HEIGHT = 1440
+REEL_FPS = 24
+REEL_TOTAL_DURATION_SECONDS = APP_SETTINGS.reel_total_duration_seconds
+REEL_SECONDS_PER_SLIDE = APP_SETTINGS.reel_seconds_per_slide
+REEL_INTRO_DURATION_SECONDS = APP_SETTINGS.reel_intro_duration_seconds
+REEL_SUBTITLE_FONT_PATH = Path(APP_SETTINGS.reel_subtitle_font_path).expanduser()
+REEL_SUBTITLE_FONT_SIZE = APP_SETTINGS.reel_subtitle_font_size
+REEL_MAX_SLIDE_COUNT = 7
+REEL_AUDIO_VOLUME = 0.14
+
+
+__all__ = [
+    "ASSETS_DIRNAME",
+    "REEL_BER_ICONS_DIRNAME",
+    "REELS_ROOT_DIRNAME",
+    "REEL_AUDIO_VOLUME",
+    "REEL_BACKGROUND_AUDIO_FILENAME",
+    "REEL_COVER_LOGO_FILENAME",
+    "REEL_FPS",
+    "REEL_HEIGHT",
+    "REEL_INTRO_DURATION_SECONDS",
+    "REEL_MAX_SLIDE_COUNT",
+    "REEL_SECONDS_PER_SLIDE",
+    "REEL_SUBTITLE_FONT_PATH",
+    "REEL_SUBTITLE_FONT_SIZE",
+    "REEL_TOTAL_DURATION_SECONDS",
+    "REEL_WIDTH",
+]

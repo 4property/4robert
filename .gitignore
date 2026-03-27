@@ -1,35 +1,48 @@
-# Python cache and bytecode
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 
-# Virtual environments
+# Virtual environments and local env files
 .venv/
 venv/
 env/
 ENV/
+.env
 
-# Test and tooling caches
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test, lint, and local tooling caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+.runtime_locks/
+.tmp_test/
+.tmp_test_cases/
+.tmp_test_manual/
+tmp_*/
 
-# Local editor settings
-.vscode/
-.idea/
-
-# Local databases
+# Local databases and journals
+*.db
+*.sqlite
 *.sqlite3
 *.sqlite3-journal
 *.sqlite3-shm
 *.sqlite3-wal
 
-# Generated property media
+# Generated runtime media and manifests
+property_media/
+property_media_raw/
+generated_reels/
 wordpress_properties/
 wordpress_properties_raw/
 
-# Temporary validation folders
-tmp_*/
-
-# OS files
-.DS_Store
-Thumbs.db
+# Local logs and runtime leftovers
+*.log

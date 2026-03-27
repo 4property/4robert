@@ -1,0 +1,145 @@
+﻿from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+from application.default_services import (
+    CompositeVideoPublisher,
+    DefaultPhotoSelectionService,
+    DefaultPropertyInfoService,
+    DefaultVideoRenderer,
+    FileSystemVideoPublisher,
+)
+from application.dispatching import SqliteJobDispatcher
+from application.job_runner import PropertyVideoJobRunner
+from application.property_video_pipeline import PropertyVideoPipeline
+from application.types import PropertyVideoJob
+from repositories.sqlite_work_unit import SqliteWorkUnit
+from config import (
+    DATABASE_FILENAME,
+    GO_HIGH_LEVEL_API_VERSION,
+    GO_HIGH_LEVEL_BASE_URL,
+    REQUEST_TIMEOUT_SECONDS,
+    SOCIAL_PUBLISHING_DEFAULT_PLATFORM,
+    SOCIAL_PUBLISHING_ENABLED,
+    SOCIAL_PUBLISHING_LOCAL_ONLY,
+    SOCIAL_PUBLISHING_RETRY_ATTEMPTS,
+    SOCIAL_PUBLISHING_RETRY_BACKOFF_SECONDS,
+    SOCIAL_PUBLISHING_PROPERTY_URL_TEMPLATE,
+    SOCIAL_PUBLISHING_PROPERTY_URL_TRACKING_PARAMS,
+    WEBHOOK_JOB_MAX_ATTEMPTS,
+    WEBHOOK_JOB_RETRY_BACKOFF_SECONDS,
+    WEBHOOK_QUEUE_LEASE_SECONDS,
+    WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS,
+    WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
+    WEBHOOK_WORKER_COUNT,
+)
+from services.social_delivery import (
+    GoHighLevelClient,
+    GoHighLevelMediaService,
+    GoHighLevelPropertyPublisher,
+    GoHighLevelPublisher,
+    GoHighLevelSocialService,
+    select_random_location_user,
+)
+
+
+def build_default_social_property_publisher() -> GoHighLevelPropertyPublisher:
+    client = GoHighLevelClient(
+        base_url=GO_HIGH_LEVEL_BASE_URL,
+        api_version=GO_HIGH_LEVEL_API_VERSION,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+    )
+    publisher = GoHighLevelPublisher(
+        media_service=GoHighLevelMediaService(client=client),
+        social_service=GoHighLevelSocialService(client=client),
+        fallback_user_selector=select_random_location_user,
+        retry_attempts=SOCIAL_PUBLISHING_RETRY_ATTEMPTS,
+        retry_backoff_seconds=SOCIAL_PUBLISHING_RETRY_BACKOFF_SECONDS,
+    )
+    return GoHighLevelPropertyPublisher(
+        publisher=publisher,
+    )
+
+
+def build_default_unit_of_work_factory(workspace_dir: str | Path):
+    workspace_path = Path(workspace_dir).expanduser().resolve()
+    return lambda: SqliteWorkUnit(workspace_path / DATABASE_FILENAME, workspace_path)
+
+
+def build_default_property_video_pipeline(workspace_dir: str | Path) -> PropertyVideoPipeline:
+    workspace_path = Path(workspace_dir).expanduser().resolve()
+    unit_of_work_factory = build_default_unit_of_work_factory(workspace_path)
+    social_publishing_active = SOCIAL_PUBLISHING_ENABLED and not SOCIAL_PUBLISHING_LOCAL_ONLY
+    social_property_publisher = (
+        build_default_social_property_publisher()
+        if social_publishing_active
+        else None
+    )
+    return PropertyVideoPipeline(
+        property_info_service=DefaultPropertyInfoService(
+            workspace_path,
+            unit_of_work_factory=unit_of_work_factory,
+            property_url_template=SOCIAL_PUBLISHING_PROPERTY_URL_TEMPLATE,
+            property_url_tracking_params=SOCIAL_PUBLISHING_PROPERTY_URL_TRACKING_PARAMS,
+            social_publishing_enabled=social_publishing_active,
+        ),
+        photo_selection_service=DefaultPhotoSelectionService(
+            workspace_path,
+            unit_of_work_factory=unit_of_work_factory,
+        ),
+        video_renderer=DefaultVideoRenderer(workspace_path),
+        video_publisher=CompositeVideoPublisher(
+            local_publisher=FileSystemVideoPublisher(
+                unit_of_work_factory=unit_of_work_factory,
+            ),
+            unit_of_work_factory=unit_of_work_factory,
+            social_publisher=social_property_publisher,
+        ),
+    )
+
+
+def build_default_job_handler(
+    workspace_dir: str | Path,
+    *,
+    pipeline: PropertyVideoPipeline | None = None,
+) -> Callable[[PropertyVideoJob], object | None]:
+    workspace_path = Path(workspace_dir).expanduser().resolve()
+    active_pipeline = pipeline or build_default_property_video_pipeline(workspace_dir)
+    runner = PropertyVideoJobRunner(
+        workspace_path,
+        pipeline=active_pipeline,
+    )
+
+    def handle_job(job: PropertyVideoJob) -> object | None:
+        return runner.run(job)
+
+    return handle_job
+
+
+def build_default_job_dispatcher(
+    workspace_dir: str | Path,
+    *,
+    worker_count: int = WEBHOOK_WORKER_COUNT,
+    pipeline: PropertyVideoPipeline | None = None,
+) -> SqliteJobDispatcher:
+    return SqliteJobDispatcher(
+        handler=build_default_job_handler(workspace_dir, pipeline=pipeline),
+        unit_of_work_factory=build_default_unit_of_work_factory(workspace_dir),
+        worker_count=worker_count,
+        poll_interval_seconds=WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS,
+        lease_seconds=WEBHOOK_QUEUE_LEASE_SECONDS,
+        retry_backoff_seconds=WEBHOOK_JOB_RETRY_BACKOFF_SECONDS,
+        job_max_attempts=WEBHOOK_JOB_MAX_ATTEMPTS,
+    )
+
+
+__all__ = [
+    "WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS",
+    "build_default_job_dispatcher",
+    "build_default_job_handler",
+    "build_default_property_video_pipeline",
+    "build_default_social_property_publisher",
+    "build_default_unit_of_work_factory",
+]
+
