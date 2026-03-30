@@ -402,7 +402,7 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
             if request.url.path.endswith("/posts"):
                 return httpx.Response(
                     201,
-                    json={"message": "Created Post", "results": {}},
+                    json={"message": "Request completed", "results": {}},
                 )
             raise AssertionError(f"Unexpected path: {request.url.path}")
 
@@ -430,6 +430,85 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
                 )
 
         self.assertIn("did not return a post_id or post_status", str(raised.exception))
+
+    def test_publish_video_accepts_successful_created_post_without_post_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/accounts"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": {
+                            "accounts": [
+                                {
+                                    "id": "account-1",
+                                    "name": "TikTok Business",
+                                    "platform": "tiktok",
+                                    "type": "profile",
+                                    "isExpired": False,
+                                }
+                            ]
+                        }
+                    },
+                )
+            if request.url.path == "/users/":
+                return httpx.Response(
+                    200,
+                    json={
+                        "users": [
+                            {
+                                "id": "user-1",
+                                "firstName": "Jane",
+                                "lastName": "Doe",
+                                "email": "jane@example.com",
+                            }
+                        ]
+                    },
+                )
+            if request.url.path == "/medias/upload-file":
+                return httpx.Response(
+                    200,
+                    json={"fileId": "file-1", "url": "https://storage.googleapis.com/example/reel.mp4"},
+                )
+            if request.url.path.endswith("/posts"):
+                return httpx.Response(
+                    201,
+                    json={
+                        "success": True,
+                        "statusCode": 201,
+                        "message": "Created Post",
+                        "traceId": "3629e807-81db-4a8c-9b73-34b11280e539",
+                    },
+                )
+            raise AssertionError(f"Unexpected path: {request.url.path}")
+
+        with workspace_temp_dir() as temp_dir:
+            video_path = temp_dir / "sample-reel.mp4"
+            video_path.write_bytes(b"video-bytes")
+            client = build_client_with_transport(handler)
+            publisher = GoHighLevelPublisher(
+                media_service=GoHighLevelMediaService(client=client),
+                social_service=GoHighLevelSocialService(client=client),
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+            )
+
+            result = publisher.publish_video(
+                PublishVideoRequest(
+                    video_path=video_path,
+                    description="https://ckp.ie/property/sample-property",
+                    location_id="location-1",
+                    access_token="token-1",
+                    platform="tiktok",
+                    source_site_id="ckp.ie",
+                )
+            )
+
+        self.assertIsNone(result.created_post.post_id)
+        self.assertEqual(result.created_post.status, "created")
+        self.assertEqual(
+            result.created_post.raw_response.get("traceId"),
+            "3629e807-81db-4a8c-9b73-34b11280e539",
+        )
 
     def test_publish_video_does_not_retry_client_errors(self) -> None:
         call_count = 0

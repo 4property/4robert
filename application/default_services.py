@@ -323,7 +323,7 @@ class DefaultPropertyInfoService:
         post_status = str(details.get("post_status") or "").strip().lower()
         if post_id:
             return True
-        return post_status in {"published", "scheduled", "queued", "processing"}
+        return post_status in {"published", "scheduled", "queued", "processing", "created", "accepted"}
 
 
 class DefaultPhotoSelectionService:
@@ -585,6 +585,7 @@ class CompositeVideoPublisher:
             "post_id": publish_result.created_post.post_id,
             "post_status": publish_result.created_post.status,
             "message": publish_result.created_post.message,
+            "trace_id": publish_result.created_post.raw_response.get("traceId"),
             "uploaded_media_url": publish_result.uploaded_media.url,
             "description": publish_result.description,
         }

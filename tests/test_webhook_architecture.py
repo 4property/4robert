@@ -339,6 +339,37 @@ class PropertyInfoServiceTests(unittest.TestCase):
         self.assertTrue(retry_context.requires_external_publish)
         self.assertIsNotNone(retry_context.existing_published_video)
 
+    def test_created_social_publish_result_is_treated_as_complete(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = self._build_service(workspace_dir)
+            first_context = service.ingest_property(build_job())
+            self._materialise_completed_artifacts(
+                workspace_dir=workspace_dir,
+                site_id="site-a",
+                property_item=first_context.property,
+                location_id="location-a",
+            )
+
+            with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+                repository.update_social_publish_status(
+                    site_id="site-a",
+                    source_property_id=first_context.property.id,
+                    status="published",
+                    details={
+                        "message": "Created Post",
+                        "post_id": None,
+                        "post_status": "created",
+                        "trace_id": "3629e807-81db-4a8c-9b73-34b11280e539",
+                    },
+                    last_published_location_id="location-a",
+                )
+
+            second_context = service.ingest_property(build_job())
+
+        self.assertTrue(second_context.is_noop)
+        self.assertFalse(second_context.requires_render)
+        self.assertFalse(second_context.requires_external_publish)
+
     def test_changed_property_features_force_new_render(self) -> None:
         with workspace_temp_dir() as workspace_dir:
             service = self._build_service(workspace_dir)
@@ -403,6 +434,9 @@ class WebhookTransportTests(unittest.TestCase):
     def _build_client(
         self,
         dispatcher: RecordingDispatcher | None = None,
+        *,
+        security_disabled: bool = False,
+        site_secrets: dict[str, str] | None = None,
     ) -> tuple[TestClient, RecordingDispatcher]:
         active_dispatcher = dispatcher or RecordingDispatcher()
         workspace_dir = TEST_TEMP_ROOT / uuid4().hex
@@ -411,8 +445,8 @@ class WebhookTransportTests(unittest.TestCase):
         application = WordPressWebhookApplication(
             workspace_dir=workspace_dir,
             dispatcher=active_dispatcher,
-            site_secrets={"site-a": "secret-a"},
-            security_disabled=False,
+            site_secrets=site_secrets or {"site-a": "secret-a"},
+            security_disabled=security_disabled,
             worker_count=1,
         )
         app = create_fastapi_app(application=application)
@@ -429,20 +463,19 @@ class WebhookTransportTests(unittest.TestCase):
 
     @staticmethod
     def _build_signed_headers(
-        payload: dict[str, object],
+        payload: dict[str, object] | list[dict[str, object]],
         *,
         site_id: str = "site-a",
         location_id: str = "location-a",
         access_token: str = "token-a",
         timestamp: str | None = None,
+        include_site_header: bool = True,
+        use_alt_ghl_headers: bool = False,
     ) -> dict[str, str]:
         body = json.dumps(payload).encode("utf-8")
         timestamp_value = str(int(time.time())) if timestamp is None else timestamp
-        return {
+        headers = {
             "Content-Type": "application/json",
-            "X-WordPress-Site-ID": site_id,
-            "X-GoHighLevel-Location-ID": location_id,
-            "X-GoHighLevel-Access-Token": access_token,
             "X-WordPress-Timestamp": timestamp_value,
             "X-WordPress-Signature": build_signature(
                 "secret-a",
@@ -453,6 +486,15 @@ class WebhookTransportTests(unittest.TestCase):
                 body,
             ),
         }
+        if include_site_header:
+            headers["X-WordPress-Site-ID"] = site_id
+        if use_alt_ghl_headers:
+            headers["X-GHL-Location-Id"] = location_id
+            headers["X-GHL-Token"] = access_token
+        else:
+            headers["X-GoHighLevel-Location-ID"] = location_id
+            headers["X-GoHighLevel-Access-Token"] = access_token
+        return headers
 
     def test_valid_signed_request_enqueues_job_with_publish_context(self) -> None:
         payload = build_sample_payload()
@@ -534,6 +576,73 @@ class WebhookTransportTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 503)
+
+    def test_security_disabled_accepts_ghl_headers_and_single_item_array_payload(self) -> None:
+        payload = build_sample_payload()
+        payload["link"] = "https://dev76.designbricks.ie/property/sample-property"
+        payload["guid"] = {
+            "rendered": "https://dev76.designbricks.ie/property/sample-property"
+        }
+        client, _ = self._build_client(security_disabled=True)
+        request_body = json.dumps([payload])
+
+        with client:
+            response = client.post(
+                "/webhooks/wordpress/property",
+                content=request_body,
+                headers={
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "Accept": "application/json",
+                    "X-GHL-Location-Id": "location-a",
+                    "X-GHL-Token": "token-a",
+                },
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["site_id"], "dev76.designbricks.ie")
+
+    def test_signed_single_item_array_payload_can_infer_site_id_without_header(self) -> None:
+        payload = build_sample_payload()
+        payload["link"] = "https://site-a/property/sample-property"
+        payload["guid"] = {"rendered": "https://site-a/property/sample-property"}
+        client, _ = self._build_client()
+        request_body = json.dumps([payload])
+
+        with client:
+            response = client.post(
+                "/webhooks/wordpress/property",
+                content=request_body,
+                headers=self._build_signed_headers(
+                    [payload],
+                    include_site_header=False,
+                    use_alt_ghl_headers=True,
+                ),
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["site_id"], "site-a")
+
+    def test_multi_item_array_payload_is_rejected(self) -> None:
+        payload = build_sample_payload()
+        client, _ = self._build_client(security_disabled=True)
+        request_body = json.dumps([payload, payload])
+
+        with client:
+            response = client.post(
+                "/webhooks/wordpress/property",
+                content=request_body,
+                headers={
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "X-GHL-Location-Id": "location-a",
+                    "X-GHL-Token": "token-a",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            "Webhook payload array must contain exactly one JSON object.",
+        )
 
 
 class SqliteJobDispatcherTests(unittest.TestCase):

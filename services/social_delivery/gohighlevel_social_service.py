@@ -119,7 +119,7 @@ class GoHighLevelSocialService:
         result_dict = results if isinstance(results, dict) else {}
         return CreatedSocialPost(
             post_id=self._extract_post_id(result_dict),
-            status=self._extract_status(result_dict),
+            status=self._extract_status(result_dict) or self._infer_status(payload),
             message=str(payload.get("message") or "").strip() or None,
             raw_response=payload,
         )
@@ -138,6 +138,47 @@ class GoHighLevelSocialService:
             value = results.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
+        return None
+
+    @staticmethod
+    def _infer_status(payload: dict[str, object]) -> str | None:
+        top_level_status = payload.get("status")
+        if isinstance(top_level_status, str) and top_level_status.strip():
+            return top_level_status.strip()
+
+        message = str(payload.get("message") or "").strip().lower()
+        status_code = GoHighLevelSocialService._coerce_int(payload.get("statusCode"))
+        success = payload.get("success")
+
+        if message:
+            if "published" in message:
+                return "published"
+            if "scheduled" in message:
+                return "scheduled"
+            if "queued" in message:
+                return "queued"
+            if "processing" in message:
+                return "processing"
+            if "created" in message:
+                return "created"
+
+        if success is True:
+            if status_code == 202:
+                return "accepted"
+            if status_code in {200, 201}:
+                return "created"
+
+        return None
+
+    @staticmethod
+    def _coerce_int(value: object) -> int | None:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                return None
         return None
 
     @staticmethod

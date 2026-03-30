@@ -5,6 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -14,6 +15,7 @@ from application.interfaces import JobDispatcher
 from application.types import SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
+    LEGACY_SITE_ID,
     SOCIAL_PUBLISHING_DEFAULT_PLATFORM,
     WEBHOOK_DISABLE_SECURITY,
     WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER,
@@ -37,6 +39,9 @@ from services.webhook_transport.operations import build_readiness_report, run_st
 from services.webhook_transport.security import build_raw_payload_hash, is_signature_valid, is_timestamp_fresh
 
 logger = logging.getLogger(__name__)
+
+_ALTERNATE_GOHIGHLEVEL_LOCATION_ID_HEADERS = ("X-GHL-Location-Id",)
+_ALTERNATE_GOHIGHLEVEL_ACCESS_TOKEN_HEADERS = ("X-GHL-Token",)
 
 
 class WordPressWebhookApplication:
@@ -257,14 +262,20 @@ def create_fastapi_app(
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
-        site_id = request.headers.get(runtime.site_id_header)
-        location_id = request.headers.get(runtime.gohighlevel_location_id_header)
-        access_token = request.headers.get(runtime.gohighlevel_access_token_header)
+        site_id = _get_header_value(request, runtime.site_id_header)
+        location_id = _get_header_value(
+            request,
+            runtime.gohighlevel_location_id_header,
+            *_ALTERNATE_GOHIGHLEVEL_LOCATION_ID_HEADERS,
+        )
+        access_token = _get_header_value(
+            request,
+            runtime.gohighlevel_access_token_header,
+            *_ALTERNATE_GOHIGHLEVEL_ACCESS_TOKEN_HEADERS,
+        )
         timestamp = request.headers.get(runtime.timestamp_header)
         signature = request.headers.get(runtime.signature_header)
-        if not site_id or not location_id or not access_token:
-            return _json_error(400, "Missing required webhook headers.")
-        if not runtime.security_disabled and (not timestamp or not signature):
+        if not location_id or not access_token:
             return _json_error(400, "Missing required webhook headers.")
 
         content_type = request.headers.get("Content-Type", "")
@@ -281,6 +292,18 @@ def create_fastapi_app(
         if len(raw_body) > runtime.max_payload_bytes:
             return _json_error(413, "Request body is too large.")
 
+        payload, payload_error = _parse_webhook_payload(raw_body)
+        if payload_error is not None:
+            return _json_error(400, payload_error)
+
+        if not site_id:
+            site_id = _resolve_site_id(payload)
+
+        if not site_id:
+            return _json_error(400, "Missing required webhook headers.")
+        if not runtime.security_disabled and (not timestamp or not signature):
+            return _json_error(400, "Missing required webhook headers.")
+
         if not runtime.authenticate(
             site_id=site_id,
             location_id=location_id,
@@ -290,14 +313,6 @@ def create_fastapi_app(
             raw_body=raw_body,
         ):
             return _json_error(401, "Invalid webhook credentials.")
-
-        try:
-            payload = json.loads(raw_body.decode("utf-8"))
-        except json.JSONDecodeError:
-            return _json_error(400, "Request body must be valid JSON.")
-
-        if not isinstance(payload, dict):
-            return _json_error(400, "Webhook payload must be a JSON object.")
 
         property_id = _extract_property_id(payload)
         raw_payload_hash = build_raw_payload_hash(raw_body)
@@ -408,6 +423,58 @@ def _extract_property_id(payload: dict[str, Any]) -> int | None:
             return int(value)
         except ValueError:
             return None
+    return None
+
+
+def _get_header_value(request: Request, *names: str) -> str | None:
+    for name in names:
+        value = request.headers.get(name)
+        if value:
+            return value
+    return None
+
+
+def _parse_webhook_payload(raw_body: bytes) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        parsed = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None, "Request body must be valid JSON."
+
+    if isinstance(parsed, list):
+        if len(parsed) != 1:
+            return None, "Webhook payload array must contain exactly one JSON object."
+        parsed = parsed[0]
+
+    if not isinstance(parsed, dict):
+        return None, "Webhook payload must be a JSON object."
+
+    return parsed, None
+
+
+def _resolve_site_id(payload: dict[str, Any]) -> str | None:
+    direct_site_id = payload.get("site_id")
+    if isinstance(direct_site_id, str) and direct_site_id.strip():
+        return direct_site_id.strip().lower()
+
+    link_candidates: list[str] = []
+    link = payload.get("link")
+    if isinstance(link, str) and link.strip():
+        link_candidates.append(link)
+
+    guid = payload.get("guid")
+    if isinstance(guid, dict):
+        rendered = guid.get("rendered")
+        if isinstance(rendered, str) and rendered.strip():
+            link_candidates.append(rendered)
+
+    for candidate in link_candidates:
+        parsed = urlparse(candidate)
+        if parsed.netloc:
+            return parsed.netloc.strip().lower()
+
+    if LEGACY_SITE_ID and LEGACY_SITE_ID.strip():
+        return LEGACY_SITE_ID.strip().lower()
+
     return None
 
 
