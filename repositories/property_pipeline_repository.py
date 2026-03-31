@@ -9,8 +9,6 @@ from typing import Any, TypeAlias
 
 from config import (
     DATABASE_FILENAME,
-    LEGACY_PROPERTY_COLUMN_DEFINITIONS,
-    LEGACY_SITE_ID,
     PROPERTY_COLUMN_DEFINITIONS,
     PROPERTY_UNIQUE_CONSTRAINTS,
 )
@@ -34,20 +32,23 @@ PROPERTY_REEL_SELECT_FIELDS = (
     "agent_email",
     "agent_mobile",
     "agent_number",
+    "agency_psra",
+    "agency_logo_url",
     "price",
+    "price_term",
     "property_type_label",
     "property_area_label",
     "property_county_label",
     "eircode",
     "pps.selected_image_folder",
+    "pps.artifact_kind",
+    "pps.local_artifact_path",
+    "pps.local_metadata_path",
+    "pps.render_profile",
     "pps.local_manifest_path",
     "pps.local_video_path",
 )
-LEGACY_PROPERTY_TABLE_NAME = "properties"
-LEGACY_PROPERTY_IMAGES_TABLE_NAME = "property_images"
 PIPELINE_STATE_TABLE_NAME = "property_pipeline_state"
-MIGRATION_PROPERTY_TABLE_NAME = "properties__migration"
-MIGRATION_PROPERTY_IMAGES_TABLE_NAME = "property_images__migration"
 
 
 @dataclass(slots=True)
@@ -67,11 +68,17 @@ class PropertyPipelineState:
     publish_target_fingerprint: str
     publish_target_snapshot_json: str
     selected_image_folder: str
+    artifact_kind: str
+    local_artifact_path: str
+    local_metadata_path: str
+    render_profile: str
     local_manifest_path: str
     local_video_path: str
     render_status: str
     publish_status: str
+    workflow_state: str
     publish_details_json: str
+    current_revision_id: str
     last_published_location_id: str
     created_at: str
     updated_at: str
@@ -97,11 +104,18 @@ class PropertyReelRecord:
     agent_email: str | None
     agent_mobile: str | None
     agent_number: str | None
+    agency_psra: str | None
+    agency_logo_url: str | None
     price: str | None
+    price_term: str | None
     property_type_label: str | None
     property_area_label: str | None
     property_county_label: str | None
     eircode: str | None
+    artifact_kind: str
+    local_artifact_path: str
+    local_metadata_path: str
+    render_profile: str
 
 
 def _relative_to_base(path: Path, base_dir: Path) -> str:
@@ -165,16 +179,48 @@ def _build_pipeline_state_table_sql(table_name: str = PIPELINE_STATE_TABLE_NAME)
         "                publish_target_fingerprint TEXT NOT NULL DEFAULT '',\n"
         "                publish_target_snapshot_json TEXT NOT NULL DEFAULT '',\n"
         "                selected_image_folder TEXT NOT NULL DEFAULT '',\n"
+        "                artifact_kind TEXT NOT NULL DEFAULT '',\n"
+        "                local_artifact_path TEXT NOT NULL DEFAULT '',\n"
+        "                local_metadata_path TEXT NOT NULL DEFAULT '',\n"
+        "                render_profile TEXT NOT NULL DEFAULT '',\n"
         "                local_manifest_path TEXT NOT NULL DEFAULT '',\n"
         "                local_video_path TEXT NOT NULL DEFAULT '',\n"
         "                render_status TEXT NOT NULL DEFAULT '',\n"
         "                publish_status TEXT NOT NULL DEFAULT '',\n"
+        "                workflow_state TEXT NOT NULL DEFAULT '',\n"
         "                publish_details_json TEXT NOT NULL DEFAULT '',\n"
+        "                current_revision_id TEXT NOT NULL DEFAULT '',\n"
         "                last_published_location_id TEXT NOT NULL DEFAULT '',\n"
         "                created_at TEXT NOT NULL,\n"
         "                updated_at TEXT NOT NULL,\n"
         "                PRIMARY KEY (site_id, source_property_id)\n"
         "            );"
+    )
+
+
+def _empty_pipeline_state(site_id: str, source_property_id: int) -> PropertyPipelineState:
+    return PropertyPipelineState(
+        site_id=site_id,
+        source_property_id=source_property_id,
+        content_fingerprint="",
+        content_snapshot_json="",
+        publish_target_fingerprint="",
+        publish_target_snapshot_json="",
+        selected_image_folder="",
+        artifact_kind="",
+        local_artifact_path="",
+        local_metadata_path="",
+        render_profile="",
+        local_manifest_path="",
+        local_video_path="",
+        render_status="",
+        publish_status="",
+        workflow_state="",
+        publish_details_json="",
+        current_revision_id="",
+        last_published_location_id="",
+        created_at="",
+        updated_at="",
     )
 
 
@@ -277,11 +323,17 @@ class PropertyPipelineRepository:
             "publish_target_fingerprint": "TEXT NOT NULL DEFAULT ''",
             "publish_target_snapshot_json": "TEXT NOT NULL DEFAULT ''",
             "selected_image_folder": "TEXT NOT NULL DEFAULT ''",
+            "artifact_kind": "TEXT NOT NULL DEFAULT ''",
+            "local_artifact_path": "TEXT NOT NULL DEFAULT ''",
+            "local_metadata_path": "TEXT NOT NULL DEFAULT ''",
+            "render_profile": "TEXT NOT NULL DEFAULT ''",
             "local_manifest_path": "TEXT NOT NULL DEFAULT ''",
             "local_video_path": "TEXT NOT NULL DEFAULT ''",
             "render_status": "TEXT NOT NULL DEFAULT ''",
             "publish_status": "TEXT NOT NULL DEFAULT ''",
+            "workflow_state": "TEXT NOT NULL DEFAULT ''",
             "publish_details_json": "TEXT NOT NULL DEFAULT ''",
+            "current_revision_id": "TEXT NOT NULL DEFAULT ''",
             "last_published_location_id": "TEXT NOT NULL DEFAULT ''",
             "created_at": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
@@ -293,87 +345,7 @@ class PropertyPipelineRepository:
                 f"ALTER TABLE {PIPELINE_STATE_TABLE_NAME} ADD COLUMN {column} {definition}"
             )
 
-    def _is_legacy_schema(self) -> bool:
-        existing_columns = set(self._get_table_columns("properties"))
-        return (
-            bool(existing_columns)
-            and "record_id" not in existing_columns
-            and "source_property_id" not in existing_columns
-            and "id" in existing_columns
-        )
-
-    def _migrate_legacy_schema(self) -> None:
-        legacy_columns = set(self._get_table_columns(LEGACY_PROPERTY_TABLE_NAME))
-        if not legacy_columns:
-            return
-
-        self.connection.executescript(
-            f"""
-            DROP TABLE IF EXISTS {MIGRATION_PROPERTY_IMAGES_TABLE_NAME};
-            DROP TABLE IF EXISTS {MIGRATION_PROPERTY_TABLE_NAME};
-            """
-        )
-        self._create_properties_table(MIGRATION_PROPERTY_TABLE_NAME)
-        self._create_property_images_table(
-            MIGRATION_PROPERTY_IMAGES_TABLE_NAME,
-            property_table_name=MIGRATION_PROPERTY_TABLE_NAME,
-        )
-
-        copied_columns = [
-            column
-            for column, _ in LEGACY_PROPERTY_COLUMN_DEFINITIONS
-            if column in legacy_columns and column != "id"
-        ]
-        insert_columns = ["site_id", "source_property_id", *copied_columns]
-        select_columns = ["?", "id", *copied_columns]
-        self.connection.execute(
-            f"""
-            INSERT INTO {MIGRATION_PROPERTY_TABLE_NAME} (
-                {", ".join(insert_columns)}
-            )
-            SELECT
-                {", ".join(select_columns)}
-            FROM {LEGACY_PROPERTY_TABLE_NAME}
-            """,
-            (LEGACY_SITE_ID,),
-        )
-
-        if self._table_exists(LEGACY_PROPERTY_IMAGES_TABLE_NAME):
-            self.connection.execute(
-                f"""
-                INSERT INTO {MIGRATION_PROPERTY_IMAGES_TABLE_NAME} (
-                    record_id,
-                    position,
-                    image_url,
-                    local_path
-                )
-                SELECT
-                    migrated.record_id,
-                    legacy.position,
-                    legacy.image_url,
-                    legacy.local_path
-                FROM {LEGACY_PROPERTY_IMAGES_TABLE_NAME} AS legacy
-                INNER JOIN {MIGRATION_PROPERTY_TABLE_NAME} AS migrated
-                    ON migrated.site_id = ?
-                    AND migrated.source_property_id = legacy.property_id
-                """,
-                (LEGACY_SITE_ID,),
-            )
-
-        self.connection.executescript(
-            f"""
-            DROP TABLE IF EXISTS {LEGACY_PROPERTY_IMAGES_TABLE_NAME};
-            DROP TABLE IF EXISTS {LEGACY_PROPERTY_TABLE_NAME};
-            ALTER TABLE {MIGRATION_PROPERTY_TABLE_NAME} RENAME TO {LEGACY_PROPERTY_TABLE_NAME};
-            ALTER TABLE {MIGRATION_PROPERTY_IMAGES_TABLE_NAME} RENAME TO {LEGACY_PROPERTY_IMAGES_TABLE_NAME};
-            """
-        )
-        self._create_indexes()
-
     def initialise(self) -> None:
-        if self._is_legacy_schema():
-            self._migrate_legacy_schema()
-
         self._create_properties_table()
         self._create_property_images_table()
         self._create_pipeline_state_table()
@@ -444,7 +416,7 @@ class PropertyPipelineRepository:
             ],
         )
 
-    def get_property_ids(self, *, site_id: str | None = LEGACY_SITE_ID) -> set[int]:
+    def get_property_ids(self, *, site_id: str | None = None) -> set[int]:
         if site_id is None:
             rows = self.connection.execute("SELECT DISTINCT source_property_id FROM properties")
         else:
@@ -457,7 +429,7 @@ class PropertyPipelineRepository:
     def get_property_sync_state(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         source_property_id: int,
     ) -> PropertySyncState | None:
         row = self.connection.execute(
@@ -489,7 +461,7 @@ class PropertyPipelineRepository:
     def _get_property_reel_row(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         property_id: int | None = None,
         slug: str | None = None,
     ) -> sqlite3.Row | None:
@@ -519,7 +491,7 @@ class PropertyPipelineRepository:
     def get_property_reel_record(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         property_id: int | None = None,
         slug: str | None = None,
     ) -> PropertyReelRecord | None:
@@ -550,11 +522,18 @@ class PropertyPipelineRepository:
             agent_email=None if row["agent_email"] is None else str(row["agent_email"]),
             agent_mobile=None if row["agent_mobile"] is None else str(row["agent_mobile"]),
             agent_number=None if row["agent_number"] is None else str(row["agent_number"]),
+            agency_psra=None if row["agency_psra"] is None else str(row["agency_psra"]),
+            agency_logo_url=None if row["agency_logo_url"] is None else str(row["agency_logo_url"]),
             price=None if row["price"] is None else str(row["price"]),
+            price_term=None if row["price_term"] is None else str(row["price_term"]),
             property_type_label=None if row["property_type_label"] is None else str(row["property_type_label"]),
             property_area_label=None if row["property_area_label"] is None else str(row["property_area_label"]),
             property_county_label=None if row["property_county_label"] is None else str(row["property_county_label"]),
             eircode=None if row["eircode"] is None else str(row["eircode"]),
+            artifact_kind="" if row["artifact_kind"] is None else str(row["artifact_kind"]),
+            local_artifact_path="" if row["local_artifact_path"] is None else str(row["local_artifact_path"]),
+            local_metadata_path="" if row["local_metadata_path"] is None else str(row["local_metadata_path"]),
+            render_profile="" if row["render_profile"] is None else str(row["render_profile"]),
         )
 
     def _save_property_record(
@@ -579,7 +558,7 @@ class PropertyPipelineRepository:
     def get_property_pipeline_state(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         source_property_id: int,
     ) -> PropertyPipelineState | None:
         row = self.connection.execute(
@@ -592,11 +571,17 @@ class PropertyPipelineRepository:
                 publish_target_fingerprint,
                 publish_target_snapshot_json,
                 selected_image_folder,
+                artifact_kind,
+                local_artifact_path,
+                local_metadata_path,
+                render_profile,
                 local_manifest_path,
                 local_video_path,
                 render_status,
                 publish_status,
+                workflow_state,
                 publish_details_json,
+                current_revision_id,
                 last_published_location_id,
                 created_at,
                 updated_at
@@ -617,11 +602,17 @@ class PropertyPipelineRepository:
             publish_target_fingerprint=str(row["publish_target_fingerprint"] or ""),
             publish_target_snapshot_json=str(row["publish_target_snapshot_json"] or ""),
             selected_image_folder=str(row["selected_image_folder"] or ""),
+            artifact_kind=str(row["artifact_kind"] or ""),
+            local_artifact_path=str(row["local_artifact_path"] or row["local_video_path"] or ""),
+            local_metadata_path=str(row["local_metadata_path"] or row["local_manifest_path"] or ""),
+            render_profile=str(row["render_profile"] or ""),
             local_manifest_path=str(row["local_manifest_path"] or ""),
             local_video_path=str(row["local_video_path"] or ""),
             render_status=str(row["render_status"] or ""),
             publish_status=str(row["publish_status"] or ""),
+            workflow_state=str(row["workflow_state"] or ""),
             publish_details_json=str(row["publish_details_json"] or ""),
+            current_revision_id=str(row["current_revision_id"] or ""),
             last_published_location_id=str(row["last_published_location_id"] or ""),
             created_at=str(row["created_at"] or ""),
             updated_at=str(row["updated_at"] or ""),
@@ -641,27 +632,39 @@ class PropertyPipelineRepository:
                 publish_target_fingerprint,
                 publish_target_snapshot_json,
                 selected_image_folder,
+                artifact_kind,
+                local_artifact_path,
+                local_metadata_path,
+                render_profile,
                 local_manifest_path,
                 local_video_path,
                 render_status,
                 publish_status,
+                workflow_state,
                 publish_details_json,
+                current_revision_id,
                 last_published_location_id,
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(site_id, source_property_id) DO UPDATE SET
                 content_fingerprint = excluded.content_fingerprint,
                 content_snapshot_json = excluded.content_snapshot_json,
                 publish_target_fingerprint = excluded.publish_target_fingerprint,
                 publish_target_snapshot_json = excluded.publish_target_snapshot_json,
                 selected_image_folder = excluded.selected_image_folder,
+                artifact_kind = excluded.artifact_kind,
+                local_artifact_path = excluded.local_artifact_path,
+                local_metadata_path = excluded.local_metadata_path,
+                render_profile = excluded.render_profile,
                 local_manifest_path = excluded.local_manifest_path,
                 local_video_path = excluded.local_video_path,
                 render_status = excluded.render_status,
                 publish_status = excluded.publish_status,
+                workflow_state = excluded.workflow_state,
                 publish_details_json = excluded.publish_details_json,
+                current_revision_id = excluded.current_revision_id,
                 last_published_location_id = excluded.last_published_location_id,
                 updated_at = excluded.updated_at
             """,
@@ -673,11 +676,17 @@ class PropertyPipelineRepository:
                 state.publish_target_fingerprint,
                 state.publish_target_snapshot_json,
                 state.selected_image_folder,
+                state.artifact_kind,
+                state.local_artifact_path,
+                state.local_metadata_path,
+                state.render_profile,
                 state.local_manifest_path,
                 state.local_video_path,
                 state.render_status,
                 state.publish_status,
+                state.workflow_state,
                 state.publish_details_json,
+                state.current_revision_id,
                 state.last_published_location_id,
                 created_at,
                 updated_at,
@@ -688,7 +697,7 @@ class PropertyPipelineRepository:
         self,
         property_item: Property,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         image_folder: str = "",
         social_publish_status: str | None = None,
         social_publish_details_json: str | None = None,
@@ -705,23 +714,7 @@ class PropertyPipelineRepository:
             state = self.get_property_pipeline_state(
                 site_id=site_id,
                 source_property_id=property_item.id,
-            ) or PropertyPipelineState(
-                site_id=site_id,
-                source_property_id=property_item.id,
-                content_fingerprint="",
-                content_snapshot_json="",
-                publish_target_fingerprint="",
-                publish_target_snapshot_json="",
-                selected_image_folder="",
-                local_manifest_path="",
-                local_video_path="",
-                render_status="",
-                publish_status="",
-                publish_details_json="",
-                last_published_location_id="",
-                created_at="",
-                updated_at="",
-            )
+            ) or _empty_pipeline_state(site_id, property_item.id)
             details_json = state.publish_details_json
             if social_publish_details_json is not None:
                 details_json = social_publish_details_json
@@ -734,11 +727,17 @@ class PropertyPipelineRepository:
                     publish_target_fingerprint=state.publish_target_fingerprint,
                     publish_target_snapshot_json=state.publish_target_snapshot_json,
                     selected_image_folder=image_folder or state.selected_image_folder,
+                    artifact_kind=state.artifact_kind,
+                    local_artifact_path=state.local_artifact_path,
+                    local_metadata_path=state.local_metadata_path,
+                    render_profile=state.render_profile,
                     local_manifest_path=state.local_manifest_path,
                     local_video_path=state.local_video_path,
                     render_status=state.render_status,
                     publish_status=social_publish_status or state.publish_status,
+                    workflow_state=state.workflow_state,
                     publish_details_json=details_json,
+                    current_revision_id=state.current_revision_id,
                     last_published_location_id=state.last_published_location_id,
                     created_at=state.created_at,
                     updated_at=state.updated_at,
@@ -751,7 +750,7 @@ class PropertyPipelineRepository:
         property_dir: Path,
         downloaded_images: list[DownloadedImage],
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         social_publish_status: str | None = None,
         social_publish_details_json: str | None = None,
     ) -> None:
@@ -763,23 +762,7 @@ class PropertyPipelineRepository:
         state = self.get_property_pipeline_state(
             site_id=site_id,
             source_property_id=property_item.id,
-        ) or PropertyPipelineState(
-            site_id=site_id,
-            source_property_id=property_item.id,
-            content_fingerprint="",
-            content_snapshot_json="",
-            publish_target_fingerprint="",
-            publish_target_snapshot_json="",
-            selected_image_folder="",
-            local_manifest_path="",
-            local_video_path="",
-            render_status="",
-            publish_status="",
-            publish_details_json="",
-            last_published_location_id="",
-            created_at="",
-            updated_at="",
-        )
+        ) or _empty_pipeline_state(site_id, property_item.id)
         self.save_property_pipeline_state(
             PropertyPipelineState(
                 site_id=state.site_id,
@@ -789,11 +772,17 @@ class PropertyPipelineRepository:
                 publish_target_fingerprint=state.publish_target_fingerprint,
                 publish_target_snapshot_json=state.publish_target_snapshot_json,
                 selected_image_folder=_relative_to_base(property_dir, self.base_dir),
+                artifact_kind=state.artifact_kind,
+                local_artifact_path=state.local_artifact_path,
+                local_metadata_path=state.local_metadata_path,
+                render_profile=state.render_profile,
                 local_manifest_path=state.local_manifest_path,
                 local_video_path=state.local_video_path,
                 render_status=state.render_status,
                 publish_status=social_publish_status or state.publish_status,
+                workflow_state=state.workflow_state,
                 publish_details_json=social_publish_details_json or state.publish_details_json,
+                current_revision_id=state.current_revision_id,
                 last_published_location_id=state.last_published_location_id,
                 created_at=state.created_at,
                 updated_at=state.updated_at,
@@ -806,7 +795,7 @@ class PropertyPipelineRepository:
         property_dir: Path,
         downloaded_images: list[DownloadedImage],
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
     ) -> None:
         self.save_property_images(
             property_item,
@@ -818,7 +807,7 @@ class PropertyPipelineRepository:
     def update_social_publish_status(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         source_property_id: int,
         status: str,
         details: dict[str, Any] | None = None,
@@ -830,23 +819,7 @@ class PropertyPipelineRepository:
         state = self.get_property_pipeline_state(
             site_id=site_id,
             source_property_id=source_property_id,
-        ) or PropertyPipelineState(
-            site_id=site_id,
-            source_property_id=source_property_id,
-            content_fingerprint="",
-            content_snapshot_json="",
-            publish_target_fingerprint="",
-            publish_target_snapshot_json="",
-            selected_image_folder="",
-            local_manifest_path="",
-            local_video_path="",
-            render_status="",
-            publish_status="",
-            publish_details_json="",
-            last_published_location_id="",
-            created_at="",
-            updated_at="",
-        )
+        ) or _empty_pipeline_state(site_id, source_property_id)
         self.save_property_pipeline_state(
             PropertyPipelineState(
                 site_id=state.site_id,
@@ -856,12 +829,60 @@ class PropertyPipelineRepository:
                 publish_target_fingerprint=state.publish_target_fingerprint,
                 publish_target_snapshot_json=state.publish_target_snapshot_json,
                 selected_image_folder=state.selected_image_folder,
+                artifact_kind=state.artifact_kind,
+                local_artifact_path=state.local_artifact_path,
+                local_metadata_path=state.local_metadata_path,
+                render_profile=state.render_profile,
                 local_manifest_path=state.local_manifest_path,
                 local_video_path=state.local_video_path,
                 render_status=state.render_status,
                 publish_status=status,
+                workflow_state=state.workflow_state,
                 publish_details_json=details_json,
+                current_revision_id=state.current_revision_id,
                 last_published_location_id=last_published_location_id or state.last_published_location_id,
+                created_at=state.created_at,
+                updated_at=state.updated_at,
+            )
+        )
+
+    def update_workflow_state(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+        workflow_state: str,
+        current_revision_id: str | None = None,
+    ) -> None:
+        state = self.get_property_pipeline_state(
+            site_id=site_id,
+            source_property_id=source_property_id,
+        ) or _empty_pipeline_state(site_id, source_property_id)
+        self.save_property_pipeline_state(
+            PropertyPipelineState(
+                site_id=state.site_id,
+                source_property_id=state.source_property_id,
+                content_fingerprint=state.content_fingerprint,
+                content_snapshot_json=state.content_snapshot_json,
+                publish_target_fingerprint=state.publish_target_fingerprint,
+                publish_target_snapshot_json=state.publish_target_snapshot_json,
+                selected_image_folder=state.selected_image_folder,
+                artifact_kind=state.artifact_kind,
+                local_artifact_path=state.local_artifact_path,
+                local_metadata_path=state.local_metadata_path,
+                render_profile=state.render_profile,
+                local_manifest_path=state.local_manifest_path,
+                local_video_path=state.local_video_path,
+                render_status=state.render_status,
+                publish_status=state.publish_status,
+                workflow_state=workflow_state,
+                publish_details_json=state.publish_details_json,
+                current_revision_id=(
+                    state.current_revision_id
+                    if current_revision_id is None
+                    else current_revision_id
+                ),
+                last_published_location_id=state.last_published_location_id,
                 created_at=state.created_at,
                 updated_at=state.updated_at,
             )
@@ -870,31 +891,24 @@ class PropertyPipelineRepository:
     def save_local_artifacts(
         self,
         *,
-        site_id: str = LEGACY_SITE_ID,
+        site_id: str,
         source_property_id: int,
-        manifest_path: Path,
-        video_path: Path,
+        artifact_kind: str = "reel_video",
+        artifact_path: Path | None = None,
+        metadata_path: Path | None = None,
+        render_profile: str = "",
+        current_revision_id: str = "",
+        manifest_path: Path | None = None,
+        video_path: Path | None = None,
     ) -> None:
+        resolved_artifact_path = artifact_path or video_path
+        resolved_metadata_path = metadata_path or manifest_path
+        if resolved_artifact_path is None:
+            raise TypeError("save_local_artifacts requires an artifact_path.")
         state = self.get_property_pipeline_state(
             site_id=site_id,
             source_property_id=source_property_id,
-        ) or PropertyPipelineState(
-            site_id=site_id,
-            source_property_id=source_property_id,
-            content_fingerprint="",
-            content_snapshot_json="",
-            publish_target_fingerprint="",
-            publish_target_snapshot_json="",
-            selected_image_folder="",
-            local_manifest_path="",
-            local_video_path="",
-            render_status="",
-            publish_status="",
-            publish_details_json="",
-            last_published_location_id="",
-            created_at="",
-            updated_at="",
-        )
+        ) or _empty_pipeline_state(site_id, source_property_id)
         self.save_property_pipeline_state(
             PropertyPipelineState(
                 site_id=state.site_id,
@@ -904,11 +918,29 @@ class PropertyPipelineRepository:
                 publish_target_fingerprint=state.publish_target_fingerprint,
                 publish_target_snapshot_json=state.publish_target_snapshot_json,
                 selected_image_folder=state.selected_image_folder,
-                local_manifest_path=_relative_to_base(manifest_path, self.base_dir),
-                local_video_path=_relative_to_base(video_path, self.base_dir),
+                artifact_kind=artifact_kind,
+                local_artifact_path=_relative_to_base(resolved_artifact_path, self.base_dir),
+                local_metadata_path=(
+                    ""
+                    if resolved_metadata_path is None
+                    else _relative_to_base(resolved_metadata_path, self.base_dir)
+                ),
+                render_profile=render_profile,
+                local_manifest_path=(
+                    _relative_to_base(resolved_metadata_path, self.base_dir)
+                    if artifact_kind == "reel_video" and resolved_metadata_path is not None
+                    else ""
+                ),
+                local_video_path=(
+                    _relative_to_base(resolved_artifact_path, self.base_dir)
+                    if artifact_kind == "reel_video"
+                    else ""
+                ),
                 render_status="completed",
                 publish_status=state.publish_status,
+                workflow_state="rendered",
                 publish_details_json=state.publish_details_json,
+                current_revision_id=current_revision_id or state.current_revision_id,
                 last_published_location_id=state.last_published_location_id,
                 created_at=state.created_at,
                 updated_at=state.updated_at,

@@ -11,7 +11,11 @@ from services.reel_rendering.models import (
     PropertyReelSlide,
     PropertyReelTemplate,
 )
-from services.reel_rendering.render import generate_property_reel, generate_property_reel_from_data
+from services.reel_rendering.render import (
+    build_reel_template_for_render_profile,
+    generate_property_reel,
+    generate_property_reel_from_data,
+)
 
 __all__ = [
     "PropertyReelData",
@@ -20,6 +24,7 @@ __all__ = [
     "PropertyReelTemplate",
     "build_property_reel_manifest",
     "build_property_reel_manifest_from_data",
+    "build_reel_template_for_render_profile",
     "generate_property_reel",
     "generate_property_reel_from_data",
     "load_property_reel_data",

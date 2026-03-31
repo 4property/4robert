@@ -1,16 +1,18 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Protocol
 
 from services.social_delivery.models import (
     LocationUser,
-    PublishVideoRequest,
-    PublishVideoResult,
+    MultiPlatformPublishRequest,
+    MultiPlatformPublishResult,
+    PublishMediaRequest,
+    PublishMediaResult,
     SocialAccount,
 )
 
 
-class SocialVideoPublisher(Protocol):
+class SocialMediaPublisher(Protocol):
     def list_connected_accounts(
         self,
         *,
@@ -28,9 +30,17 @@ class SocialVideoPublisher(Protocol):
     ) -> tuple[LocationUser, ...]:
         ...
 
-    def publish_video(self, request: PublishVideoRequest) -> PublishVideoResult:
+    def publish_media(self, request: PublishMediaRequest) -> PublishMediaResult:
+        ...
+
+    def publish_media_to_platforms(
+        self,
+        request: MultiPlatformPublishRequest,
+    ) -> MultiPlatformPublishResult:
         ...
 
 
-__all__ = ["SocialVideoPublisher"]
+SocialVideoPublisher = SocialMediaPublisher
 
+
+__all__ = ["SocialMediaPublisher", "SocialVideoPublisher"]

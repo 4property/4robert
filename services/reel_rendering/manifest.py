@@ -7,15 +7,20 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from config import LEGACY_SITE_ID
 from services.reel_rendering.data import load_property_reel_data
-from services.reel_rendering.formatting import build_agent_lines, build_property_facts_line, format_price
+from services.reel_rendering.formatting import (
+    build_agent_lines,
+    build_display_price,
+    build_property_facts_line,
+)
+from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
 from services.reel_rendering.runtime import (
     compute_slide_timing,
+    prepare_cover_logo_image,
     resolve_ber_icon_path,
-    resolve_asset_path,
     resolve_manifest_output_path,
+    resolve_asset_path,
     select_reel_slides,
 )
 
@@ -47,7 +52,7 @@ def build_property_reel_manifest_from_data(
         settings,
         property_data.ber_rating,
     )
-    _, _, actual_total_duration = compute_slide_timing(settings, len(slide_image_paths))
+    _, slide_duration, actual_total_duration = compute_slide_timing(settings, len(slide_image_paths))
     duration_delta = round(actual_total_duration - settings.total_duration_seconds, 3)
     if abs(duration_delta) > 0.001:
         logger.warning(
@@ -57,6 +62,15 @@ def build_property_reel_manifest_from_data(
             property_data.slug,
             duration_delta,
         )
+    overlay_layout = build_overlay_layout(
+        property_data,
+        settings,
+        slides=tuple(slides),
+        slide_duration=slide_duration,
+        has_ber_badge=ber_icon_path is not None,
+        cover_caption=slides[0].caption if settings.include_intro and slides else None,
+    )
+    cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
 
     return {
         "site_id": property_data.site_id,
@@ -65,6 +79,8 @@ def build_property_reel_manifest_from_data(
         "title": property_data.title,
         "link": property_data.link,
         "property_status": property_data.property_status,
+        "listing_lifecycle": property_data.listing_lifecycle,
+        "banner_text": property_data.banner_text,
         "featured_image_url": property_data.featured_image_url,
         "agent_photo_url": property_data.agent_photo_url,
         "ber_rating": property_data.ber_rating,
@@ -77,8 +93,10 @@ def build_property_reel_manifest_from_data(
             }
             for slide in slides
         ],
-        "cover_logo_path": str(
-            resolve_asset_path(workspace_dir, settings, settings.cover_logo_filename)
+        "cover_logo_path": (
+            str(cover_logo_path)
+            if cover_logo_path is not None
+            else None
         ),
         "background_audio_path": str(
             resolve_asset_path(workspace_dir, settings, settings.background_audio_filename)
@@ -94,7 +112,8 @@ def build_property_reel_manifest_from_data(
         "resolution": [settings.width, settings.height],
         "property_facts": build_property_facts_line(property_data),
         "agent_lines": build_agent_lines(property_data),
-        "price": format_price(property_data.price),
+        "price": build_display_price(property_data),
+        "overlay_layout": overlay_layout.to_dict(),
     }
 
 
@@ -126,7 +145,7 @@ def write_property_reel_manifest_from_data(
 def build_property_reel_manifest(
     base_dir: str | Path,
     *,
-    site_id: str = LEGACY_SITE_ID,
+    site_id: str,
     property_id: int | None = None,
     slug: str | None = None,
     template: PropertyReelTemplate | None = None,
@@ -148,7 +167,7 @@ def build_property_reel_manifest(
 def write_property_reel_manifest(
     base_dir: str | Path,
     *,
-    site_id: str = LEGACY_SITE_ID,
+    site_id: str,
     property_id: int | None = None,
     slug: str | None = None,
     output_path: str | Path | None = None,

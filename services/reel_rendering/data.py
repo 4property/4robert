@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from config import DATABASE_FILENAME, LEGACY_SITE_ID
+from config import DATABASE_FILENAME
 from core.errors import PropertyReelError, ResourceNotFoundError
 from repositories.property_pipeline_repository import PropertyReelRecord, PropertyPipelineRepository
 from services.reel_rendering.formatting import clean_text
@@ -29,6 +29,8 @@ def record_to_property_reel_data(base_dir: Path, record: PropertyReelRecord) -> 
         title=clean_text(record.title) or record.slug,
         link=clean_text(record.link),
         property_status=clean_text(record.property_status),
+        listing_lifecycle=None,
+        banner_text=clean_text(record.property_status),
         selected_image_dir=selected_image_dir,
         selected_image_paths=selected_image_paths,
         featured_image_url=clean_text(record.featured_image_url),
@@ -40,7 +42,10 @@ def record_to_property_reel_data(base_dir: Path, record: PropertyReelRecord) -> 
         agent_email=clean_text(record.agent_email),
         agent_mobile=clean_text(record.agent_mobile),
         agent_number=clean_text(record.agent_number),
+        agency_psra=clean_text(record.agency_psra),
+        agency_logo_url=clean_text(record.agency_logo_url),
         price=clean_text(record.price),
+        price_display_text=clean_text(record.price),
         property_type_label=clean_text(record.property_type_label),
         property_area_label=clean_text(record.property_area_label),
         property_county_label=clean_text(record.property_county_label),
@@ -52,7 +57,7 @@ def record_to_property_reel_data(base_dir: Path, record: PropertyReelRecord) -> 
 def load_property_reel_data(
     base_dir: str | Path,
     *,
-    site_id: str = LEGACY_SITE_ID,
+    site_id: str,
     property_id: int | None = None,
     slug: str | None = None,
 ) -> PropertyRenderData:

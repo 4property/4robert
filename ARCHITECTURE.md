@@ -2,215 +2,191 @@
 
 ## Overview
 
-The application is a webhook-driven pipeline for property videos.
+CPIHED is a multi-site property media workflow triggered by WordPress webhooks.
 
-1. A WordPress plugin sends a signed property payload to `POST /webhooks/wordpress/property`.
-2. The FastAPI adapter validates the request, records a webhook event, and enqueues a job.
-3. `PropertyVideoPipeline` orchestrates the runtime modules in this order:
-   1. property info ingestion
-   2. photo selection
-   3. video rendering
-   4. video publishing
-4. The local `wordpress-webhook-simulator` acts as the stand-in for the future plugin and drives the whole flow in development.
+1. A property webhook is accepted at `POST /webhooks/wordpress/property`.
+2. The transport layer validates the request, records an audit event, and enqueues durable work in SQLite.
+3. The dispatcher processes jobs with keyed serialization by `site_id + property_id` so the same property is not processed concurrently by multiple workers.
+4. `PropertyMediaPipeline` executes five stable stages:
+   1. ingestion and normalization
+   2. campaign planning
+   3. asset preparation
+   4. reel rendering
+   5. local publish and external social delivery
+5. Local publish persists a durable media revision and emits an outbox event.
+6. Social delivery publishes through GoHighLevel to the configured platforms, recording `published`, `partial`, `failed`, or `skipped` outcomes per property.
 
-The storage model is multi-site. A property is uniquely identified by `site_id + source_property_id`.
+The current media output is always a reel video. `for_sale` and `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, and `let` use a short status reel with a single moving primary image.
 
-## Modules
+## Workflow State
 
-### HTTP adapter
+`property_pipeline_state` keeps the latest delivery state for each property. The runtime uses these states today:
 
-File: `services/webhook/server.py`
+- `ingested`
+- `assets_prepared`
+- `rendered`
+- `awaiting_review`
+- `published`
+- `partial`
+- `failed`
+- `skipped`
 
-Responsibilities:
+`awaiting_review` is the durable handoff point for a future preview-and-approval flow. The code emits outbox events for that path, but review remains optional and disabled by default.
 
-- validate route, method, headers, and JSON body
-- verify `X-WordPress-Site-ID`, `X-GoHighLevel-Location-ID`, `X-GoHighLevel-Access-Token`, `X-WordPress-Timestamp`, and `X-WordPress-Signature`
-- enforce request size limits
-- create a webhook event record for audit and troubleshooting
-- create a request-scoped `PropertyVideoJob`, including the current GoHighLevel publish context
-- enqueue the job
-- return `202 Accepted`
+## Main Modules
 
-The HTTP adapter is intentionally thin, but it still owns webhook event audit writes because accepted deliveries are recorded at the transport boundary.
-
-### Job dispatcher
-
-File: `application/dispatching.py`
-
-Responsibilities:
-
-- provide a simple `JobDispatcher` interface
-- run a bounded in-memory queue
-- process jobs with one or more worker threads
-- drain in-flight work on shutdown up to a configured timeout
-
-Current limitation:
-
-- the queue is not durable
-- queued jobs are lost if the process crashes
-- this is acceptable for the current single-node, low-volume deployment
-- worker count is intentionally fixed to `1` until keyed locking exists
-
-### Application orchestration
-
-File: `application/property_video_pipeline.py`
-
-Responsibilities:
-
-- make the full workflow readable in one place
-- keep the order of the business steps explicit
-- depend only on interfaces, not concrete infrastructure
-
-### Property info ingestion
-
-File: `application/default_services.py`
-
-Responsibilities:
-
-- normalize the incoming webhook payload with `Property.from_api_payload()`
-- persist the property record
-- compute two fingerprints:
-  - `content_fingerprint`
-  - `publish_target_fingerprint`
-- skip duplicate deliveries only when the content fingerprint, publish target fingerprint, and local artifacts all match a completed run
-- trigger rerender when property content changes, including `property_status`
-- trigger republish without rerender when only the GoHighLevel destination changes
-- resolve site-scoped storage paths
-
-Notes:
-
-- the payload field `agent_photo` is stored as `agent_photo_url`
-- GoHighLevel access tokens are request-scoped only and are never persisted
-
-### Event tracking
-
-File: `repositories/webhook_event_repository.py`
-
-Responsibilities:
-
-- store one event row per accepted delivery
-- track status transitions: `received`, `queued`, `processing`, `completed`, `noop`, `failed`
-- store `site_id`, `property_id`, `received_at`, `raw_payload_hash`, and `error_message`
-
-### Photo selection
+### Transport
 
 Files:
 
-- `application/default_services.py`
-- `services/wordpress_image/*`
+- `services/webhook_transport/server.py`
+- `services/webhook_transport/operations.py`
 
 Responsibilities:
 
-- download the candidate property photos
-- filter them into the selected set
-- save the selected image paths in the repository
+- validate headers, payload shape, and optional security signature
+- accept the current webhook header format
+- create webhook audit rows
+- enqueue durable jobs
+- expose liveness and readiness endpoints
 
-The application depends on a photo-selection boundary rather than the concrete heuristic implementation, so this module can later be replaced by a Gemini-backed selector.
-The application now uses a Gemini-backed selector that classifies candidate photos, reserves the featured image as the first slide when available, and writes a per-property JSON audit of the decision.
+Readiness is capability-based. Core webhook processing can be ready even if optional AI, notification, or review capabilities are not configured.
 
-### Video rendering
+### Durable Queue and Dispatch
 
 Files:
 
-- `application/default_services.py`
-- `services/property_reel/*`
+- `application/dispatching.py`
+- `repositories/property_job_repository.py`
 
 Responsibilities:
 
-- build the manifest from prepared `PropertyRenderData`
-- render the MP4 from prepared `PropertyRenderData`
-- write both outputs into a temporary staging directory
+- durable SQLite-backed queue
+- lease-based worker claims
+- retry scheduling for transient external failures
+- keyed serialization for the same property across multiple workers
 
-The render layer does not query SQLite directly. The application layer prepares the full render input first.
+This replaces the earlier single-worker-only safety model. Worker count can be greater than `1` without allowing concurrent processing of the same property.
 
-### Video publishing
+### Application Workflow
 
-File: `application/default_services.py`
+Files:
+
+- `application/property_video_pipeline.py`
+- `application/media_services.py`
+- `application/content_generation.py`
+- `application/media_planning.py`
 
 Responsibilities:
 
-- move staged render outputs into the final site-scoped publish folder
-- optionally publish the final MP4 to external social channels through a separate service
-- keep the publishing concern separate from the rendering concern
+- map raw property status into the business lifecycle
+- decide render profile and asset strategy
+- generate deterministic copy through the `ContentGenerator` boundary
+- prepare curated or primary-only assets
+- render the reel
+- publish locally and externally
 
-The runtime publisher is `CompositeVideoPublisher`:
+The deterministic copy generator is the default implementation today. It is intentionally isolated so future AI-generated captions, narration scripts, or overlay copy can be added without rewriting the renderer or social publisher.
 
-- `FileSystemVideoPublisher` writes the final outputs into `generated_reels/<safe_site_id>/`
-- `GoHighLevelPropertyPublisher` publishes reels to GoHighLevel Social Planner using the request-scoped publish context from the webhook
-- the current external proof of concept publishes only to TikTok
-- GoHighLevel publication retries are in-memory only inside the current worker job
+### Rendering
 
-## Storage
+Files:
 
-### Database
+- `services/reel_rendering/*`
 
-File: `repositories/wordpress_property_repository.py`
+Responsibilities:
 
-The repository uses a v2 schema with:
+- build the reel manifest
+- compute a Python-side overlay layout before ffmpeg
+- render text blocks that auto-fit, wrap, or clamp safely
+- omit optional fields when they are missing
+- persist the resolved overlay layout in the manifest for audit and preview use
 
-- `record_id` as the internal primary key
-- `site_id`
-- `source_property_id`
-- `UNIQUE(site_id, source_property_id)`
-- a dedicated `property_pipeline_state` table for render/publish state
+The layout engine is the authority for text fitting. ffmpeg now paints a resolved layout rather than making ad hoc overflow decisions inline.
 
-The same SQLite database also stores the `webhook_events` audit table.
+### Social Delivery
 
-The `property_pipeline_state` table stores:
+Files:
 
-- content and publish fingerprints
-- selected image folder
-- local manifest and video paths
-- render status
-- publish status and details
-- last published GoHighLevel location id
+- `services/social_delivery/*`
 
-No raw GoHighLevel access token is stored in SQLite.
+Responsibilities:
 
-Legacy single-site databases are migrated automatically and assigned `LEGACY_SITE_ID`.
+- upload media to GoHighLevel
+- select one location user and one account per platform
+- publish sequentially across the configured platforms
+- apply per-platform validation policies
+- treat missing accounts or unsupported platforms as partial/skipped results rather than fatal pipeline errors
 
-### Filesystem
+The job succeeds if at least one platform publishes successfully. Only total failure across all requested platforms fails the job.
 
-Site-scoped paths are resolved in `services/webhook_transport/site_storage.py`.
+## Persistence Model
+
+SQLite stores the full operational state:
+
+- `properties`: normalized property payloads
+- `property_images`: downloaded/selected image metadata
+- `property_pipeline_state`: latest render and publish state, workflow state, and current revision id
+- `webhook_events`: transport audit trail
+- `job_queue`: durable background jobs
+- `media_revisions`: immutable render revisions
+- `outbox_events`: durable domain events for future notification/review consumers
+
+`media_revisions` separates revision history from the mutable current state. That is the foundation for future preview, approval, and republish workflows.
+
+## Filesystem Layout
+
+Site-scoped directories are resolved in `services/webhook_transport/site_storage.py`.
 
 Current roots:
 
-- `property_media/<safe_site_id>/`
-- `property_media_raw/<safe_site_id>/`
-- `generated_reels/<safe_site_id>/`
+- `property_media/<site>/`
+- `property_media_raw/<site>/`
+- `generated_media/<site>/reels/`
 
-## Public service layer
+`generated_media/<site>/reels/` is the canonical output location.
 
-The public HTTP entrypoint is now FastAPI.
+## Logging and Error Model
 
-Reasons:
+Files:
 
-- the app needs operational endpoints such as liveness and readiness checks
-- request handling and validation are clearer than with the previous stdlib adapter
-- the HTTP adapter still remains separate from the business pipeline
+- `core/errors.py`
+- `core/logging.py`
 
-Recommended production deployment:
+Errors now carry structured fields:
 
-- Linux host or container
-- reverse proxy with HTTPS termination and rate limiting
-- `uvicorn` as the ASGI server
+- `stage`
+- `code`
+- `retryable`
+- `context`
+- `external_trace_id`
 
-## Simulator Contract
+Rich console output remains for development, but the log content itself now includes enough structured detail to diagnose stage failures, publish API failures, and layout clamp events in deployment.
 
-The simulator mirrors the future plugin contract and sends:
+## Outbox and Future Extensions
 
-- `X-WordPress-Site-ID`
-- `X-GoHighLevel-Location-ID`
-- `X-GoHighLevel-Access-Token`
-- `X-WordPress-Timestamp`
-- `X-WordPress-Signature`
+The outbox currently records events such as:
 
-The signature covers:
+- `media_rendered`
+- `review_requested`
+- `publish_completed`
+- `publish_failed`
+- `publish_skipped`
 
-- timestamp
-- site id
-- GoHighLevel location id
-- GoHighLevel access token
-- raw JSON body
+That outbox is the intended integration point for:
 
-Per-site webhook secrets and GoHighLevel routing values are configured in `wordpress-webhook-simulator`, not in the main app settings.
+- email notifications
+- preview/review workflows
+- analytics or audit sinks
+- future asynchronous AI content generation
+
+## Deployment Notes
+
+Recommended production model:
+
+- run FastAPI behind a reverse proxy with HTTPS and rate limiting
+- keep SQLite on durable local storage
+- run with one or more workers depending on throughput needs
+- forward stdout/stderr to centralized logging
+
+Optional capabilities such as AI copy, AI narration, notifications, and review can be enabled incrementally without blocking the core webhook workflow.

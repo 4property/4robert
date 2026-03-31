@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
@@ -7,6 +7,7 @@ from core.errors import ResourceNotFoundError, SocialPublishingError, Validation
 from services.social_delivery.gohighlevel_client import GoHighLevelClient
 from services.social_delivery.models import UploadedMedia
 
+MAX_GHL_GENERAL_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_GHL_VIDEO_UPLOAD_BYTES = 500 * 1024 * 1024
 
 
@@ -14,22 +15,26 @@ class GoHighLevelMediaService:
     def __init__(self, *, client: GoHighLevelClient) -> None:
         self.client = client
 
-    def upload_video(self, *, access_token: str, video_path: str | Path) -> UploadedMedia:
-        resolved_path = Path(video_path).expanduser().resolve()
+    def upload_media(
+        self,
+        *,
+        access_token: str,
+        media_path: str | Path,
+        upload_file_name: str | None = None,
+    ) -> UploadedMedia:
+        resolved_path = Path(media_path).expanduser().resolve()
         if not resolved_path.exists():
-            raise ResourceNotFoundError(f"Video file does not exist: {resolved_path}")
+            raise ResourceNotFoundError(f"Media file does not exist: {resolved_path}")
         if not resolved_path.is_file():
-            raise ValidationError(f"Video path is not a file: {resolved_path}")
+            raise ValidationError(f"Media path is not a file: {resolved_path}")
 
-        file_size = resolved_path.stat().st_size
-        if file_size <= 0:
-            raise ValidationError(f"Video file is empty: {resolved_path}")
-        if file_size > MAX_GHL_VIDEO_UPLOAD_BYTES:
-            raise ValidationError(
-                f"Video file exceeds the GoHighLevel upload limit of {MAX_GHL_VIDEO_UPLOAD_BYTES} bytes."
-            )
+        mime_type = mimetypes.guess_type(resolved_path.name)[0] or "application/octet-stream"
+        self._validate_media_file(resolved_path, mime_type=mime_type)
+        requested_upload_name = self._resolve_upload_file_name(
+            resolved_path=resolved_path,
+            upload_file_name=upload_file_name,
+        )
 
-        mime_type = mimetypes.guess_type(resolved_path.name)[0] or "video/mp4"
         with resolved_path.open("rb") as file_handle:
             payload = self.client.request_json(
                 "POST",
@@ -37,10 +42,10 @@ class GoHighLevelMediaService:
                 access_token=access_token,
                 data={
                     "hosted": "false",
-                    "name": resolved_path.name,
+                    "name": requested_upload_name,
                 },
                 files={
-                    "file": (resolved_path.name, file_handle, mime_type),
+                    "file": (requested_upload_name, file_handle, mime_type),
                 },
             )
 
@@ -55,10 +60,63 @@ class GoHighLevelMediaService:
             file_id=file_id.strip(),
             url=url.strip(),
             mime_type=mime_type,
-            file_name=resolved_path.name,
+            file_name=requested_upload_name,
             raw_response=payload,
         )
 
+    def upload_video(self, *, access_token: str, video_path: str | Path) -> UploadedMedia:
+        return self.upload_media(access_token=access_token, media_path=video_path)
 
-__all__ = ["GoHighLevelMediaService", "MAX_GHL_VIDEO_UPLOAD_BYTES"]
+    @staticmethod
+    def _resolve_upload_file_name(
+        *,
+        resolved_path: Path,
+        upload_file_name: str | None,
+    ) -> str:
+        normalized_name = str(upload_file_name or "").strip()
+        if not normalized_name:
+            return resolved_path.name
 
+        safe_stem = (
+            normalized_name.replace("\\", " ")
+            .replace("/", " ")
+            .replace(":", " ")
+            .replace("*", " ")
+            .replace("?", "")
+            .replace('"', "")
+            .replace("<", "")
+            .replace(">", "")
+            .replace("|", "")
+        ).strip()
+        if not safe_stem:
+            return resolved_path.name
+
+        suffix = resolved_path.suffix or ""
+        if safe_stem.lower().endswith(suffix.lower()) and suffix:
+            return safe_stem
+        return f"{safe_stem}{suffix}"
+
+    @staticmethod
+    def _validate_media_file(resolved_path: Path, *, mime_type: str) -> None:
+        file_size = resolved_path.stat().st_size
+        if file_size <= 0:
+            raise ValidationError(f"Media file is empty: {resolved_path}")
+
+        if mime_type.startswith("video/"):
+            if file_size > MAX_GHL_VIDEO_UPLOAD_BYTES:
+                raise ValidationError(
+                    f"Video file exceeds the GoHighLevel upload limit of {MAX_GHL_VIDEO_UPLOAD_BYTES} bytes."
+                )
+            return
+
+        if file_size > MAX_GHL_GENERAL_UPLOAD_BYTES:
+            raise ValidationError(
+                f"Media file exceeds the GoHighLevel upload limit of {MAX_GHL_GENERAL_UPLOAD_BYTES} bytes."
+            )
+
+
+__all__ = [
+    "GoHighLevelMediaService",
+    "MAX_GHL_GENERAL_UPLOAD_BYTES",
+    "MAX_GHL_VIDEO_UPLOAD_BYTES",
+]

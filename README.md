@@ -1,47 +1,59 @@
 # CPIHED
 
-WordPress webhook pipeline that ingests property payloads from multiple sites, selects images with Gemini, renders short-form property reels, and optionally publishes them to social platforms.
+Webhook-driven property media pipeline for multi-site real estate content.
 
-## What is in the repo
+It ingests WordPress property payloads, prepares images, renders short-form reels, stores durable media revisions, and publishes through GoHighLevel to the configured social platforms.
 
-- `application/`: orchestration, job dispatching, and pipeline entrypoints
-- `services/`: adapters for webhook transport, media handling, reel rendering, AI photo selection, and social delivery
-- `repositories/`: SQLite-backed persistence layer
+## Current capabilities
+
+- multi-site webhook ingestion
+- durable SQLite job queue
+- keyed worker serialization per property
+- full reels for `for_sale` and `to_let`
+- short status reels for `sale_agreed`, `sold`, `let_agreed`, and `let`
+- multi-platform publishing through GoHighLevel
+- durable outbox events for future notifications and review workflows
+- manifest-level overlay layout auditing with safe text wrapping and clamp warnings
+
+## Project structure
+
+- `application/`: workflow orchestration, dispatching, planning, and content generation
+- `services/`: webhook transport, rendering, media prep, AI adapters, and social delivery
+- `repositories/`: SQLite persistence
 - `settings/`: environment-driven configuration
-- `tests/`: regression and architecture tests
+- `tests/`: regression and architecture coverage
 
 ## Local setup
 
 1. Create a virtual environment.
 2. Install runtime dependencies with `pip install -r requirements.txt`.
-3. Install test dependencies with `pip install -r requirements-dev.txt`.
-4. Copy `.env.example` to `.env` and replace the placeholder values.
+3. Install dev dependencies with `pip install -r requirements-dev.txt`.
+4. Copy `.env.example` to `.env` and fill in the required values.
 
-## Running the app
+## Run
 
 ```powershell
 python main.py
 ```
 
-The server reads configuration from `.env` and starts the WordPress webhook endpoint.
-
-## Running tests
+## Test
 
 ```powershell
 python -m pytest -q
 ```
 
-## Important local-only folders
+## Runtime folders
 
-These paths are generated at runtime and are ignored by Git:
+Generated at runtime and ignored by Git:
 
 - `property_media/`
 - `property_media_raw/`
-- `generated_reels/`
+- `generated_media/`
 - `.runtime_locks/`
 - `.tmp_test_cases/`
 
 ## Notes
 
-- The repository is configured for multi-site webhook ingestion; no single agency is treated as the preferred source.
-- The default reel fonts are bundled in `assets/fonts/` to avoid machine-specific Windows font dependencies.
+- The webhook runtime is ready when core storage, queue, and ffmpeg checks pass.
+- Optional capabilities such as AI copy, AI narration, notifications, and review can stay disabled without blocking the core webhook workflow.
+- Captions are generated through a dedicated content-generation boundary so deterministic copy can be replaced later by an AI-backed implementation.

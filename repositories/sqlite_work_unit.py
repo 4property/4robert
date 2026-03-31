@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from application.persistence import UnitOfWork
+from repositories.media_revision_repository import MediaRevisionRepository
+from repositories.outbox_event_repository import OutboxEventRepository
 from repositories.property_job_repository import PropertyJobRepository
 from repositories.sqlite_connection import create_sqlite_connection
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
@@ -16,6 +18,8 @@ class SqliteWorkUnit:
         self.connection = None
         self.property_repository = None
         self.pipeline_state_repository = None
+        self.media_revision_store = None
+        self.outbox_event_store = None
         self.webhook_event_store = None
         self.job_queue_store = None
 
@@ -32,6 +36,14 @@ class SqliteWorkUnit:
             connection=self.connection,
         )
         self.pipeline_state_repository = self.property_repository
+        self.media_revision_store = MediaRevisionRepository(
+            self.database_path,
+            connection=self.connection,
+        )
+        self.outbox_event_store = OutboxEventRepository(
+            self.database_path,
+            connection=self.connection,
+        )
         self.webhook_event_store = WebhookDeliveryRepository(
             self.database_path,
             connection=self.connection,
@@ -41,6 +53,8 @@ class SqliteWorkUnit:
             connection=self.connection,
         )
         self.property_repository.__enter__()
+        self.media_revision_store.__enter__()
+        self.outbox_event_store.__enter__()
         self.webhook_event_store.__enter__()
         self.job_queue_store.__enter__()
         self.connection.commit()
@@ -51,6 +65,10 @@ class SqliteWorkUnit:
             self.job_queue_store.__exit__(exc_type, exc, exc_tb)
         if self.webhook_event_store is not None:
             self.webhook_event_store.__exit__(exc_type, exc, exc_tb)
+        if self.outbox_event_store is not None:
+            self.outbox_event_store.__exit__(exc_type, exc, exc_tb)
+        if self.media_revision_store is not None:
+            self.media_revision_store.__exit__(exc_type, exc, exc_tb)
         if self.property_repository is not None:
             self.property_repository.__exit__(exc_type, exc, exc_tb)
         if self.connection is not None:

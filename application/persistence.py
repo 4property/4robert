@@ -3,6 +3,8 @@
 from typing import Protocol
 
 from models.property import Property
+from repositories.media_revision_repository import MediaRevisionRecord
+from repositories.outbox_event_repository import OutboxEventRecord
 from repositories.property_job_repository import PropertyJobEnqueueRequest, QueuedPropertyJobRecord
 from repositories.webhook_delivery_repository import WebhookDeliveryRecord
 from repositories.property_pipeline_repository import (
@@ -63,8 +65,13 @@ class PropertyPipelineStateRepository(Protocol):
         *,
         site_id: str,
         source_property_id: int,
-        manifest_path,
-        video_path,
+        artifact_kind: str = "reel_video",
+        artifact_path=None,
+        metadata_path=None,
+        render_profile: str = "",
+        current_revision_id: str = "",
+        manifest_path=None,
+        video_path=None,
     ) -> None:
         ...
 
@@ -77,6 +84,61 @@ class PropertyPipelineStateRepository(Protocol):
         details: dict[str, object] | None = None,
         last_published_location_id: str = "",
     ) -> None:
+        ...
+
+    def update_workflow_state(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+        workflow_state: str,
+        current_revision_id: str | None = None,
+    ) -> None:
+        ...
+
+
+class MediaRevisionStore(Protocol):
+    def save_media_revision(self, record: MediaRevisionRecord) -> None:
+        ...
+
+    def get_media_revision(self, revision_id: str) -> MediaRevisionRecord | None:
+        ...
+
+    def list_media_revisions(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+    ) -> tuple[MediaRevisionRecord, ...]:
+        ...
+
+
+class OutboxEventStore(Protocol):
+    def add_event(
+        self,
+        *,
+        event_id: str,
+        aggregate_type: str,
+        aggregate_id: str,
+        event_type: str,
+        payload: dict[str, object] | None = None,
+        site_id: str = "",
+        source_property_id: int | None = None,
+        status: str = "pending",
+        created_at: str | None = None,
+        available_at: str | None = None,
+    ) -> None:
+        ...
+
+    def mark_published(self, *, event_id: str, published_at: str | None = None) -> None:
+        ...
+
+    def list_events(
+        self,
+        *,
+        site_id: str | None = None,
+        source_property_id: int | None = None,
+    ) -> tuple[OutboxEventRecord, ...]:
         ...
 
 
@@ -183,6 +245,8 @@ class JobQueueStore(Protocol):
 class UnitOfWork(Protocol):
     property_repository: PropertyRepository
     pipeline_state_repository: PropertyPipelineStateRepository
+    media_revision_store: MediaRevisionStore
+    outbox_event_store: OutboxEventStore
     webhook_event_store: WebhookEventStore
     job_queue_store: JobQueueStore
 
@@ -198,6 +262,8 @@ class UnitOfWork(Protocol):
 
 __all__ = [
     "JobQueueStore",
+    "MediaRevisionStore",
+    "OutboxEventStore",
     "PropertyPipelineStateRepository",
     "PropertyRepository",
     "UnitOfWork",

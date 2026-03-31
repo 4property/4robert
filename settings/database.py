@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 
-# Kept for compatibility with existing deployments; renaming the file requires
-# an explicit data migration step.
 DATABASE_FILENAME = "db.sqlite3"
 
 PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
@@ -54,6 +52,8 @@ PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
     ("agent_mobile", "TEXT"),
     ("agent_number", "TEXT"),
     ("agent_qualification", "TEXT"),
+    ("agency_psra", "TEXT"),
+    ("agency_logo_url", "TEXT"),
     ("featured_media_id", "INTEGER"),
     ("featured_image_url", "TEXT"),
     ("amenities", "TEXT"),
@@ -76,72 +76,6 @@ PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
     ("fetched_at", "TEXT NOT NULL DEFAULT ''"),
 ]
 
-LEGACY_PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
-    ("id", "INTEGER PRIMARY KEY"),
-    ("slug", "TEXT NOT NULL"),
-    ("title", "TEXT"),
-    ("link", "TEXT"),
-    ("guid", "TEXT"),
-    ("status", "TEXT"),
-    ("resource_type", "TEXT"),
-    ("author_id", "INTEGER"),
-    ("importer_id", "TEXT"),
-    ("list_reference", "TEXT"),
-    ("date", "TEXT"),
-    ("date_gmt", "TEXT"),
-    ("modified", "TEXT"),
-    ("modified_gmt", "TEXT"),
-    ("excerpt_html", "TEXT"),
-    ("content_html", "TEXT"),
-    ("price", "TEXT"),
-    ("price_sold", "TEXT"),
-    ("price_term", "TEXT"),
-    ("property_status", "TEXT"),
-    ("property_market", "TEXT"),
-    ("property_type_label", "TEXT"),
-    ("property_county_label", "TEXT"),
-    ("property_area_label", "TEXT"),
-    ("property_size", "TEXT"),
-    ("property_land_size", "TEXT"),
-    ("property_accommodation", "TEXT"),
-    ("property_disclaimer", "TEXT"),
-    ("bedrooms", "INTEGER"),
-    ("bathrooms", "INTEGER"),
-    ("ber_rating", "TEXT"),
-    ("ber_number", "TEXT"),
-    ("energy_details", "TEXT"),
-    ("bidding_method", "TEXT"),
-    ("living_type", "TEXT"),
-    ("country", "TEXT"),
-    ("eircode", "TEXT"),
-    ("directions", "TEXT"),
-    ("latitude", "REAL"),
-    ("longitude", "REAL"),
-    ("agent_name", "TEXT"),
-    ("agent_email", "TEXT"),
-    ("agent_mobile", "TEXT"),
-    ("agent_number", "TEXT"),
-    ("agent_qualification", "TEXT"),
-    ("featured_media_id", "INTEGER"),
-    ("featured_image_url", "TEXT"),
-    ("amenities", "TEXT"),
-    ("property_order", "INTEGER"),
-    ("wppd_parent_id", "TEXT"),
-    ("property_type_ids", "TEXT"),
-    ("property_county_ids", "TEXT"),
-    ("property_area_ids", "TEXT"),
-    ("property_features", "TEXT"),
-    ("media_attachments_json", "TEXT"),
-    ("brochure_urls", "TEXT"),
-    ("floorplan_urls", "TEXT"),
-    ("tour_urls", "TEXT"),
-    ("viewing_times", "TEXT"),
-    ("image_folder", "TEXT NOT NULL DEFAULT ''"),
-    ("image_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("raw_json", "TEXT NOT NULL DEFAULT '{}'"),
-    ("fetched_at", "TEXT NOT NULL DEFAULT ''"),
-]
-
 PROPERTY_UNIQUE_CONSTRAINTS = (
     "UNIQUE(site_id, source_property_id)",
 )
@@ -149,7 +83,6 @@ PROPERTY_UNIQUE_CONSTRAINTS = (
 
 __all__ = [
     "DATABASE_FILENAME",
-    "LEGACY_PROPERTY_COLUMN_DEFINITIONS",
     "PROPERTY_COLUMN_DEFINITIONS",
     "PROPERTY_UNIQUE_CONSTRAINTS",
 ]

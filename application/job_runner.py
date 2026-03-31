@@ -3,25 +3,25 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from application.property_video_pipeline import PropertyVideoPipeline
-from application.types import PropertyVideoJob
+from application.property_video_pipeline import PropertyMediaPipeline
+from application.types import PropertyMediaJob
 from core.locking import exclusive_file_lock, property_job_lock_path
 from core.logging import LoggedProcess, format_console_block, format_detail_line
 
 logger = logging.getLogger(__name__)
 
 
-class PropertyVideoJobRunner:
+class PropertyMediaJobRunner:
     def __init__(
         self,
         workspace_dir: str | Path,
         *,
-        pipeline: PropertyVideoPipeline,
+        pipeline: PropertyMediaPipeline,
     ) -> None:
         self.workspace_dir = Path(workspace_dir).expanduser().resolve()
         self.pipeline = pipeline
 
-    def run(self, job: PropertyVideoJob) -> object | None:
+    def run(self, job: PropertyMediaJob) -> object | None:
         lock_path = property_job_lock_path(
             self.workspace_dir,
             site_id=job.site_id,
@@ -52,7 +52,7 @@ class PropertyVideoJobRunner:
                             format_detail_line("Lock path", lock_path, highlight=True),
                         )
                     )
-                    published_video = self.pipeline.run_job(job)
+                    published_media = self.pipeline.run_job(job)
             except Exception as exc:
                 job_process.fail(
                     exc,
@@ -61,12 +61,15 @@ class PropertyVideoJobRunner:
                 )
                 raise
 
-            final_status = "noop" if published_video is None else "completed"
+            final_status = "noop" if published_media is None else "completed"
             job_process.complete(
                 format_detail_line("Final status", final_status.upper(), highlight=True),
                 total_label="Total time",
             )
-            return published_video
+            return published_media
 
 
-__all__ = ["PropertyVideoJobRunner"]
+PropertyVideoJobRunner = PropertyMediaJobRunner
+
+
+__all__ = ["PropertyMediaJobRunner", "PropertyVideoJobRunner"]

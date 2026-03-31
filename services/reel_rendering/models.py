@@ -5,7 +5,6 @@ from pathlib import Path
 
 from settings.reels import (
     ASSETS_DIRNAME,
-    REELS_ROOT_DIRNAME,
     REEL_AUDIO_VOLUME,
     REEL_BACKGROUND_AUDIO_FILENAME,
     REEL_BER_ICONS_DIRNAME,
@@ -35,7 +34,6 @@ class PropertyReelTemplate:
     seconds_per_slide: float = REEL_SECONDS_PER_SLIDE
     max_slide_count: int = REEL_MAX_SLIDE_COUNT
     intro_duration_seconds: float = REEL_INTRO_DURATION_SECONDS
-    output_dirname: str = REELS_ROOT_DIRNAME
     assets_dirname: str = ASSETS_DIRNAME
     ber_icons_dirname: str = REEL_BER_ICONS_DIRNAME
     cover_logo_filename: str = REEL_COVER_LOGO_FILENAME
@@ -45,6 +43,7 @@ class PropertyReelTemplate:
     bold_font_path: Path = DEFAULT_REEL_FONT_BOLD_PATH
     subtitle_font_path: Path = REEL_SUBTITLE_FONT_PATH
     subtitle_font_size: int = REEL_SUBTITLE_FONT_SIZE
+    include_intro: bool = True
 
 
 @dataclass(slots=True)
@@ -78,6 +77,11 @@ class PropertyRenderData:
     property_county_label: str | None
     eircode: str | None
     selected_slides: tuple[PropertyReelSlide, ...] = ()
+    agency_psra: str | None = None
+    agency_logo_url: str | None = None
+    listing_lifecycle: str | None = None
+    banner_text: str | None = None
+    price_display_text: str | None = None
 
 
 PropertyReelData = PropertyRenderData

@@ -10,8 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from application.persistence import UnitOfWork
 from application.types import PropertyVideoJob, SocialPublishContext
-from core.errors import TransientSocialPublishingError
-from core.logging import format_console_block, format_detail_line
+from core.errors import TransientSocialPublishingError, extract_error_details
+from core.logging import format_console_block, format_context_line, format_detail_line
 from services.social_delivery.gohighlevel_client import GoHighLevelApiError
 
 logger = logging.getLogger(__name__)
@@ -235,7 +235,7 @@ class SqliteJobDispatcher:
         )
         heartbeat_thread.start()
         try:
-            published_video = self.handler(job)
+            published_media = self.handler(job)
         except Exception as error:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1.0)
@@ -244,7 +244,7 @@ class SqliteJobDispatcher:
 
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=1.0)
-        final_status = "noop" if published_video is None else "completed"
+        final_status = "noop" if published_media is None else "completed"
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
             unit_of_work.job_queue_store.mark_job_completed(job_id=claimed_job.job_id)
@@ -255,7 +255,15 @@ class SqliteJobDispatcher:
             )
 
     def _finalize_failure(self, claimed_job, error: Exception) -> None:
-        error_message = str(error)
+        error_details = extract_error_details(error)
+        error_message = str(error_details.get("message") or error)
+        error_stage = str(error_details.get("stage") or "")
+        error_code = str(error_details.get("code") or "")
+        error_context = (
+            error_details.get("context")
+            if isinstance(error_details.get("context"), dict)
+            else None
+        )
         should_retry = _should_retry_job(
             error=error,
             attempt_count=claimed_job.attempt_count,
@@ -283,7 +291,10 @@ class SqliteJobDispatcher:
                     format_detail_line("Job ID", claimed_job.job_id),
                     format_detail_line("Attempt", f"{claimed_job.attempt_count}/{claimed_job.max_attempts}"),
                     format_detail_line("Retry at", retry_available_at),
+                    format_detail_line("Error stage", error_stage or "<none>"),
+                    format_detail_line("Error code", error_code or "<none>"),
                     format_detail_line("Reason", error_message),
+                    format_context_line(error_context),
                 )
             )
             return
@@ -306,6 +317,9 @@ class SqliteJobDispatcher:
                 format_detail_line("Event ID", claimed_job.event_id),
                 format_detail_line("Site ID", claimed_job.site_id),
                 format_detail_line("Property ID", claimed_job.property_id),
+                format_detail_line("Error stage", error_stage or "<none>"),
+                format_detail_line("Error code", error_code or "<none>"),
+                format_context_line(error_context),
             ),
             exc_info=error,
         )

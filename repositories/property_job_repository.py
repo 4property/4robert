@@ -232,11 +232,20 @@ class PropertyJobRepository:
                 lease_expires_at = ?,
                 updated_at = ?
             WHERE job_id = (
-                SELECT job_id
-                FROM {PROPERTY_JOB_TABLE_NAME}
-                WHERE status = 'queued'
-                AND available_at <= ?
-                ORDER BY created_at ASC, job_id ASC
+                SELECT candidate.job_id
+                FROM {PROPERTY_JOB_TABLE_NAME} AS candidate
+                WHERE candidate.status = 'queued'
+                AND candidate.available_at <= ?
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM {PROPERTY_JOB_TABLE_NAME} AS processing
+                    WHERE processing.status = 'processing'
+                    AND processing.site_id = candidate.site_id
+                    AND processing.property_id IS NOT NULL
+                    AND candidate.property_id IS NOT NULL
+                    AND processing.property_id = candidate.property_id
+                )
+                ORDER BY candidate.created_at ASC, candidate.job_id ASC
                 LIMIT 1
             )
             RETURNING

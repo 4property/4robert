@@ -15,10 +15,26 @@ class GoHighLevelApiError(SocialPublishingError):
         status_code: int,
         message: str,
         response_body: str,
+        method: str,
+        path: str,
+        external_trace_id: str | None = None,
     ) -> None:
         self.status_code = status_code
         self.response_body = response_body
-        super().__init__(f"GoHighLevel API error {status_code}: {message}")
+        self.method = method
+        self.path = path
+        response_preview = response_body[:1000]
+        super().__init__(
+            f"GoHighLevel API error {status_code}: {message}",
+            code=f"GHL_API_{status_code}",
+            context={
+                "method": method.upper(),
+                "path": path,
+                "status_code": status_code,
+                "response_body": response_preview,
+            },
+            external_trace_id=external_trace_id,
+        )
 
 
 class GoHighLevelClient:
@@ -71,13 +87,21 @@ class GoHighLevelClient:
                 files=files,
             )
         except httpx.HTTPError as error:
-            raise TransientSocialPublishingError(f"GoHighLevel request failed: {error}") from error
+            raise TransientSocialPublishingError(
+                f"GoHighLevel request failed: {error}",
+                code="GHL_HTTP_ERROR",
+                context={"method": method.upper(), "path": path},
+                cause=error,
+            ) from error
 
         if response.status_code >= 400:
             raise GoHighLevelApiError(
                 status_code=response.status_code,
                 message=self._summarise_error_message(response),
                 response_body=response.text,
+                method=method,
+                path=path,
+                external_trace_id=self._extract_trace_id(response),
             )
 
         if not response.content:
@@ -87,7 +111,10 @@ class GoHighLevelClient:
             payload = response.json()
         except json.JSONDecodeError as error:
             raise SocialPublishingError(
-                "GoHighLevel returned a non-JSON response."
+                "GoHighLevel returned a non-JSON response.",
+                code="GHL_NON_JSON_RESPONSE",
+                context={"method": method.upper(), "path": path},
+                cause=error,
             ) from error
 
         return payload if isinstance(payload, dict) else {"results": payload}
@@ -105,6 +132,19 @@ class GoHighLevelClient:
                 if isinstance(value, str) and value.strip():
                     return value.strip()
         return response.text[:300] or "Unknown API error"
+
+    @staticmethod
+    def _extract_trace_id(response: httpx.Response) -> str | None:
+        try:
+            payload = response.json()
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        trace_id = payload.get("traceId")
+        if isinstance(trace_id, str) and trace_id.strip():
+            return trace_id.strip()
+        return None
 
 
 __all__ = ["GoHighLevelApiError", "GoHighLevelClient"]

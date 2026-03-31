@@ -224,6 +224,8 @@ class Property:
     agent_mobile: str | None = None
     agent_number: str | None = None
     agent_qualification: str | None = None
+    agency_psra: str | None = None
+    agency_logo_url: str | None = None
     featured_media_id: int | None = None
     featured_image_url: str | None = None
     amenities: str | None = None
@@ -306,6 +308,8 @@ class Property:
             agent_mobile=_to_text(payload.get("agent_mobile")),
             agent_number=_to_text(payload.get("agent_number")),
             agent_qualification=_to_text(payload.get("agent_qualification")),
+            agency_psra=_to_text(payload.get("agency_psra")),
+            agency_logo_url=_to_text(payload.get("agency_logo")),
             featured_media_id=_to_int(payload.get("featured_media")),
             featured_image_url=featured_image_url,
             amenities=_to_text(payload.get("amenities")),
@@ -387,6 +391,8 @@ class Property:
             "agent_mobile": self.agent_mobile,
             "agent_number": self.agent_number,
             "agent_qualification": self.agent_qualification,
+            "agency_psra": self.agency_psra,
+            "agency_logo_url": self.agency_logo_url,
             "featured_media_id": self.featured_media_id,
             "featured_image_url": self.featured_image_url,
             "amenities": self.amenities,
@@ -455,6 +461,8 @@ class Property:
             "agent_mobile": self.agent_mobile,
             "agent_number": self.agent_number,
             "agent_qualification": self.agent_qualification,
+            "agency_psra": self.agency_psra,
+            "agency_logo_url": self.agency_logo_url,
             "featured_media_id": self.featured_media_id,
             "featured_image_url": self.featured_image_url,
             "amenities": self.amenities,

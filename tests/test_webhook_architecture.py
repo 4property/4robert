@@ -18,21 +18,31 @@ if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
 from application.dispatching import SqliteJobDispatcher
-from application.default_services import DefaultPropertyInfoService
-from application.types import PropertyVideoJob, SocialPublishContext
+from application.default_services import DefaultPropertyInfoService, FileSystemMediaPublisher
+from application.media_planning import build_media_delivery_plan, normalize_listing_lifecycle
+from application.types import PropertyVideoJob, RenderedMediaArtifact, SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
-from config import DATABASE_FILENAME, GEMINI_SELECTION_AUDIT_FILENAME
+from config import (
+    DATABASE_FILENAME,
+    GEMINI_SELECTION_AUDIT_FILENAME,
+    SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
+)
 from core.errors import TransientSocialPublishingError
 from models.property import Property
-from repositories.property_job_repository import PropertyJobRepository
+from repositories.media_revision_repository import MediaRevisionRepository
+from repositories.outbox_event_repository import OutboxEventRepository
+from repositories.property_job_repository import PropertyJobEnqueueRequest, PropertyJobRepository
 from repositories.sqlite_work_unit import SqliteWorkUnit
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
 from services.reel_rendering.formatting import escape_filter_path
-from services.reel_rendering.filters import build_overlay_filter
+from services.reel_rendering.filters import build_filter_complex, build_overlay_filter
+from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.manifest import build_property_reel_manifest_from_data
-from services.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
-from services.reel_rendering.runtime import resolve_ber_icon_path, resolve_font_path
+from services.reel_rendering.models import PropertyRenderData, PropertyReelSlide, PropertyReelTemplate
+from services.reel_rendering.render import build_reel_template_for_render_profile
+from services.reel_rendering.runtime import prepare_cover_logo_image, resolve_ber_icon_path, resolve_font_path
+from services.webhook_transport.operations import build_readiness_report
 from services.webhook_transport.security import build_signature
 from services.webhook_transport.server import WordPressWebhookApplication, create_fastapi_app
 from services.webhook_transport.site_storage import resolve_site_storage_layout
@@ -79,6 +89,7 @@ def build_sample_payload(
         "agent_photo": "https://example.com/agent.jpg",
         "agent_email": "jane@example.com",
         "agent_number": "+353 1 234 5678",
+        "agency_logo": "https://example.com/agency-logo.png",
         "wppd_primary_image": "https://example.com/property-primary.jpg",
         "wppd_pics": [
             "https://example.com/property-primary.jpg",
@@ -95,6 +106,7 @@ def build_job(
     payload: dict[str, object] | None = None,
     location_id: str = "location-a",
     access_token: str = "token-a",
+    platforms: tuple[str, ...] = ("tiktok",),
 ) -> PropertyVideoJob:
     active_payload = payload or build_sample_payload()
     return PropertyVideoJob(
@@ -108,7 +120,7 @@ def build_job(
             provider="gohighlevel",
             location_id=location_id,
             access_token=access_token,
-            platform="tiktok",
+            platforms=platforms,
         ),
     )
 
@@ -174,15 +186,101 @@ class RepositorySchemaTests(unittest.TestCase):
                     str(row[1])
                     for row in repository.connection.execute("PRAGMA table_info(property_pipeline_state)")
                 }
+            with MediaRevisionRepository(database_path) as media_revision_repository:
+                media_revision_tables = {
+                    str(row[0])
+                    for row in media_revision_repository.connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+            with OutboxEventRepository(database_path) as outbox_repository:
+                outbox_tables = {
+                    str(row[0])
+                    for row in outbox_repository.connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
 
         self.assertIn("agent_photo_url", property_columns)
         self.assertIn("content_fingerprint", pipeline_columns)
         self.assertIn("content_snapshot_json", pipeline_columns)
         self.assertIn("publish_target_fingerprint", pipeline_columns)
         self.assertIn("publish_target_snapshot_json", pipeline_columns)
+        self.assertIn("workflow_state", pipeline_columns)
+        self.assertIn("current_revision_id", pipeline_columns)
         self.assertIn("last_published_location_id", pipeline_columns)
+        self.assertIn("media_revisions", media_revision_tables)
+        self.assertIn("outbox_events", outbox_tables)
         self.assertFalse(any("access_token" in column for column in property_columns))
         self.assertFalse(any("access_token" in column for column in pipeline_columns))
+
+    def test_job_queue_claim_serializes_work_for_same_property(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            database_path = workspace_dir / DATABASE_FILENAME
+            with PropertyJobRepository(database_path) as repository:
+                repository.enqueue_job(
+                    PropertyJobEnqueueRequest(
+                        job_id="job-1",
+                        event_id="event-1",
+                        site_id="site-a",
+                        property_id=101,
+                        received_at="2026-03-31T10:00:00+00:00",
+                        raw_payload_hash="hash-1",
+                        payload_json='{"id":101}',
+                        publish_context_json="",
+                        max_attempts=1,
+                        available_at="2026-03-31T10:00:00+00:00",
+                        created_at="2026-03-31T10:00:00+00:00",
+                    )
+                )
+                repository.enqueue_job(
+                    PropertyJobEnqueueRequest(
+                        job_id="job-2",
+                        event_id="event-2",
+                        site_id="site-a",
+                        property_id=101,
+                        received_at="2026-03-31T10:00:01+00:00",
+                        raw_payload_hash="hash-2",
+                        payload_json='{"id":101}',
+                        publish_context_json="",
+                        max_attempts=1,
+                        available_at="2026-03-31T10:00:01+00:00",
+                        created_at="2026-03-31T10:00:01+00:00",
+                    )
+                )
+                repository.enqueue_job(
+                    PropertyJobEnqueueRequest(
+                        job_id="job-3",
+                        event_id="event-3",
+                        site_id="site-a",
+                        property_id=202,
+                        received_at="2026-03-31T10:00:02+00:00",
+                        raw_payload_hash="hash-3",
+                        payload_json='{"id":202}',
+                        publish_context_json="",
+                        max_attempts=1,
+                        available_at="2026-03-31T10:00:02+00:00",
+                        created_at="2026-03-31T10:00:02+00:00",
+                    )
+                )
+
+                first_claim = repository.claim_next_ready_job(
+                    worker_id="worker-1",
+                    lease_expires_at="2026-03-31T10:05:00+00:00",
+                    now="2026-03-31T10:00:03+00:00",
+                )
+                second_claim = repository.claim_next_ready_job(
+                    worker_id="worker-2",
+                    lease_expires_at="2026-03-31T10:05:00+00:00",
+                    now="2026-03-31T10:00:03+00:00",
+                )
+
+        self.assertIsNotNone(first_claim)
+        self.assertIsNotNone(second_claim)
+        self.assertEqual(first_claim.job_id, "job-1")
+        self.assertEqual(first_claim.property_id, 101)
+        self.assertEqual(second_claim.job_id, "job-3")
+        self.assertEqual(second_claim.property_id, 202)
 
 
 class PropertyInfoServiceTests(unittest.TestCase):
@@ -236,7 +334,19 @@ class PropertyInfoServiceTests(unittest.TestCase):
                 site_id=site_id,
                 source_property_id=property_item.id,
                 status="published",
-                details={"post_id": "post-1"},
+                details={
+                    "aggregate_status": "published",
+                    "desired_platforms": ["tiktok"],
+                    "successful_platforms": ["tiktok"],
+                    "platform_results": {
+                        "tiktok": {
+                            "platform": "tiktok",
+                            "outcome": "published",
+                            "post_id": "post-1",
+                            "post_status": "published",
+                        }
+                    },
+                },
                 last_published_location_id=location_id,
             )
 
@@ -269,7 +379,7 @@ class PropertyInfoServiceTests(unittest.TestCase):
             context = service.ingest_property(build_job())
 
         self.assertIsNone(context.publish_context)
-        self.assertIsNone(context.publish_description)
+        self.assertEqual(context.publish_descriptions_by_platform, {})
         self.assertIsNone(context.publish_target_url)
         self.assertFalse(context.requires_external_publish)
 
@@ -370,6 +480,55 @@ class PropertyInfoServiceTests(unittest.TestCase):
         self.assertFalse(second_context.requires_render)
         self.assertFalse(second_context.requires_external_publish)
 
+    def test_partial_social_publish_retries_only_pending_platforms(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = self._build_service(workspace_dir)
+            first_context = service.ingest_property(
+                build_job(platforms=("tiktok", "instagram"))
+            )
+            self._materialise_completed_artifacts(
+                workspace_dir=workspace_dir,
+                site_id="site-a",
+                property_item=first_context.property,
+                location_id="location-a",
+            )
+
+            with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+                repository.update_social_publish_status(
+                    site_id="site-a",
+                    source_property_id=first_context.property.id,
+                    status="partial",
+                    details={
+                        "aggregate_status": "partial",
+                        "desired_platforms": ["tiktok", "instagram"],
+                        "successful_platforms": ["tiktok"],
+                        "platform_results": {
+                            "tiktok": {
+                                "platform": "tiktok",
+                                "outcome": "published",
+                                "post_id": "post-1",
+                                "post_status": "published",
+                            },
+                            "instagram": {
+                                "platform": "instagram",
+                                "outcome": "skipped_missing_account",
+                                "message": "No connected instagram account was found.",
+                            },
+                        },
+                    },
+                    last_published_location_id="location-a",
+                )
+
+            retry_context = service.ingest_property(
+                build_job(platforms=("tiktok", "instagram"))
+            )
+
+        self.assertFalse(retry_context.is_noop)
+        self.assertFalse(retry_context.requires_render)
+        self.assertTrue(retry_context.requires_external_publish)
+        self.assertEqual(retry_context.pending_publish_platforms, ("instagram",))
+        self.assertIsNotNone(retry_context.existing_published_video)
+
     def test_changed_property_features_force_new_render(self) -> None:
         with workspace_temp_dir() as workspace_dir:
             service = self._build_service(workspace_dir)
@@ -397,7 +556,7 @@ class PropertyInfoServiceTests(unittest.TestCase):
         self.assertTrue(changed_context.requires_render)
         self.assertTrue(changed_context.requires_external_publish)
 
-    def test_changed_normalized_field_outside_legacy_subset_forces_new_render(self) -> None:
+    def test_changed_normalized_field_forces_new_render(self) -> None:
         with workspace_temp_dir() as workspace_dir:
             service = self._build_service(workspace_dir)
             first_context = service.ingest_property(build_job())
@@ -428,6 +587,121 @@ class PropertyInfoServiceTests(unittest.TestCase):
 
         self.assertNotIn(b"token-keep-out", database_bytes)
         self.assertNotIn(b"token-keep-out", wal_bytes)
+
+
+class WorkflowPersistenceTests(unittest.TestCase):
+    def test_local_media_publish_creates_revision_and_outbox_event(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = DefaultPropertyInfoService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                property_url_template="https://{site_id}/property/{slug}",
+                property_url_tracking_params={},
+                social_publishing_enabled=True,
+            )
+            context = service.ingest_property(build_job())
+            staging_dir = workspace_dir / "staging"
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            staged_manifest_path = staging_dir / "sample-property-reel.json"
+            staged_media_path = staging_dir / "sample-property-reel.mp4"
+            staged_manifest_path.write_text("{}", encoding="utf-8")
+            staged_media_path.write_bytes(b"video")
+
+            publisher = FileSystemMediaPublisher(
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+            )
+            published_media = publisher.publish_media(
+                context,
+                RenderedMediaArtifact(
+                    staging_dir=staging_dir,
+                    media_path=staged_media_path,
+                    metadata_path=staged_manifest_path,
+                    revision_id="revision-1",
+                ),
+            )
+
+            with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+                state = repository.get_property_pipeline_state(
+                    site_id=context.site_id,
+                    source_property_id=context.property.id,
+                )
+            with MediaRevisionRepository(workspace_dir / DATABASE_FILENAME) as revision_repository:
+                revisions = revision_repository.list_media_revisions(
+                    site_id=context.site_id,
+                    source_property_id=context.property.id,
+                )
+            with OutboxEventRepository(workspace_dir / DATABASE_FILENAME) as outbox_repository:
+                events = outbox_repository.list_events(
+                    site_id=context.site_id,
+                    source_property_id=context.property.id,
+                )
+
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual(state.workflow_state, "rendered")
+        self.assertEqual(state.current_revision_id, "revision-1")
+        self.assertEqual(published_media.revision_id, "revision-1")
+        self.assertEqual(len(revisions), 1)
+        self.assertEqual(revisions[0].revision_id, "revision-1")
+        self.assertEqual(revisions[0].workflow_state, "rendered")
+        self.assertEqual(events[-1].event_type, "media_rendered")
+        self.assertEqual(events[-1].payload["revision_id"], "revision-1")
+
+    def test_readiness_report_exposes_optional_capabilities_without_blocking_core(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            with patch(
+                "services.webhook_transport.operations.resolve_ffmpeg_binary",
+                return_value=workspace_dir / "ffmpeg.exe",
+            ):
+                readiness = build_readiness_report(
+                    workspace_dir,
+                    site_secrets={},
+                    worker_count=1,
+                    security_disabled=True,
+                )
+
+        self.assertEqual(readiness["ready"], readiness["capabilities"]["core"]["ready"])
+        self.assertTrue(readiness["ready"])
+        self.assertIn("ai_photo_selection", readiness["capabilities"])
+        self.assertIsInstance(readiness["capabilities"]["ai_photo_selection"]["ready"], bool)
+
+
+class MediaPlanningTests(unittest.TestCase):
+    def test_normalize_listing_lifecycle_accepts_new_state_variants(self) -> None:
+        self.assertEqual(normalize_listing_lifecycle("For Sale"), "for_sale")
+        self.assertEqual(normalize_listing_lifecycle("to-let"), "to_let")
+        self.assertEqual(normalize_listing_lifecycle("sale_agreed"), "sale_agreed")
+        self.assertEqual(normalize_listing_lifecycle("Sold"), "sold")
+        self.assertEqual(normalize_listing_lifecycle("let agreed"), "let_agreed")
+        self.assertEqual(normalize_listing_lifecycle("LET"), "let")
+
+    def test_build_media_delivery_plan_uses_status_reel_for_closing_states(self) -> None:
+        property_item = Property.from_api_payload(
+            build_sample_payload(property_status="Let Agreed")
+        )
+
+        delivery_plan = build_media_delivery_plan(property_item)
+
+        self.assertEqual(delivery_plan.artifact_kind, "reel_video")
+        self.assertEqual(delivery_plan.asset_strategy, "primary_only")
+        self.assertEqual(delivery_plan.social_post_type, "reel")
+        self.assertEqual(delivery_plan.render_profile, "let_agreed_status_reel")
+        self.assertEqual(delivery_plan.banner_text, "LET AGREED")
+        self.assertEqual(delivery_plan.price_display_text, "")
+
+    def test_build_media_delivery_plan_keeps_full_reel_for_to_let(self) -> None:
+        payload = build_sample_payload(property_status="To Let")
+        payload["price"] = "1750"
+        payload["price_term"] = "per month"
+        property_item = Property.from_api_payload(payload)
+
+        delivery_plan = build_media_delivery_plan(property_item)
+
+        self.assertEqual(delivery_plan.artifact_kind, "reel_video")
+        self.assertEqual(delivery_plan.asset_strategy, "curated_selection")
+        self.assertEqual(delivery_plan.social_post_type, "reel")
+        self.assertEqual(delivery_plan.render_profile, "to_let_reel")
+        self.assertEqual(delivery_plan.price_display_text, "€1,750 per month")
 
 
 class WebhookTransportTests(unittest.TestCase):
@@ -526,7 +800,10 @@ class WebhookTransportTests(unittest.TestCase):
         self.assertEqual(event.status, "queued")
         self.assertIn('"location_id": "location-a"', job.publish_context_json)
         self.assertIn('"access_token": "token-a"', job.publish_context_json)
-        self.assertIn('"platform": "tiktok"', job.publish_context_json)
+        self.assertEqual(
+            json.loads(job.publish_context_json)["platforms"],
+            list(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
+        )
 
     def test_missing_gohighlevel_headers_is_rejected(self) -> None:
         payload = build_sample_payload()
@@ -727,7 +1004,7 @@ class SqliteJobDispatcherTests(unittest.TestCase):
                     provider="gohighlevel",
                     location_id="location-a",
                     access_token="token-persist-until-complete",
-                    platform="tiktok",
+                    platforms=("tiktok",),
                 ),
             )
             dispatcher = self._build_dispatcher(
@@ -767,7 +1044,7 @@ class SqliteJobDispatcherTests(unittest.TestCase):
                     provider="gohighlevel",
                     location_id="location-a",
                     access_token="token-first",
-                    platform="tiktok",
+                    platforms=("tiktok",),
                 ),
             )
             second_delivery = acceptance_service.accept_delivery(
@@ -779,7 +1056,7 @@ class SqliteJobDispatcherTests(unittest.TestCase):
                     provider="gohighlevel",
                     location_id="location-a",
                     access_token="token-second",
-                    platform="tiktok",
+                    platforms=("tiktok",),
                 ),
             )
             completed_property_ids: list[int | None] = []
@@ -852,7 +1129,7 @@ class SqliteJobDispatcherTests(unittest.TestCase):
                     provider="gohighlevel",
                     location_id="location-a",
                     access_token="token-a",
-                    platform="tiktok",
+                    platforms=("tiktok",),
                 ),
             )
             with PropertyJobRepository(workspace_dir / DATABASE_FILENAME) as repository:
@@ -1021,7 +1298,7 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertNotIn("color=black@0.40:t=fill:enable=", filter_text)
         self.assertLess(filter_text.index("FOR SALE"), filter_text.index("650\\,000"))
 
-    def test_overlay_filter_truncates_long_caption_to_fit_two_lines(self) -> None:
+    def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
             site_id="ckp.ie",
             property_id=170800,
@@ -1059,9 +1336,180 @@ class RenderOverlayTests(unittest.TestCase):
             slide_duration=template.seconds_per_slide,
         )
 
-        self.assertIn("...", filter_text)
+        self.assertNotIn("...", filter_text)
         self.assertNotIn("Key features", filter_text)
+        self.assertIn("Bright open-plan living area with breakfast", filter_text)
+        self.assertIn("counter\\, fitted appliances\\, private patio", filter_text)
+        self.assertIn("access and additional built-in storage.", filter_text)
         self.assertIn("€650\\,000", filter_text)
+
+    def test_overlay_filter_wraps_long_address_more_gracefully(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title=(
+                "Apartment 12, The Extremely Long Residential Development Name, "
+                "Sandymount, Dublin 4, Ireland"
+            ),
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+
+        filter_text = build_overlay_filter(
+            property_data,
+            template,
+            cover_caption="Bright open-plan living area.",
+            slide_captions=("Bright open-plan living area.",),
+            slide_duration=template.seconds_per_slide,
+        )
+
+        self.assertIn("Extremely Long Residential", filter_text)
+        self.assertIn("Development Name\\, Sandymount\\, Dublin 4\\,", filter_text)
+        self.assertIn("Ireland", filter_text)
+
+    def test_overlay_filter_renders_phone_and_email_on_separate_lines(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+
+        filter_text = build_overlay_filter(
+            property_data,
+            template,
+            cover_caption="Bright open-plan living area.",
+            slide_captions=("Bright open-plan living area.",),
+            slide_duration=template.seconds_per_slide,
+        )
+
+        self.assertIn("+353 1 234 5678", filter_text)
+        self.assertIn("jane@example.com", filter_text)
+        self.assertNotIn("+353 1 234 5678 | jane@example.com", filter_text)
+        self.assertLess(filter_text.index("+353 1 234 5678"), filter_text.index("jane@example.com"))
+
+    def test_overlay_layout_hides_missing_agent_text_blocks(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating=None,
+            agent_name=None,
+            agent_photo_url=None,
+            agent_email=None,
+            agent_mobile=None,
+            agent_number=None,
+            agency_psra=None,
+            price=None,
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=False,
+            cover_caption=None,
+        )
+
+        rendered_blocks = {block.block for block in overlay_layout.text_blocks}
+        self.assertNotIn("agent_name", rendered_blocks)
+        self.assertNotIn("agent_phone", rendered_blocks)
+        self.assertNotIn("agent_email", rendered_blocks)
+        self.assertNotIn("agency_psra", rendered_blocks)
+
+    def test_overlay_layout_records_clamp_warning_for_extreme_title(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title=" ".join(["Exceptional"] * 40),
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            agency_psra="PSRA-1234",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=True,
+            cover_caption=None,
+        )
+
+        address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
+        self.assertTrue(address_block.clamped)
+        self.assertTrue(any(warning.code == "TEXT_CLAMPED" for warning in overlay_layout.warnings))
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -1115,6 +1563,106 @@ class RenderOverlayTests(unittest.TestCase):
             self.assertIn("fontsize=52", filter_text)
 
 
+class StatusReelRenderTests(unittest.TestCase):
+    def test_status_reel_template_disables_intro_and_limits_to_one_slide(self) -> None:
+        template = build_reel_template_for_render_profile("sale_agreed_status_reel")
+
+        self.assertFalse(template.include_intro)
+        self.assertEqual(template.intro_duration_seconds, 0.0)
+        self.assertEqual(template.max_slide_count, 1)
+        self.assertEqual(template.total_duration_seconds, template.seconds_per_slide)
+
+    def test_status_reel_filter_omits_cover_logo_intro(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="Sale Agreed",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label=None,
+            property_area_label=None,
+            property_county_label=None,
+            eircode=None,
+            banner_text="SALE AGREED",
+            price_display_text="",
+        )
+        template = build_reel_template_for_render_profile("sale_agreed_status_reel")
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        filter_text = build_filter_complex(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_frames=120,
+            slide_duration=template.seconds_per_slide,
+            logo_input_index=None,
+            agent_image_input_index=1,
+            ber_icon_input_index=2,
+        )
+
+        self.assertNotIn("[coverbg][logo]overlay=", filter_text)
+        self.assertNotIn("concat=n=2:v=1:a=0[video_base]", filter_text)
+        self.assertIn("[slideshow]null[video_base]", filter_text)
+        self.assertIn("SALE AGREED", filter_text)
+        self.assertNotIn("650\\,000", filter_text)
+
+    def test_full_reel_filter_supports_intro_without_cover_logo_input(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = PropertyReelTemplate()
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        filter_text = build_filter_complex(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_frames=120,
+            slide_duration=template.seconds_per_slide,
+            logo_input_index=None,
+            agent_image_input_index=1,
+            ber_icon_input_index=2,
+        )
+
+        self.assertIn("[coverbg]null[cover]", filter_text)
+        self.assertIn("[cover][slideshow]concat=n=2:v=1:a=0[video_base]", filter_text)
+        self.assertNotIn("[coverbg][logo]overlay=", filter_text)
+
+
 class BerIconRuntimeTests(unittest.TestCase):
     def test_resolve_ber_icon_path_normalizes_supported_values(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -1135,6 +1683,93 @@ class BerIconRuntimeTests(unittest.TestCase):
             self.assertIsNone(resolve_ber_icon_path(workspace_dir, template, None))
             self.assertIsNone(resolve_ber_icon_path(workspace_dir, template, "Z9"))
             self.assertIsNone(resolve_ber_icon_path(workspace_dir, template, "B2"))
+
+
+class AgencyLogoRuntimeTests(unittest.TestCase):
+    def test_prepare_cover_logo_image_downloads_agency_logo_when_available(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=None,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/agency-logo.png",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                self.assertEqual(image_url, "https://example.com/agency-logo.png")
+                destination.write_bytes(b"logo")
+                return destination
+
+            with patch("services.reel_rendering.runtime.download_remote_image", side_effect=fake_download):
+                cover_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                )
+
+        self.assertIsNotNone(cover_logo_path)
+        assert cover_logo_path is not None
+        self.assertTrue(cover_logo_path.name.startswith("sample-property-agency-logo-"))
+        self.assertEqual(cover_logo_path.suffix, ".png")
+
+    def test_prepare_cover_logo_image_returns_none_when_download_fails(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=None,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/agency-logo.png",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=OSError("network failure"),
+            ):
+                cover_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                )
+
+        self.assertIsNone(cover_logo_path)
 
 
 class ReelRuntimePathTests(unittest.TestCase):
@@ -1235,6 +1870,118 @@ class ReelManifestTests(unittest.TestCase):
         self.assertEqual(manifest["estimated_duration_seconds"], 11.0)
         self.assertEqual(manifest["slide_count"], 2)
         self.assertEqual(manifest["ber_icon_path"], str(ber_icons_dir / "B2.png"))
+        self.assertEqual(
+            manifest["agent_lines"],
+            ["Jane Doe", "+353 1 234 5678", "jane@example.com"],
+        )
+        self.assertIn("overlay_layout", manifest)
+        self.assertIn("text_blocks", manifest["overlay_layout"])
+        self.assertIn("warnings", manifest["overlay_layout"])
+
+    def test_manifest_omits_cover_logo_when_agency_logo_is_unavailable(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            ber_icons_dir = assets_dir / "ber-icons"
+            ber_icons_dir.mkdir(parents=True, exist_ok=True)
+            (ber_icons_dir / "B2.png").write_bytes(b"png")
+
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            primary_image = selected_dir / "primary_image.jpg"
+            primary_image.write_bytes(b"image")
+
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=selected_dir,
+                selected_image_paths=(primary_image,),
+                featured_image_url="https://example.com/property-primary.jpg",
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=None,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/agency-logo.png",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=OSError("network failure"),
+            ):
+                manifest = build_property_reel_manifest_from_data(
+                    workspace_dir,
+                    property_data,
+                )
+
+        self.assertIsNone(manifest["cover_logo_path"])
+
+    def test_status_reel_manifest_does_not_include_cover_logo_and_uses_single_slide_duration(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            ber_icons_dir = assets_dir / "ber-icons"
+            ber_icons_dir.mkdir(parents=True, exist_ok=True)
+            (ber_icons_dir / "B2.png").write_bytes(b"png")
+
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            primary_image = selected_dir / "primary_image.jpg"
+            primary_image.write_bytes(b"image")
+
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="Sale Agreed",
+                selected_image_dir=selected_dir,
+                selected_image_paths=(primary_image,),
+                featured_image_url="https://example.com/property-primary.jpg",
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=None,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+                banner_text="SALE AGREED",
+                price_display_text="",
+            )
+
+            template = build_reel_template_for_render_profile("sale_agreed_status_reel")
+            manifest = build_property_reel_manifest_from_data(
+                workspace_dir,
+                property_data,
+                template=template,
+            )
+
+        self.assertIsNone(manifest["cover_logo_path"])
+        self.assertEqual(manifest["slide_count"], 1)
+        self.assertEqual(manifest["configured_total_duration_seconds"], template.seconds_per_slide)
+        self.assertEqual(manifest["actual_total_duration_seconds"], template.seconds_per_slide)
+        self.assertEqual(manifest["price"], None)
 
 
 class SimulatorContractTests(unittest.TestCase):

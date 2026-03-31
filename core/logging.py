@@ -4,7 +4,10 @@ import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any, Final
+
+from core.errors import PipelineError, extract_error_details
 
 try:
     from rich.console import Console
@@ -199,6 +202,33 @@ def format_message_line(message: str, *, tone: str = "info") -> str:
     return f"[{color}]{_escape(message)}[/]"
 
 
+def build_log_context(**values: object) -> dict[str, object]:
+    context: dict[str, object] = {}
+    for key, value in values.items():
+        normalized_key = str(key).strip()
+        if not normalized_key or value in (None, "", (), [], {}):
+            continue
+        context[normalized_key] = value
+    return context
+
+
+def format_context_line(context: Mapping[str, object] | None) -> str | None:
+    if not context:
+        return None
+    normalized_items = [
+        (str(key).strip(), value)
+        for key, value in context.items()
+        if str(key).strip() and value not in (None, "", (), [], {})
+    ]
+    if not normalized_items:
+        return None
+    rendered_pairs = [
+        f"{key}={value}"
+        for key, value in sorted(normalized_items, key=lambda item: item[0])
+    ]
+    return format_detail_line("Context", " | ".join(rendered_pairs))
+
+
 @dataclass(slots=True)
 class LoggedProcess:
     logger: logging.Logger
@@ -253,11 +283,21 @@ class LoggedProcess:
             return time.perf_counter() - self._started_at
         self._closed = True
         duration = time.perf_counter() - self._started_at
+        error_details = extract_error_details(error)
+        error_lines = [
+            format_detail_line("Error", error, highlight=True),
+            format_detail_line("Error type", error_details.get("type")),
+            format_detail_line("Error stage", error_details.get("stage")),
+            format_detail_line("Error code", error_details.get("code")),
+            format_detail_line("Retryable", "Yes" if error_details.get("retryable") else "No"),
+            format_detail_line("External trace", error_details.get("external_trace_id")),
+            format_context_line(error_details.get("context") if isinstance(error_details.get("context"), dict) else None),
+        ]
         self.logger.error(
             format_console_block(
                 f"{self.title} FAILED",
                 *lines,
-                format_detail_line("Error", error, highlight=True),
+                *error_lines,
                 format_detail_line(total_label or self.total_label, format_duration(duration), highlight=True),
                 tone="failure",
             )
@@ -315,6 +355,8 @@ __all__ = [
     "create_progress",
     "configure_logging",
     "format_console_block",
+    "build_log_context",
+    "format_context_line",
     "format_detail_line",
     "format_duration",
     "format_message_line",

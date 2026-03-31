@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,20 +45,30 @@ def clean_text(value: Any) -> str | None:
     return text or None
 
 
-def wrap_lines(value: str | None, *, width: int, max_lines: int) -> list[str]:
+@dataclass(frozen=True, slots=True)
+class WrappedTextResult:
+    lines: tuple[str, ...]
+    clamped: bool
+
+
+def fit_wrapped_lines(value: str | None, *, width: int, max_lines: int) -> WrappedTextResult:
     if not value:
-        return []
+        return WrappedTextResult(lines=(), clamped=False)
 
     wrapped = textwrap.wrap(value, width=width)
     if not wrapped:
-        return []
+        return WrappedTextResult(lines=(), clamped=False)
     if len(wrapped) <= max_lines:
-        return wrapped
+        return WrappedTextResult(lines=tuple(wrapped), clamped=False)
 
     lines = wrapped[: max_lines - 1]
     remaining = " ".join(wrapped[max_lines - 1 :])
     lines.append(textwrap.shorten(remaining, width=width, placeholder="..."))
-    return lines
+    return WrappedTextResult(lines=tuple(lines), clamped=True)
+
+
+def wrap_lines(value: str | None, *, width: int, max_lines: int) -> list[str]:
+    return list(fit_wrapped_lines(value, width=width, max_lines=max_lines).lines)
 
 
 def build_property_facts_line(property_data: PropertyRenderData) -> str:
@@ -100,41 +111,38 @@ def build_agent_lines(property_data: PropertyRenderData) -> list[str]:
     if property_data.agent_name:
         lines.append(property_data.agent_name)
 
-    contact_parts = [
-        part
-        for part in (
-            property_data.agent_mobile or property_data.agent_number,
-            property_data.agent_email,
-        )
-        if part
-    ]
-    if contact_parts:
-        lines.append(" | ".join(contact_parts))
-
-    if not lines:
-        lines.append("Agent details unavailable")
+    phone_number = property_data.agent_mobile or property_data.agent_number
+    if phone_number:
+        lines.append(phone_number)
+    if property_data.agent_email:
+        lines.append(property_data.agent_email)
     return lines
 
 
 def build_status_ribbon_text(property_data: PropertyRenderData) -> str | None:
-    status = clean_text(property_data.property_status)
+    status = clean_text(property_data.banner_text) or clean_text(property_data.property_status)
     if not status:
         return None
-    normalized = status.upper()
-    if len(normalized) <= 18:
-        return normalized
-    return textwrap.shorten(normalized, width=18, placeholder="...")
+    return status.upper()
+
+
+def build_display_price(property_data: PropertyRenderData) -> str | None:
+    if property_data.price_display_text is not None:
+        return clean_text(property_data.price_display_text)
+    return format_price(property_data.price)
 
 
 __all__ = [
+    "WrappedTextResult",
     "build_agent_lines",
+    "build_display_price",
     "build_property_facts_line",
     "build_property_overlay_facts_line",
     "build_status_ribbon_text",
     "clean_text",
     "escape_drawtext_text",
     "escape_filter_path",
+    "fit_wrapped_lines",
     "format_price",
     "wrap_lines",
 ]
-

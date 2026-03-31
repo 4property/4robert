@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from urllib.parse import urlparse
+from typing import Annotated
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-def _infer_legacy_site_id(default_link: str) -> str:
-    parsed = urlparse(default_link)
-    return parsed.netloc or "legacy-site"
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _parse_key_value_mapping(value: str | dict[str, str] | None) -> dict[str, str]:
@@ -29,6 +24,29 @@ def _parse_key_value_mapping(value: str | dict[str, str] | None) -> dict[str, st
         if site_id and mapped_value:
             site_mapping[site_id] = mapped_value
     return site_mapping
+
+
+def _parse_platforms(
+    value: str | list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if value is None:
+        return ()
+
+    raw_values: list[str] = []
+    if isinstance(value, str):
+        raw_values.extend(part.strip() for part in value.split(","))
+    else:
+        raw_values.extend(str(part).strip() for part in value)
+
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        normalized_value = raw_value.strip().lower()
+        if not normalized_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        normalized_values.append(normalized_value)
+    return tuple(normalized_values)
 
 
 class AppSettings(BaseSettings):
@@ -53,10 +71,6 @@ class AppSettings(BaseSettings):
         ge=1,
     )
 
-    legacy_site_id: str | None = Field(
-        None,
-        validation_alias="LEGACY_SITE_ID",
-    )
     webhook_host: str = Field(
         "0.0.0.0",
         validation_alias="WEBHOOK_HOST",
@@ -151,9 +165,12 @@ class AppSettings(BaseSettings):
         "2021-07-28",
         validation_alias="GO_HIGH_LEVEL_API_VERSION",
     )
-    social_publishing_default_platform: str = Field(
-        "tiktok",
-        validation_alias="SOCIAL_PUBLISHING_DEFAULT_PLATFORM",
+    social_publishing_default_platforms: Annotated[tuple[str, ...], NoDecode] = Field(
+        ("tiktok", "instagram", "linkedin", "youtube"),
+        validation_alias=AliasChoices(
+            "SOCIAL_PUBLISHING_DEFAULT_PLATFORMS",
+            "SOCIAL_PUBLISHING_DEFAULT_PLATFORM",
+        ),
     )
     social_publishing_enabled: bool = Field(
         True,
@@ -179,6 +196,20 @@ class AppSettings(BaseSettings):
     social_publishing_retry_backoff_seconds: float = Field(
         1.5,
         validation_alias="SOCIAL_PUBLISHING_RETRY_BACKOFF_SECONDS",
+        ge=0.0,
+    )
+    social_publishing_youtube_post_type: str = Field(
+        "post",
+        validation_alias="SOCIAL_PUBLISHING_YOUTUBE_POST_TYPE",
+    )
+    social_publishing_post_status_poll_attempts: int = Field(
+        10,
+        validation_alias="SOCIAL_PUBLISHING_POST_STATUS_POLL_ATTEMPTS",
+        ge=1,
+    )
+    social_publishing_post_status_poll_interval_seconds: float = Field(
+        3.0,
+        validation_alias="SOCIAL_PUBLISHING_POST_STATUS_POLL_INTERVAL_SECONDS",
         ge=0.0,
     )
     reel_total_duration_seconds: float = Field(
@@ -223,6 +254,22 @@ class AppSettings(BaseSettings):
         validation_alias="GEMINI_RETRY_ATTEMPTS",
         ge=1,
     )
+    review_workflow_enabled: bool = Field(
+        False,
+        validation_alias="REVIEW_WORKFLOW_ENABLED",
+    )
+    notifications_enabled: bool = Field(
+        False,
+        validation_alias="NOTIFICATIONS_ENABLED",
+    )
+    ai_copy_enabled: bool = Field(
+        False,
+        validation_alias="AI_COPY_ENABLED",
+    )
+    ai_narration_enabled: bool = Field(
+        False,
+        validation_alias="AI_NARRATION_ENABLED",
+    )
     log_level: str = Field(
         "INFO",
         validation_alias="LOG_LEVEL",
@@ -242,19 +289,30 @@ class AppSettings(BaseSettings):
             return _parse_key_value_mapping(value)
         return {}
 
+    @field_validator("social_publishing_default_platforms", mode="before")
+    @classmethod
+    def _validate_social_platforms(cls, value: object) -> tuple[str, ...]:
+        if value is None or isinstance(value, (str, list, tuple)):
+            return _parse_platforms(value)
+        return ()
+
     @model_validator(mode="after")
     def _apply_defaults(self) -> "AppSettings":
-        if not self.legacy_site_id:
-            self.legacy_site_id = _infer_legacy_site_id(self.wordpress_link)
-
         if not self.webhook_site_secrets:
-            self.webhook_site_secrets = {self.legacy_site_id: "change-me"}
+            self.webhook_site_secrets = {}
 
         if not self.log_level:
             self.log_level = "INFO"
 
         if self.social_publishing_property_url_tracking_params is None:
             self.social_publishing_property_url_tracking_params = {}
+
+        if not self.social_publishing_default_platforms:
+            self.social_publishing_default_platforms = ("tiktok",)
+
+        self.social_publishing_youtube_post_type = (
+            self.social_publishing_youtube_post_type.strip().lower() or "post"
+        )
 
         return self
 

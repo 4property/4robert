@@ -144,7 +144,7 @@ class PromptBuilderTests(unittest.TestCase):
         )
         self.assertEqual(len(property_context["property_features"]), 10)
 
-    def test_normalize_caption_removes_legacy_key_features_prefix(self) -> None:
+    def test_normalize_caption_removes_key_features_prefix(self) -> None:
         self.assertEqual(
             normalize_caption("Key features: Bright open-plan kitchen/dining area"),
             "Bright open-plan kitchen/dining area.",

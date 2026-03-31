@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from settings.app import APP_SETTINGS
 
-LEGACY_SITE_ID = APP_SETTINGS.legacy_site_id
 WEBHOOK_HOST = APP_SETTINGS.webhook_host
 WEBHOOK_PORT = APP_SETTINGS.webhook_port
 WEBHOOK_PATH = APP_SETTINGS.webhook_path
@@ -23,7 +22,6 @@ WEBHOOK_MAX_PAYLOAD_BYTES = APP_SETTINGS.webhook_max_payload_bytes
 WEBHOOK_SITE_SECRETS = dict(APP_SETTINGS.webhook_site_secrets)
 
 __all__ = [
-    "LEGACY_SITE_ID",
     "WEBHOOK_HOST",
     "WEBHOOK_DISABLE_SECURITY",
     "WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER",

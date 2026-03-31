@@ -1,0 +1,342 @@
+{
+  "site_id": "ckp.ie",
+  "property_id": 173259,
+  "slug": "149-leeson-street-upper-d04-vx52",
+  "title": "v2 149 Leeson Street Upper, D04 VX52",
+  "link": "https://ckp.ie/property/149-leeson-street-upper-d04-vx52/",
+  "property_status": "To Let",
+  "listing_lifecycle": "to_let",
+  "banner_text": "TO LET",
+  "featured_image_url": "https://www.brightlogic-estateagents.co.uk/KNAM/upload/3400-1.jpg",
+  "agent_photo_url": "https://ckp.ie/wp-content/uploads/2023/03/head-shot-jk-scaled.jpg",
+  "ber_rating": null,
+  "ber_icon_path": null,
+  "slide_image_paths": [
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\primary_image.jpg",
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\01_3400-4.jpg",
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\02_3400-3.jpg",
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\03_3400-7.jpg",
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\04_3400-9.jpg",
+    "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\05_3400-12.jpg"
+  ],
+  "slides": [
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\primary_image.jpg",
+      "caption": "Generous proportions with period features and high ceilings."
+    },
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\01_3400-4.jpg",
+      "caption": "Residence with benefit of an outdoor terrace area."
+    },
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\02_3400-3.jpg",
+      "caption": "Kitchen with high ceilings and outdoor terrace access."
+    },
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\03_3400-7.jpg",
+      "caption": "Generous proportions with high ceilings."
+    },
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\04_3400-9.jpg",
+      "caption": "Bathroom with freestanding bath and tiled floor."
+    },
+    {
+      "image_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\property_media\\ckp.ie\\149-leeson-street-upper-d04-vx52\\selected_photos\\05_3400-12.jpg",
+      "caption": "Separate entrance to residential accommodation with high ceilings."
+    }
+  ],
+  "cover_logo_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\generated_media\\ckp.ie\\_branding\\149-leeson-street-upper-d04-vx52-agency-logo-146cad361e59.png",
+  "background_audio_path": "C:\\Users\\4pm\\Desktop\\warp\\CPIHED\\assets\\ncs-music.mp3",
+  "estimated_duration_seconds": 33.0,
+  "configured_total_duration_seconds": 38.0,
+  "actual_total_duration_seconds": 33.0,
+  "duration_delta_seconds": -5.0,
+  "intro_duration_seconds": 3.0,
+  "seconds_per_slide": 5.0,
+  "slide_count": 6,
+  "fps": 24,
+  "resolution": [
+    1080,
+    1440
+  ],
+  "property_facts": "2 bed | 1 bath | Apartment | Dublin 4, Dublin, D04 VX52",
+  "agent_lines": [
+    "John Kennedy",
+    "01 288-3688",
+    "john@ckp.ie",
+    "Agency PSRA: 003493"
+  ],
+  "price": "\u20ac4,500 monthly",
+  "overlay_layout": {
+    "frame_width": 1080,
+    "frame_height": 1440,
+    "top_panel": {
+      "visible": true,
+      "x": 43,
+      "y": 43,
+      "width": 994,
+      "height": 243
+    },
+    "bottom_panel": {
+      "visible": true,
+      "x": 43,
+      "y": 1214,
+      "width": 994,
+      "height": 183
+    },
+    "agent_image_box": {
+      "visible": true,
+      "x": 69,
+      "y": 1244,
+      "width": 122,
+      "height": 122
+    },
+    "ber_badge_box": null,
+    "text_blocks": [
+      {
+        "block": "status",
+        "visible": true,
+        "text": "TO LET",
+        "lines": [
+          "TO LET"
+        ],
+        "font_size": 72,
+        "x": 69,
+        "y": 69,
+        "max_width": 942,
+        "line_gap": 86,
+        "box_height": 72,
+        "max_lines": 2,
+        "clamped": false
+      },
+      {
+        "block": "price",
+        "visible": true,
+        "text": "\u20ac4,500 monthly",
+        "lines": [
+          "\u20ac4,500 monthly"
+        ],
+        "font_size": 66,
+        "x": 69,
+        "y": 150,
+        "max_width": 942,
+        "line_gap": 79,
+        "box_height": 66,
+        "max_lines": 2,
+        "clamped": false
+      },
+      {
+        "block": "address",
+        "visible": true,
+        "text": "v2 149 Leeson Street Upper, D04 VX52",
+        "lines": [
+          "v2 149 Leeson Street Upper, D04 VX52"
+        ],
+        "font_size": 35,
+        "x": 69,
+        "y": 225,
+        "max_width": 942,
+        "line_gap": 43,
+        "box_height": 35,
+        "max_lines": 4,
+        "clamped": false
+      },
+      {
+        "block": "agent_name",
+        "visible": true,
+        "text": "John Kennedy",
+        "lines": [
+          "John Kennedy"
+        ],
+        "font_size": 35,
+        "x": 217,
+        "y": 1240,
+        "max_width": 794,
+        "line_gap": 43,
+        "box_height": 35,
+        "max_lines": 2,
+        "clamped": false
+      },
+      {
+        "block": "agent_phone",
+        "visible": true,
+        "text": "01 288-3688",
+        "lines": [
+          "01 288-3688"
+        ],
+        "font_size": 26,
+        "x": 217,
+        "y": 1281,
+        "max_width": 794,
+        "line_gap": 34,
+        "box_height": 26,
+        "max_lines": 2,
+        "clamped": false
+      },
+      {
+        "block": "agent_email",
+        "visible": true,
+        "text": "john@ckp.ie",
+        "lines": [
+          "john@ckp.ie"
+        ],
+        "font_size": 26,
+        "x": 217,
+        "y": 1313,
+        "max_width": 794,
+        "line_gap": 34,
+        "box_height": 26,
+        "max_lines": 2,
+        "clamped": false
+      },
+      {
+        "block": "agency_psra",
+        "visible": true,
+        "text": "Agency PSRA: 003493",
+        "lines": [
+          "Agency PSRA: 003493"
+        ],
+        "font_size": 26,
+        "x": 217,
+        "y": 1345,
+        "max_width": 794,
+        "line_gap": 34,
+        "box_height": 26,
+        "max_lines": 2,
+        "clamped": false
+      }
+    ],
+    "subtitle_segments": [
+      {
+        "block": "subtitle_caption",
+        "text": "Generous proportions with period features and high ceilings.",
+        "lines": [
+          "Generous proportions with",
+          "period features and high",
+          "ceilings."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1004,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 184,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 0.0,
+        "end_time": 3.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Generous proportions with period features and high ceilings.",
+        "lines": [
+          "Generous proportions with",
+          "period features and high",
+          "ceilings."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1004,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 184,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 3.0,
+        "end_time": 8.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Residence with benefit of an outdoor terrace area.",
+        "lines": [
+          "Residence with benefit of an",
+          "outdoor terrace area."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1069,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 119,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 8.0,
+        "end_time": 13.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Kitchen with high ceilings and outdoor terrace access.",
+        "lines": [
+          "Kitchen with high ceilings and",
+          "outdoor terrace access."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1069,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 119,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 13.0,
+        "end_time": 18.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Generous proportions with high ceilings.",
+        "lines": [
+          "Generous proportions with high",
+          "ceilings."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1069,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 119,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 18.0,
+        "end_time": 23.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Bathroom with freestanding bath and tiled floor.",
+        "lines": [
+          "Bathroom with freestanding",
+          "bath and tiled floor."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1069,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 119,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 23.0,
+        "end_time": 28.0
+      },
+      {
+        "block": "subtitle_caption",
+        "text": "Separate entrance to residential accommodation with high ceilings.",
+        "lines": [
+          "Separate entrance to",
+          "residential accommodation with",
+          "high ceilings."
+        ],
+        "font_size": 54,
+        "x": 69,
+        "y": 1004,
+        "max_width": 942,
+        "line_gap": 65,
+        "box_height": 184,
+        "max_lines": 3,
+        "clamped": false,
+        "start_time": 28.0,
+        "end_time": 33.0
+      }
+    ],
+    "warnings": []
+  }
+}

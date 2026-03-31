@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from config import GEMINI_SELECTION_AUDIT_FILENAME
@@ -19,9 +21,15 @@ from services.reel_rendering.models import (
     PropertyReelSlide,
     PropertyReelTemplate,
 )
-from services.webhook_transport.site_storage import safe_site_dirname
+from services.webhook_transport.site_storage import resolve_site_storage_layout, safe_site_dirname
 
 logger = logging.getLogger(__name__)
+_BRANDING_CACHE_DIRNAME = "_branding"
+_TRANSPARENT_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc`\x00"
+    b"\x00\x00\x02\x00\x01\xe5'\xd4\xa2\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 _VALID_BER_ICON_CODES = {
     "A1",
     "A2",
@@ -130,26 +138,81 @@ def download_primary_image(primary_image_url: str, destination: Path) -> Path:
     return download_remote_image(primary_image_url, destination)
 
 
+def prepare_cover_logo_image(
+    workspace_dir: Path,
+    property_data: PropertyRenderData,
+    settings: PropertyReelTemplate,
+) -> Path | None:
+    if not settings.include_intro:
+        return None
+
+    agency_logo_url = str(property_data.agency_logo_url or "").strip()
+    if not agency_logo_url:
+        return None
+    if _has_explicit_unsupported_image_suffix(agency_logo_url):
+        logger.warning(
+            "Skipping agency logo %r for property %s (%s) because the file extension is not supported.",
+            agency_logo_url,
+            property_data.property_id,
+            property_data.slug,
+        )
+        return None
+
+    destination = _resolve_cached_branding_destination(
+        workspace_dir=workspace_dir,
+        site_id=property_data.site_id,
+        slug=property_data.slug,
+        image_url=agency_logo_url,
+        label="agency-logo",
+    )
+    if destination.exists() and destination.stat().st_size > 0:
+        return destination
+
+    try:
+        return download_remote_image(agency_logo_url, destination)
+    except Exception as error:
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            pass
+        logger.warning(
+            "Failed to download agency logo %r for property %s (%s). Continuing without intro logo. Error: %s",
+            agency_logo_url,
+            property_data.property_id,
+            property_data.slug,
+            error,
+        )
+        return None
+
+
 def prepare_agent_image(
     workspace_dir: Path,
     property_data: PropertyRenderData,
     settings: PropertyReelTemplate,
     temp_dir: Path,
 ) -> Path:
-    fallback_logo_path = resolve_asset_path(
-        workspace_dir,
-        settings,
-        settings.cover_logo_filename,
-    )
     if not property_data.agent_photo_url:
-        return fallback_logo_path
+        agency_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+        if agency_logo_path is not None:
+            return agency_logo_path
+        return _write_transparent_placeholder(temp_dir / "agent_placeholder.png")
 
     suffix = Path(property_data.agent_photo_url).suffix or ".jpg"
     destination = temp_dir / f"agent_photo{suffix.lower()}"
     try:
         return download_remote_image(property_data.agent_photo_url, destination)
-    except Exception:
-        return fallback_logo_path
+    except Exception as error:
+        logger.warning(
+            "Failed to download agent photo %r for property %s (%s). Continuing with fallback image. Error: %s",
+            property_data.agent_photo_url,
+            property_data.property_id,
+            property_data.slug,
+            error,
+        )
+        agency_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+        if agency_logo_path is not None:
+            return agency_logo_path
+        return _write_transparent_placeholder(temp_dir / "agent_placeholder.png")
 
 
 def sorted_image_paths(folder: Path) -> list[Path]:
@@ -354,7 +417,11 @@ def resolve_reel_output_path(
     settings: PropertyReelTemplate,
     output_path: str | Path | None,
 ) -> Path:
-    output_dir = workspace_dir / settings.output_dirname / safe_site_dirname(property_data.site_id)
+    del settings
+    output_dir = resolve_site_storage_layout(
+        workspace_dir,
+        property_data.site_id,
+    ).generated_reels_root
     output_dir.mkdir(parents=True, exist_ok=True)
     final_output_path = (
         Path(output_path).expanduser().resolve()
@@ -372,10 +439,12 @@ def resolve_manifest_output_path(
     settings: PropertyReelTemplate,
     output_path: str | Path | None,
 ) -> Path:
+    del settings
+    storage_paths = resolve_site_storage_layout(workspace_dir, site_id)
     manifest_path = (
         Path(output_path).expanduser().resolve()
         if output_path is not None
-        else workspace_dir / settings.output_dirname / safe_site_dirname(site_id) / f"{slug}-reel.json"
+        else storage_paths.generated_reels_root / f"{slug}-reel.json"
     )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     return manifest_path
@@ -391,6 +460,46 @@ def compute_slide_timing(
     return slide_frames, slide_duration, total_duration
 
 
+def _resolve_cached_branding_destination(
+    *,
+    workspace_dir: Path,
+    site_id: str,
+    slug: str,
+    image_url: str,
+    label: str,
+) -> Path:
+    branding_dir = (
+        workspace_dir
+        / "generated_media"
+        / safe_site_dirname(site_id)
+        / _BRANDING_CACHE_DIRNAME
+    )
+    branding_dir.mkdir(parents=True, exist_ok=True)
+    suffix = _resolve_remote_image_suffix(image_url)
+    image_hash = hashlib.sha1(image_url.encode("utf-8")).hexdigest()[:12]
+    return branding_dir / f"{slug}-{label}-{image_hash}{suffix}"
+
+
+def _resolve_remote_image_suffix(image_url: str) -> str:
+    parsed_path = urlparse(image_url).path
+    suffix = Path(parsed_path).suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        return suffix
+    return ".png"
+
+
+def _has_explicit_unsupported_image_suffix(image_url: str) -> bool:
+    parsed_path = urlparse(image_url).path
+    suffix = Path(parsed_path).suffix.lower()
+    return bool(suffix) and suffix not in IMAGE_EXTENSIONS
+
+
+def _write_transparent_placeholder(destination: Path) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(_TRANSPARENT_PNG_BYTES)
+    return destination
+
+
 def compute_audio_fade(total_duration: float) -> tuple[float, float]:
     audio_fade_duration = min(1.5, total_duration)
     audio_fade_start = max(total_duration - audio_fade_duration, 0.0)
@@ -404,6 +513,7 @@ __all__ = [
     "download_primary_image",
     "download_remote_image",
     "normalize_ber_icon_code",
+    "prepare_cover_logo_image",
     "prepare_agent_image",
     "resolve_ber_icon_path",
     "resolve_asset_path",

@@ -15,8 +15,7 @@ from application.interfaces import JobDispatcher
 from application.types import SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
-    LEGACY_SITE_ID,
-    SOCIAL_PUBLISHING_DEFAULT_PLATFORM,
+    SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
     WEBHOOK_DISABLE_SECURITY,
     WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER,
     WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER,
@@ -327,7 +326,7 @@ def create_fastapi_app(
                     provider="gohighlevel",
                     location_id=location_id,
                     access_token=access_token,
-                    platform=SOCIAL_PUBLISHING_DEFAULT_PLATFORM,
+                    platforms=tuple(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
                 ),
             )
         except RuntimeError:
@@ -471,9 +470,6 @@ def _resolve_site_id(payload: dict[str, Any]) -> str | None:
         parsed = urlparse(candidate)
         if parsed.netloc:
             return parsed.netloc.strip().lower()
-
-    if LEGACY_SITE_ID and LEGACY_SITE_ID.strip():
-        return LEGACY_SITE_ID.strip().lower()
 
     return None
 
