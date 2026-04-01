@@ -6,11 +6,11 @@ __pycache__/
 
 # Virtual environments and local env files
 .venv/
-venv/
-env/
-ENV/
-.env
-.env.*
+/venv/
+/env/
+/ENV/
+/.env
+/.env.*
 !.env.example
 
 # Editor and OS files
@@ -25,11 +25,11 @@ Thumbs.db
 .ruff_cache/
 .coverage
 htmlcov/
-.runtime_locks/
-.tmp_test/
-.tmp_test_cases/
-.tmp_test_manual/
-tmp_*/
+/.runtime_locks/
+/.tmp_test/
+/.tmp_test_cases/
+/.tmp_test_manual/
+/tmp_*/
 
 # Local databases and journals
 *.db
@@ -38,16 +38,16 @@ tmp_*/
 *.sqlite3-journal
 *.sqlite3-shm
 *.sqlite3-wal
-db.sqlite3
+/db.sqlite3
 
 # Generated runtime media and manifests
-property_media/
-property_media_raw/
-generated_media/
-generated_reels/
-wordpress_properties/
-wordpress_properties_raw/
-artifacts/
+/property_media/
+/property_media_raw/
+/generated_media/
+/generated_reels/
+/wordpress_properties/
+/wordpress_properties_raw/
+/artifacts/
 
 # Local logs and runtime leftovers
 *.log
