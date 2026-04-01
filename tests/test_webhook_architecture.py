@@ -51,7 +51,10 @@ SIMULATOR_ROOT = Path(__file__).resolve().parents[2] / "wordpress-webhook-simula
 if str(SIMULATOR_ROOT) not in sys.path:
     sys.path.insert(0, str(SIMULATOR_ROOT))
 
-import send_webhook  # type: ignore[import-not-found]
+try:
+    import send_webhook  # type: ignore[import-not-found]
+except ModuleNotFoundError:
+    send_webhook = None
 
 TEST_TEMP_ROOT = APPLICATION_ROOT / ".tmp_test_cases"
 TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1997,6 +2000,7 @@ class ReelManifestTests(unittest.TestCase):
         self.assertEqual(manifest["price"], None)
 
 
+@unittest.skipUnless(send_webhook is not None, "wordpress-webhook-simulator is not available")
 class SimulatorContractTests(unittest.TestCase):
     def test_send_payload_includes_gohighlevel_headers_and_matching_signature(self) -> None:
         captured_request: dict[str, object] = {}
