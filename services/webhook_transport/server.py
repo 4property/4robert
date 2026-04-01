@@ -35,6 +35,7 @@ from config import (
 from core.errors import DependencyNotInstalledError
 from core.logging import format_console_block, format_detail_line
 from services.webhook_transport.operations import build_readiness_report, run_startup_checks
+from services.webhook_transport.uvicorn_protocols import VerboseAutoHTTPProtocol
 from services.webhook_transport.security import build_raw_payload_hash, is_signature_valid, is_timestamp_fresh
 
 logger = logging.getLogger(__name__)
@@ -503,6 +504,7 @@ def run_wordpress_webhook_server(
         server.app,
         host=host,
         port=port,
+        http=VerboseAutoHTTPProtocol,
         log_level=logging.getLevelName(logger.getEffectiveLevel()).lower(),
         access_log=False,
         log_config=None,

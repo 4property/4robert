@@ -43,6 +43,11 @@ from services.reel_rendering.models import PropertyRenderData, PropertyReelSlide
 from services.reel_rendering.render import build_reel_template_for_render_profile
 from services.reel_rendering.runtime import prepare_cover_logo_image, resolve_ber_icon_path, resolve_font_path
 from services.webhook_transport.operations import build_readiness_report
+from services.webhook_transport.uvicorn_protocols import (
+    build_invalid_http_request_preview,
+    format_invalid_http_request_warning,
+    infer_invalid_http_request_hint,
+)
 from services.webhook_transport.security import build_signature
 from services.webhook_transport.server import WordPressWebhookApplication, create_fastapi_app
 from services.webhook_transport.site_storage import resolve_site_storage_layout
@@ -930,6 +935,32 @@ class WebhookTransportTests(unittest.TestCase):
             response.json()["error"],
             "Webhook payload array must contain exactly one JSON object.",
         )
+
+
+class InvalidHttpRequestLoggingTests(unittest.TestCase):
+    def test_tls_handshake_hint_is_descriptive(self) -> None:
+        hint = infer_invalid_http_request_hint(b"\x16\x03\x01\x02\x00\x01\x00")
+
+        self.assertIn("TLS handshake", hint)
+
+    def test_http_preview_keeps_text_readable(self) -> None:
+        preview = build_invalid_http_request_preview(b"GET /bad HTTP/1.1\r\nHost: example.com\r\n")
+
+        self.assertIn("GET /bad HTTP/1.1", preview)
+        self.assertIn("\\r\\n", preview)
+
+    def test_invalid_http_request_warning_includes_client_and_hint(self) -> None:
+        warning = format_invalid_http_request_warning(
+            client=("10.0.0.5", 43122),
+            data=b"\x16\x03\x01\x02\x00",
+            parser_name="httptools",
+            error=ValueError("bad framing"),
+        )
+
+        self.assertIn("INVALID HTTP REQUEST RECEIVED", warning)
+        self.assertIn("10.0.0.5:43122", warning)
+        self.assertIn("httptools", warning)
+        self.assertIn("TLS handshake", warning)
 
 
 class SqliteJobDispatcherTests(unittest.TestCase):
