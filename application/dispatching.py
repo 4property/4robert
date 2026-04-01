@@ -259,6 +259,8 @@ class SqliteJobDispatcher:
         error_message = str(error_details.get("message") or error)
         error_stage = str(error_details.get("stage") or "")
         error_code = str(error_details.get("code") or "")
+        error_hint = str(error_details.get("hint") or "")
+        external_trace_id = str(error_details.get("external_trace_id") or "")
         error_context = (
             error_details.get("context")
             if isinstance(error_details.get("context"), dict)
@@ -293,6 +295,8 @@ class SqliteJobDispatcher:
                     format_detail_line("Retry at", retry_available_at),
                     format_detail_line("Error stage", error_stage or "<none>"),
                     format_detail_line("Error code", error_code or "<none>"),
+                    format_detail_line("Hint", error_hint or "<none>"),
+                    format_detail_line("External trace", external_trace_id or "<none>"),
                     format_detail_line("Reason", error_message),
                     format_context_line(error_context),
                 )
@@ -319,6 +323,8 @@ class SqliteJobDispatcher:
                 format_detail_line("Property ID", claimed_job.property_id),
                 format_detail_line("Error stage", error_stage or "<none>"),
                 format_detail_line("Error code", error_code or "<none>"),
+                format_detail_line("Hint", error_hint or "<none>"),
+                format_detail_line("External trace", external_trace_id or "<none>"),
                 format_context_line(error_context),
             ),
             exc_info=error,

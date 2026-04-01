@@ -20,7 +20,7 @@ from config import (
     DATABASE_FILENAME,
     GO_HIGH_LEVEL_API_VERSION,
     GO_HIGH_LEVEL_BASE_URL,
-    REQUEST_TIMEOUT_SECONDS,
+    OUTBOUND_HTTP_TIMEOUT_SECONDS,
     SOCIAL_PUBLISHING_ENABLED,
     SOCIAL_PUBLISHING_LOCAL_ONLY,
     SOCIAL_PUBLISHING_POST_STATUS_POLL_ATTEMPTS,
@@ -50,7 +50,7 @@ def build_default_social_property_publisher() -> GoHighLevelPropertyPublisher:
     client = GoHighLevelClient(
         base_url=GO_HIGH_LEVEL_BASE_URL,
         api_version=GO_HIGH_LEVEL_API_VERSION,
-        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+        timeout_seconds=OUTBOUND_HTTP_TIMEOUT_SECONDS,
     )
     publisher = GoHighLevelPublisher(
         media_service=GoHighLevelMediaService(client=client),

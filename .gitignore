@@ -10,6 +10,8 @@ venv/
 env/
 ENV/
 .env
+.env.*
+!.env.example
 
 # Editor and OS files
 .vscode/
@@ -36,13 +38,19 @@ tmp_*/
 *.sqlite3-journal
 *.sqlite3-shm
 *.sqlite3-wal
+db.sqlite3
 
 # Generated runtime media and manifests
 property_media/
 property_media_raw/
+generated_media/
 generated_reels/
 wordpress_properties/
 wordpress_properties_raw/
+artifacts/
 
 # Local logs and runtime leftovers
 *.log
+*.tmp
+*.bak
+*.orig

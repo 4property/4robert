@@ -649,6 +649,9 @@ class WorkflowPersistenceTests(unittest.TestCase):
 
     def test_readiness_report_exposes_optional_capabilities_without_blocking_core(self) -> None:
         with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets" / "music"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
             with patch(
                 "services.webhook_transport.operations.resolve_ffmpeg_binary",
                 return_value=workspace_dir / "ffmpeg.exe",
@@ -662,8 +665,10 @@ class WorkflowPersistenceTests(unittest.TestCase):
 
         self.assertEqual(readiness["ready"], readiness["capabilities"]["core"]["ready"])
         self.assertTrue(readiness["ready"])
+        self.assertTrue(readiness["checks"]["background_audio_available"])
         self.assertIn("ai_photo_selection", readiness["capabilities"])
         self.assertIsInstance(readiness["capabilities"]["ai_photo_selection"]["ready"], bool)
+        self.assertGreaterEqual(len(readiness["warnings"]), 1)
 
 
 class MediaPlanningTests(unittest.TestCase):
@@ -823,6 +828,8 @@ class WebhookTransportTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "MISSING_GHL_HEADERS")
+        self.assertIn("hint", response.json())
 
     def test_tampering_with_location_id_breaks_signature_validation(self) -> None:
         payload = build_sample_payload()
@@ -1792,7 +1799,9 @@ class ReelManifestTests(unittest.TestCase):
             assets_dir = workspace_dir / "assets"
             assets_dir.mkdir(parents=True, exist_ok=True)
             (assets_dir / "ckp-logo.png").write_bytes(b"logo")
-            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            music_dir = assets_dir / "music"
+            music_dir.mkdir(parents=True, exist_ok=True)
+            (music_dir / "ncs-music.mp3").write_bytes(b"audio")
             ber_icons_dir = assets_dir / "ber-icons"
             ber_icons_dir.mkdir(parents=True, exist_ok=True)
             (ber_icons_dir / "B2.png").write_bytes(b"png")
@@ -1882,7 +1891,9 @@ class ReelManifestTests(unittest.TestCase):
         with workspace_temp_dir() as workspace_dir:
             assets_dir = workspace_dir / "assets"
             assets_dir.mkdir(parents=True, exist_ok=True)
-            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            music_dir = assets_dir / "music"
+            music_dir.mkdir(parents=True, exist_ok=True)
+            (music_dir / "ncs-music.mp3").write_bytes(b"audio")
             ber_icons_dir = assets_dir / "ber-icons"
             ber_icons_dir.mkdir(parents=True, exist_ok=True)
             (ber_icons_dir / "B2.png").write_bytes(b"png")
@@ -1933,7 +1944,9 @@ class ReelManifestTests(unittest.TestCase):
         with workspace_temp_dir() as workspace_dir:
             assets_dir = workspace_dir / "assets"
             assets_dir.mkdir(parents=True, exist_ok=True)
-            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            music_dir = assets_dir / "music"
+            music_dir.mkdir(parents=True, exist_ok=True)
+            (music_dir / "ncs-music.mp3").write_bytes(b"audio")
             ber_icons_dir = assets_dir / "ber-icons"
             ber_icons_dir.mkdir(parents=True, exist_ok=True)
             (ber_icons_dir / "B2.png").write_bytes(b"png")

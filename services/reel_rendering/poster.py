@@ -117,9 +117,29 @@ def generate_property_poster_from_data(
 
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
-        raise PropertyReelError(f"ffmpeg failed to render the property poster.\n{stderr}")
+        raise PropertyReelError(
+            f"ffmpeg failed to render the property poster.\n{stderr}",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(final_output_path),
+                "ffmpeg_binary": ffmpeg_binary,
+            },
+            hint=_build_ffmpeg_failure_hint(stderr),
+        )
     if not final_output_path.exists() or final_output_path.stat().st_size == 0:
-        raise PropertyReelError("The poster output file was not created.")
+        raise PropertyReelError(
+            "The poster output file was not created.",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(final_output_path),
+            },
+            hint=(
+                "Check the ffmpeg stderr above and verify the service user can write to the poster "
+                "output directory on the deployed host."
+            ),
+        )
 
     return final_output_path
 
@@ -195,6 +215,17 @@ def _resolve_poster_photo_frame(settings: PropertyReelTemplate) -> tuple[int, in
         max(320, settings.width - horizontal_margin),
         max(480, settings.height - vertical_margin),
     )
+
+
+def _build_ffmpeg_failure_hint(stderr: str) -> str:
+    normalized_stderr = stderr.lower()
+    if "cannot allocate memory" in normalized_stderr:
+        return "The host ran out of memory while ffmpeg was rendering the poster."
+    if "permission denied" in normalized_stderr:
+        return "ffmpeg hit a filesystem permission error while writing or reading poster assets."
+    if "no such file or directory" in normalized_stderr:
+        return "ffmpeg could not read one of the poster inputs. Verify the selected photo and optional overlay assets exist."
+    return "Inspect the ffmpeg stderr above and verify poster inputs and output permissions on the deployed host."
 
 
 __all__ = ["generate_property_poster_from_data"]

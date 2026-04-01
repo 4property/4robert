@@ -36,6 +36,20 @@ It ingests WordPress property payloads, prepares images, renders short-form reel
 python main.py
 ```
 
+## Preflight checks
+
+Run the deployment checks before starting the service:
+
+```powershell
+python main.py --check
+```
+
+If you need the machine-readable readiness payload for automation:
+
+```powershell
+python main.py --check --readiness-json
+```
+
 ## Test
 
 ```powershell
@@ -57,3 +71,4 @@ Generated at runtime and ignored by Git:
 - The webhook runtime is ready when core storage, queue, and ffmpeg checks pass.
 - Optional capabilities such as AI copy, AI narration, notifications, and review can stay disabled without blocking the core webhook workflow.
 - Captions are generated through a dedicated content-generation boundary so deterministic copy can be replaced later by an AI-backed implementation.
+- Deployment guidance for Rocky Linux, including `systemd`, lives in `deploy/rocky-linux/README.md`.

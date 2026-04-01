@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, ValidationError as PydanticValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from core.errors import ApplicationError
 
 
 def _parse_key_value_mapping(value: str | dict[str, str] | None) -> dict[str, str]:
@@ -56,18 +59,9 @@ class AppSettings(BaseSettings):
         extra="ignore",
     )
 
-    wordpress_link: str = Field(
-        "https://example-estate.ie/wp-json/wp/v2/property",
-        validation_alias="WORDPRESS_LINK",
-    )
-    wordpress_per_page: int = Field(
-        100,
-        validation_alias="WORDPRESS_PER_PAGE",
-        ge=1,
-    )
-    request_timeout_seconds: int = Field(
+    outbound_http_timeout_seconds: int = Field(
         30,
-        validation_alias="REQUEST_TIMEOUT_SECONDS",
+        validation_alias="OUTBOUND_HTTP_TIMEOUT_SECONDS",
         ge=1,
     )
 
@@ -236,6 +230,16 @@ class AppSettings(BaseSettings):
         validation_alias="REEL_SUBTITLE_FONT_SIZE",
         ge=1,
     )
+    reel_ffmpeg_filter_threads: int = Field(
+        1,
+        validation_alias="REEL_FFMPEG_FILTER_THREADS",
+        ge=0,
+    )
+    reel_ffmpeg_encoder_threads: int = Field(
+        2,
+        validation_alias="REEL_FFMPEG_ENCODER_THREADS",
+        ge=0,
+    )
     gemini_api_key: str = Field(
         "",
         validation_alias=AliasChoices("GEMINI_API_KEY", "GEMINI_KEY"),
@@ -296,6 +300,24 @@ class AppSettings(BaseSettings):
             return _parse_platforms(value)
         return ()
 
+    @field_validator("webhook_path")
+    @classmethod
+    def _validate_webhook_path(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("WEBHOOK_PATH cannot be empty.")
+        if not normalized_value.startswith("/"):
+            raise ValueError("WEBHOOK_PATH must start with '/'.")
+        return normalized_value
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        normalized_value = value.strip().upper()
+        if not normalized_value:
+            return "INFO"
+        return normalized_value
+
     @model_validator(mode="after")
     def _apply_defaults(self) -> "AppSettings":
         if not self.webhook_site_secrets:
@@ -319,7 +341,29 @@ class AppSettings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_app_settings() -> AppSettings:
-    return AppSettings()
+    try:
+        return AppSettings()
+    except PydanticValidationError as exc:
+        env_file_path = Path(".env").resolve()
+        issues: list[str] = []
+        context: dict[str, object] = {
+            "env_file": str(env_file_path),
+            "issue_count": len(exc.errors()),
+        }
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg") or "Invalid value")
+            rendered_issue = f"{location}: {message}" if location else message
+            issues.append(rendered_issue)
+        raise ApplicationError(
+            "Invalid runtime configuration. " + "; ".join(issues),
+            context=context,
+            hint=(
+                "Review the values in .env against .env.example. On Rocky Linux, validate the "
+                "environment first with `python main.py --check` before starting the systemd service."
+            ),
+            cause=exc,
+        ) from exc
 
 
 APP_SETTINGS = get_app_settings()

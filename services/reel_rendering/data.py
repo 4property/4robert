@@ -71,12 +71,25 @@ def load_property_reel_data(
         )
 
     if record is None:
-        raise PropertyReelError("No property record found for reel generation.")
+        raise PropertyReelError(
+            "No property record found for reel generation.",
+            context={
+                "site_id": site_id,
+                "property_id": property_id if property_id is not None else "",
+                "slug": slug or "",
+            },
+            hint="Ensure the property was ingested into SQLite before attempting a standalone render.",
+        )
 
     property_data = record_to_property_reel_data(workspace_dir, record)
     if not property_data.selected_image_dir.exists():
         raise ResourceNotFoundError(
-            f"Selected photos folder not found: {property_data.selected_image_dir}"
+            "Selected photos folder not found for reel generation.",
+            context={"selected_image_dir": str(property_data.selected_image_dir)},
+            hint=(
+                "Run media preparation again or verify the property_media volume is persisted and mounted "
+                "correctly in the deployed environment."
+            ),
         )
     return property_data
 

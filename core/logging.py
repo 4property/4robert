@@ -291,6 +291,8 @@ class LoggedProcess:
             format_detail_line("Error code", error_details.get("code")),
             format_detail_line("Retryable", "Yes" if error_details.get("retryable") else "No"),
             format_detail_line("External trace", error_details.get("external_trace_id")),
+            format_detail_line("Hint", error_details.get("hint")),
+            format_detail_line("Cause", error_details.get("cause")),
             format_context_line(error_details.get("context") if isinstance(error_details.get("context"), dict) else None),
         ]
         self.logger.error(

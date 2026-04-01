@@ -24,9 +24,20 @@ class GoHighLevelMediaService:
     ) -> UploadedMedia:
         resolved_path = Path(media_path).expanduser().resolve()
         if not resolved_path.exists():
-            raise ResourceNotFoundError(f"Media file does not exist: {resolved_path}")
+            raise ResourceNotFoundError(
+                "The media file to upload was not found.",
+                context={"media_path": str(resolved_path)},
+                hint=(
+                    "Verify the render completed successfully and that the deployed service can read the "
+                    "generated_media directory."
+                ),
+            )
         if not resolved_path.is_file():
-            raise ValidationError(f"Media path is not a file: {resolved_path}")
+            raise ValidationError(
+                "The media upload path is not a file.",
+                context={"media_path": str(resolved_path)},
+                hint="Check the configured artifact path and ensure it points to a regular file.",
+            )
 
         mime_type = mimetypes.guess_type(resolved_path.name)[0] or "application/octet-stream"
         self._validate_media_file(resolved_path, mime_type=mime_type)
@@ -52,9 +63,15 @@ class GoHighLevelMediaService:
         file_id = payload.get("fileId")
         url = payload.get("url")
         if not isinstance(file_id, str) or not file_id.strip():
-            raise SocialPublishingError("GoHighLevel media upload succeeded without a fileId.")
+            raise SocialPublishingError(
+                "GoHighLevel media upload succeeded without a fileId.",
+                hint="Inspect the raw API response and verify the media upload endpoint still returns fileId.",
+            )
         if not isinstance(url, str) or not url.strip():
-            raise SocialPublishingError("GoHighLevel media upload succeeded without a media URL.")
+            raise SocialPublishingError(
+                "GoHighLevel media upload succeeded without a media URL.",
+                hint="Inspect the raw API response and verify the media upload endpoint still returns url.",
+            )
 
         return UploadedMedia(
             file_id=file_id.strip(),
@@ -100,18 +117,26 @@ class GoHighLevelMediaService:
     def _validate_media_file(resolved_path: Path, *, mime_type: str) -> None:
         file_size = resolved_path.stat().st_size
         if file_size <= 0:
-            raise ValidationError(f"Media file is empty: {resolved_path}")
+            raise ValidationError(
+                "The media file is empty.",
+                context={"media_path": str(resolved_path)},
+                hint="Check the render logs and confirm ffmpeg produced a non-empty output file.",
+            )
 
         if mime_type.startswith("video/"):
             if file_size > MAX_GHL_VIDEO_UPLOAD_BYTES:
                 raise ValidationError(
-                    f"Video file exceeds the GoHighLevel upload limit of {MAX_GHL_VIDEO_UPLOAD_BYTES} bytes."
+                    f"Video file exceeds the GoHighLevel upload limit of {MAX_GHL_VIDEO_UPLOAD_BYTES} bytes.",
+                    context={"media_path": str(resolved_path), "file_size_bytes": file_size},
+                    hint="Lower the render bitrate or duration before retrying the social publish.",
                 )
             return
 
         if file_size > MAX_GHL_GENERAL_UPLOAD_BYTES:
             raise ValidationError(
-                f"Media file exceeds the GoHighLevel upload limit of {MAX_GHL_GENERAL_UPLOAD_BYTES} bytes."
+                f"Media file exceeds the GoHighLevel upload limit of {MAX_GHL_GENERAL_UPLOAD_BYTES} bytes.",
+                context={"media_path": str(resolved_path), "file_size_bytes": file_size},
+                hint="Reduce the media size before retrying the social publish.",
             )
 
 

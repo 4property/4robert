@@ -19,6 +19,32 @@ def _normalise_error_context(context: Mapping[str, object] | None) -> dict[str, 
 class ApplicationError(RuntimeError):
     """Base class for application-level runtime failures."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: Mapping[str, object] | None = None,
+        hint: str | None = None,
+        cause: object | None = None,
+    ) -> None:
+        self.context = _normalise_error_context(context)
+        self.hint = str(hint).strip() if hint not in (None, "") else None
+        self.cause = cause
+        super().__init__(message)
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "message": str(self),
+            "type": self.__class__.__name__,
+        }
+        if self.context:
+            payload["context"] = dict(self.context)
+        if self.hint:
+            payload["hint"] = self.hint
+        if self.cause not in (None, ""):
+            payload["cause"] = str(self.cause)
+        return payload
+
 
 class PipelineError(ApplicationError):
     """Runtime failure with structured pipeline metadata."""
@@ -31,6 +57,7 @@ class PipelineError(ApplicationError):
         code: str = "PIPELINE_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -41,23 +68,24 @@ class PipelineError(ApplicationError):
         self.external_trace_id = (
             str(external_trace_id).strip() if external_trace_id not in (None, "") else None
         )
-        self.cause = cause
-        super().__init__(message)
+        super().__init__(
+            message,
+            context=context,
+            hint=hint,
+            cause=cause,
+        )
 
     def to_dict(self) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "message": str(self),
-            "type": self.__class__.__name__,
+        payload = super().to_dict()
+        payload.update(
+            {
             "stage": self.stage,
             "code": self.code,
             "retryable": self.retryable,
-        }
-        if self.context:
-            payload["context"] = dict(self.context)
+            }
+        )
         if self.external_trace_id:
             payload["external_trace_id"] = self.external_trace_id
-        if self.cause not in (None, ""):
-            payload["cause"] = str(self.cause)
         return payload
 
 
@@ -72,6 +100,7 @@ class ValidationError(PipelineError):
         code: str = "VALIDATION_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -81,6 +110,7 @@ class ValidationError(PipelineError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -97,6 +127,7 @@ class ResourceNotFoundError(PipelineError):
         code: str = "RESOURCE_NOT_FOUND",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -106,6 +137,7 @@ class ResourceNotFoundError(PipelineError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -122,6 +154,7 @@ class PhotoFilteringError(PipelineError):
         code: str = "PHOTO_FILTERING_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -131,6 +164,7 @@ class PhotoFilteringError(PipelineError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -147,6 +181,7 @@ class PropertyReelError(PipelineError):
         code: str = "PROPERTY_REEL_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -156,6 +191,7 @@ class PropertyReelError(PipelineError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -172,6 +208,7 @@ class SocialPublishingError(PipelineError):
         code: str = "SOCIAL_PUBLISHING_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -181,6 +218,7 @@ class SocialPublishingError(PipelineError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -198,6 +236,7 @@ class SocialPublishingResultError(SocialPublishingError):
         code: str = "SOCIAL_PUBLISHING_RESULT_ERROR",
         retryable: bool = False,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -208,6 +247,7 @@ class SocialPublishingResultError(SocialPublishingError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -224,6 +264,7 @@ class TransientSocialPublishingError(SocialPublishingError):
         code: str = "TRANSIENT_SOCIAL_PUBLISHING_ERROR",
         retryable: bool = True,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -233,6 +274,7 @@ class TransientSocialPublishingError(SocialPublishingError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -250,6 +292,7 @@ class TransientSocialPublishingResultError(TransientSocialPublishingError):
         code: str = "TRANSIENT_SOCIAL_PUBLISHING_RESULT_ERROR",
         retryable: bool = True,
         context: Mapping[str, object] | None = None,
+        hint: str | None = None,
         external_trace_id: str | None = None,
         cause: object | None = None,
     ) -> None:
@@ -260,6 +303,7 @@ class TransientSocialPublishingResultError(TransientSocialPublishingError):
             code=code,
             retryable=retryable,
             context=context,
+            hint=hint,
             external_trace_id=external_trace_id,
             cause=cause,
         )
@@ -291,11 +335,12 @@ class DependencyNotInstalledError(PipelineError):
             code="DEPENDENCY_NOT_INSTALLED",
             retryable=False,
             context={"module_name": self.module_name, "feature": self.feature or ""},
+            hint="Activate the project virtual environment and reinstall the runtime dependencies.",
         )
 
 
 def extract_error_details(error: object) -> dict[str, Any]:
-    if isinstance(error, PipelineError):
+    if isinstance(error, ApplicationError):
         return error.to_dict()
     return {
         "message": str(error),

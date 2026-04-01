@@ -9,6 +9,8 @@ from settings.reels import (
     REEL_BACKGROUND_AUDIO_FILENAME,
     REEL_BER_ICONS_DIRNAME,
     REEL_COVER_LOGO_FILENAME,
+    REEL_FFMPEG_ENCODER_THREADS,
+    REEL_FFMPEG_FILTER_THREADS,
     REEL_FPS,
     REEL_HEIGHT,
     REEL_INTRO_DURATION_SECONDS,
@@ -39,6 +41,8 @@ class PropertyReelTemplate:
     cover_logo_filename: str = REEL_COVER_LOGO_FILENAME
     background_audio_filename: str = REEL_BACKGROUND_AUDIO_FILENAME
     audio_volume: float = REEL_AUDIO_VOLUME
+    ffmpeg_filter_threads: int = REEL_FFMPEG_FILTER_THREADS
+    ffmpeg_encoder_threads: int = REEL_FFMPEG_ENCODER_THREADS
     font_path: Path = DEFAULT_REEL_FONT_PATH
     bold_font_path: Path = DEFAULT_REEL_FONT_BOLD_PATH
     subtitle_font_path: Path = REEL_SUBTITLE_FONT_PATH

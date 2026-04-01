@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -14,16 +15,19 @@ from config import (
     NOTIFICATIONS_ENABLED,
     PROPERTY_MEDIA_RAW_ROOT_DIRNAME,
     PROPERTY_MEDIA_ROOT_DIRNAME,
+    REEL_BACKGROUND_AUDIO_FILENAME,
+    REEL_SUBTITLE_FONT_PATH,
     REVIEW_WORKFLOW_ENABLED,
 )
-from core.logging import format_console_block, format_detail_line
 from core.errors import ApplicationError
+from core.logging import format_console_block, format_detail_line
 from repositories.media_revision_repository import MediaRevisionRepository
 from repositories.outbox_event_repository import OutboxEventRepository
 from repositories.property_job_repository import PropertyJobRepository
-from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
-from services.reel_rendering.runtime import resolve_ffmpeg_binary
+from repositories.webhook_delivery_repository import WebhookDeliveryRepository
+from services.reel_rendering.models import PropertyReelTemplate
+from services.reel_rendering.runtime import resolve_asset_path, resolve_ffmpeg_binary, resolve_font_path
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,11 @@ def cleanup_stale_staging_directories(base_dir: str | Path) -> list[Path]:
 
 def ensure_runtime_is_supported(*, worker_count: int) -> None:
     if worker_count < 1:
-        raise ApplicationError("WEBHOOK_WORKER_COUNT must be greater than 0.")
+        raise ApplicationError(
+            "WEBHOOK_WORKER_COUNT must be greater than 0.",
+            context={"worker_count": worker_count},
+            hint="Set WEBHOOK_WORKER_COUNT to at least 1 before starting the service.",
+        )
 
 
 def build_readiness_report(
@@ -61,10 +69,13 @@ def build_readiness_report(
 ) -> dict[str, object]:
     workspace_dir = Path(base_dir).expanduser().resolve()
     database_path = workspace_dir / DATABASE_FILENAME
+    reel_template = PropertyReelTemplate()
     checks = {
         "database_writable": False,
         "storage_writable": False,
         "ffmpeg_available": False,
+        "reel_font_available": False,
+        "background_audio_available": False,
         "site_secrets_configured": bool(site_secrets) or security_disabled,
         "worker_count_valid": worker_count >= 1,
         "webhook_security_disabled": security_disabled,
@@ -87,34 +98,93 @@ def build_readiness_report(
         },
     }
     errors: list[str] = []
+    warnings: list[str] = []
+    failures: list[dict[str, object]] = []
+    environment: dict[str, object] = {
+        "workspace_dir": str(workspace_dir),
+        "database_path": str(database_path),
+        "python_executable": sys.executable,
+        "python_version": sys.version.split()[0],
+        "platform": sys.platform,
+        "required_directories": [
+            str(workspace_dir / PROPERTY_MEDIA_ROOT_DIRNAME),
+            str(workspace_dir / PROPERTY_MEDIA_RAW_ROOT_DIRNAME),
+            str(workspace_dir / "generated_media"),
+        ],
+    }
 
     try:
         _ensure_database_writable(database_path, workspace_dir)
         checks["database_writable"] = True
     except ApplicationError as exc:
         errors.append(str(exc))
+        failures.append(_build_failure_payload("database_writable", exc))
 
     try:
         _ensure_storage_writable(workspace_dir)
         checks["storage_writable"] = True
     except ApplicationError as exc:
         errors.append(str(exc))
+        failures.append(_build_failure_payload("storage_writable", exc))
 
     try:
-        resolve_ffmpeg_binary()
+        environment["ffmpeg_binary"] = resolve_ffmpeg_binary()
         checks["ffmpeg_available"] = True
     except ApplicationError as exc:
         errors.append(str(exc))
+        failures.append(_build_failure_payload("ffmpeg_available", exc))
+
+    try:
+        environment["reel_font_path"] = str(resolve_font_path(REEL_SUBTITLE_FONT_PATH))
+        checks["reel_font_available"] = True
+    except ApplicationError as exc:
+        errors.append(str(exc))
+        failures.append(_build_failure_payload("reel_font_available", exc))
+
+    try:
+        environment["background_audio_path"] = str(
+            resolve_asset_path(
+                workspace_dir,
+                reel_template,
+                REEL_BACKGROUND_AUDIO_FILENAME,
+            )
+        )
+        checks["background_audio_available"] = True
+    except ApplicationError as exc:
+        errors.append(str(exc))
+        failures.append(_build_failure_payload("background_audio_available", exc))
 
     if not checks["site_secrets_configured"]:
-        errors.append("At least one webhook site secret must be configured.")
+        error = ApplicationError(
+            "At least one webhook site secret must be configured.",
+            hint=(
+                "Set WEBHOOK_SITE_SECRETS with comma-separated site_id=secret pairs. "
+                "Only use WEBHOOK_DISABLE_SECURITY=true for local development."
+            ),
+        )
+        errors.append(str(error))
+        failures.append(_build_failure_payload("site_secrets_configured", error))
+
     if not checks["worker_count_valid"]:
-        errors.append("WEBHOOK_WORKER_COUNT must be greater than 0.")
+        error = ApplicationError(
+            "WEBHOOK_WORKER_COUNT must be greater than 0.",
+            context={"worker_count": worker_count},
+            hint="Set WEBHOOK_WORKER_COUNT to at least 1 before starting the service.",
+        )
+        errors.append(str(error))
+        failures.append(_build_failure_payload("worker_count_valid", error))
+
+    if security_disabled:
+        warnings.append(
+            "Webhook signature validation is disabled. This should stay false in production."
+        )
 
     capabilities["core"]["ready"] = bool(
         checks["database_writable"]
         and checks["storage_writable"]
         and checks["ffmpeg_available"]
+        and checks["reel_font_available"]
+        and checks["background_audio_available"]
         and checks["worker_count_valid"]
     )
     if not capabilities["core"]["ready"]:
@@ -126,7 +196,9 @@ def build_readiness_report(
 
     capabilities["ai_photo_selection"]["ready"] = bool(GEMINI_API_KEY.strip()) and bool(GEMINI_MODEL.strip())
     if not capabilities["ai_photo_selection"]["ready"]:
-        capabilities["ai_photo_selection"]["reason"] = "Gemini photo selection is not configured."
+        capabilities["ai_photo_selection"]["reason"] = (
+            "Gemini photo selection is not configured. Set GEMINI_API_KEY and GEMINI_MODEL to enable it."
+        )
 
     if AI_COPY_ENABLED and not capabilities["ai_photo_selection"]["ready"]:
         capabilities["ai_copy"]["ready"] = False
@@ -149,6 +221,9 @@ def build_readiness_report(
         "checks": checks,
         "capabilities": capabilities,
         "errors": errors,
+        "warnings": warnings,
+        "failures": failures,
+        "environment": environment,
     }
 
 
@@ -167,7 +242,19 @@ def run_startup_checks(
         security_disabled=security_disabled,
     )
     if not readiness["ready"]:
-        raise ApplicationError("; ".join(str(error) for error in readiness["errors"]))
+        failed_checks = [
+            name
+            for name, passed in readiness["checks"].items()
+            if isinstance(passed, bool) and not passed
+        ]
+        raise ApplicationError(
+            "Startup checks failed. " + "; ".join(str(error) for error in readiness["errors"]),
+            context={
+                "workspace_dir": str(Path(base_dir).expanduser().resolve()),
+                "failed_checks": ",".join(failed_checks),
+            },
+            hint="Run `python main.py --check` to inspect the full readiness report before retrying the deployment.",
+        )
 
     removed_directories = cleanup_stale_staging_directories(base_dir)
     if removed_directories:
@@ -181,16 +268,30 @@ def run_startup_checks(
 
 
 def _ensure_database_writable(database_path: Path, workspace_dir: Path) -> None:
-    with PropertyPipelineRepository(database_path, workspace_dir):
-        pass
-    with MediaRevisionRepository(database_path):
-        pass
-    with OutboxEventRepository(database_path):
-        pass
-    with WebhookDeliveryRepository(database_path):
-        pass
-    with PropertyJobRepository(database_path):
-        pass
+    try:
+        with PropertyPipelineRepository(database_path, workspace_dir):
+            pass
+        with MediaRevisionRepository(database_path):
+            pass
+        with OutboxEventRepository(database_path):
+            pass
+        with WebhookDeliveryRepository(database_path):
+            pass
+        with PropertyJobRepository(database_path):
+            pass
+    except Exception as exc:
+        raise ApplicationError(
+            "Failed to open or initialize the SQLite repositories.",
+            context={
+                "database_path": str(database_path),
+                "workspace_dir": str(workspace_dir),
+            },
+            hint=(
+                "Ensure the service user can write to the workspace, the database path is persistent, "
+                "and no filesystem policy is blocking SQLite WAL files."
+            ),
+            cause=exc,
+        ) from exc
 
 
 def _ensure_storage_writable(workspace_dir: Path) -> None:
@@ -199,9 +300,35 @@ def _ensure_storage_writable(workspace_dir: Path) -> None:
         workspace_dir / PROPERTY_MEDIA_RAW_ROOT_DIRNAME,
         workspace_dir / "generated_media",
     ):
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=directory, delete=True):
-            pass
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, delete=True):
+                pass
+        except OSError as exc:
+            raise ApplicationError(
+                "Failed to create or write to a runtime storage directory.",
+                context={"directory": str(directory)},
+                hint=(
+                    "Ensure the deployed service user owns the workspace and can write to "
+                    "property_media, property_media_raw, and generated_media."
+                ),
+                cause=exc,
+            ) from exc
+
+
+def _build_failure_payload(check: str, error: ApplicationError) -> dict[str, object]:
+    details = error.to_dict()
+    payload: dict[str, object] = {
+        "check": check,
+        "message": details["message"],
+    }
+    if "hint" in details:
+        payload["hint"] = details["hint"]
+    if "context" in details:
+        payload["context"] = details["context"]
+    if "cause" in details:
+        payload["cause"] = details["cause"]
+    return payload
 
 
 __all__ = [
@@ -210,4 +337,3 @@ __all__ = [
     "ensure_runtime_is_supported",
     "run_startup_checks",
 ]
-

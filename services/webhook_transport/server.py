@@ -84,7 +84,7 @@ class WordPressWebhookApplication:
         self.worker_count = worker_count
 
     def start(self) -> None:
-        run_startup_checks(
+        readiness = run_startup_checks(
             self.workspace_dir,
             site_secrets=self.site_secrets,
             worker_count=self.worker_count,
@@ -97,6 +97,15 @@ class WordPressWebhookApplication:
                 format_detail_line("Webhook path", self.path),
                 format_detail_line("Worker count", self.worker_count),
                 format_detail_line("Queue backend", "SQLite durable queue"),
+                format_detail_line("Workspace", self.workspace_dir),
+                format_detail_line(
+                    "Database",
+                    readiness.get("environment", {}).get("database_path"),
+                ),
+                format_detail_line(
+                    "FFmpeg",
+                    readiness.get("environment", {}).get("ffmpeg_binary"),
+                ),
                 format_detail_line("Security disabled", "Yes" if self.security_disabled else "No"),
             )
         )
@@ -141,17 +150,50 @@ class WordPressWebhookApplication:
         signature: str,
         raw_body: bytes,
     ) -> bool:
+        return self.authenticate_with_details(
+            site_id=site_id,
+            location_id=location_id,
+            access_token=access_token,
+            timestamp=timestamp,
+            signature=signature,
+            raw_body=raw_body,
+        )[0]
+
+    def authenticate_with_details(
+        self,
+        *,
+        site_id: str,
+        location_id: str,
+        access_token: str,
+        timestamp: str,
+        signature: str,
+        raw_body: bytes,
+    ) -> tuple[bool, str | None, str | None]:
         if self.security_disabled:
-            return bool(site_id)
+            if not site_id:
+                return (
+                    False,
+                    "The webhook site_id could not be resolved while security is disabled.",
+                    "Send the configured site header or include a property link/guid that contains the site domain.",
+                )
+            return True, None, None
         expected_secret = self.site_secrets.get(site_id)
         if expected_secret is None:
-            return False
+            return (
+                False,
+                f"No webhook secret is configured for site_id '{site_id}'.",
+                "Add the site to WEBHOOK_SITE_SECRETS on the deployed service and restart it.",
+            )
         if not is_timestamp_fresh(
             timestamp,
             tolerance_seconds=self.timestamp_tolerance_seconds,
         ):
-            return False
-        return is_signature_valid(
+            return (
+                False,
+                "The webhook timestamp is outside the accepted tolerance window.",
+                "Check clock drift between WordPress and the API host or increase WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS if needed.",
+            )
+        signature_valid = is_signature_valid(
             secret=expected_secret,
             timestamp=timestamp,
             site_id=site_id,
@@ -160,6 +202,13 @@ class WordPressWebhookApplication:
             raw_body=raw_body,
             signature=signature,
         )
+        if not signature_valid:
+            return (
+                False,
+                "The webhook signature does not match the configured site secret.",
+                "Ensure WordPress signs the raw JSON body with the same secret and the same header values received by this service.",
+            )
+        return True, None, None
 
     def accept_webhook_delivery(
         self,
@@ -275,21 +324,55 @@ def create_fastapi_app(
         timestamp = request.headers.get(runtime.timestamp_header)
         signature = request.headers.get(runtime.signature_header)
         if not location_id or not access_token:
-            return _json_error(400, "Missing required webhook headers.")
+            missing_headers = []
+            if not location_id:
+                missing_headers.append(runtime.gohighlevel_location_id_header)
+            if not access_token:
+                missing_headers.append(runtime.gohighlevel_access_token_header)
+            return _json_error(
+                400,
+                "Missing required GoHighLevel webhook headers.",
+                code="MISSING_GHL_HEADERS",
+                hint="Send the GoHighLevel location and access token headers on every webhook request.",
+                details={"missing_headers": missing_headers},
+            )
 
         content_type = request.headers.get("Content-Type", "")
         if not content_type.lower().startswith("application/json"):
-            return _json_error(400, "Content-Type must be application/json.")
+            return _json_error(
+                400,
+                "Content-Type must be application/json.",
+                code="INVALID_CONTENT_TYPE",
+                hint="Configure the WordPress sender to post raw JSON with Content-Type: application/json.",
+                details={"received_content_type": content_type or "<empty>"},
+            )
 
         content_length = _parse_content_length(request.headers.get("Content-Length"))
         if content_length is None:
-            return _json_error(400, "Invalid Content-Length header.")
+            return _json_error(
+                400,
+                "Invalid Content-Length header.",
+                code="INVALID_CONTENT_LENGTH",
+                hint="Send a numeric Content-Length header or let the HTTP client populate it automatically.",
+            )
         if content_length > runtime.max_payload_bytes:
-            return _json_error(413, "Request body is too large.")
+            return _json_error(
+                413,
+                "Request body is too large.",
+                code="PAYLOAD_TOO_LARGE",
+                hint="Reduce the payload size or increase WEBHOOK_MAX_PAYLOAD_BYTES on the API host.",
+                details={"max_payload_bytes": runtime.max_payload_bytes},
+            )
 
         raw_body = await request.body()
         if len(raw_body) > runtime.max_payload_bytes:
-            return _json_error(413, "Request body is too large.")
+            return _json_error(
+                413,
+                "Request body is too large.",
+                code="PAYLOAD_TOO_LARGE",
+                hint="Reduce the payload size or increase WEBHOOK_MAX_PAYLOAD_BYTES on the API host.",
+                details={"max_payload_bytes": runtime.max_payload_bytes},
+            )
 
         payload, payload_error = _parse_webhook_payload(raw_body)
         if payload_error is not None:
@@ -299,19 +382,45 @@ def create_fastapi_app(
             site_id = _resolve_site_id(payload)
 
         if not site_id:
-            return _json_error(400, "Missing required webhook headers.")
+            return _json_error(
+                400,
+                "The webhook site_id could not be resolved.",
+                code="SITE_ID_REQUIRED",
+                hint=(
+                    f"Send the {runtime.site_id_header} header or include a property link/guid "
+                    "whose hostname matches the source site."
+                ),
+            )
         if not runtime.security_disabled and (not timestamp or not signature):
-            return _json_error(400, "Missing required webhook headers.")
+            missing_headers = []
+            if not timestamp:
+                missing_headers.append(runtime.timestamp_header)
+            if not signature:
+                missing_headers.append(runtime.signature_header)
+            return _json_error(
+                400,
+                "Missing required webhook security headers.",
+                code="MISSING_SECURITY_HEADERS",
+                hint="Send both timestamp and signature headers when webhook security is enabled.",
+                details={"missing_headers": missing_headers},
+            )
 
-        if not runtime.authenticate(
+        is_authenticated, auth_message, auth_hint = runtime.authenticate_with_details(
             site_id=site_id,
             location_id=location_id,
             access_token=access_token,
             timestamp=timestamp or "",
             signature=signature or "",
             raw_body=raw_body,
-        ):
-            return _json_error(401, "Invalid webhook credentials.")
+        )
+        if not is_authenticated:
+            return _json_error(
+                401,
+                auth_message or "Invalid webhook credentials.",
+                code="INVALID_WEBHOOK_CREDENTIALS",
+                hint=auth_hint,
+                details={"site_id": site_id},
+            )
 
         property_id = _extract_property_id(payload)
         raw_payload_hash = build_raw_payload_hash(raw_body)
@@ -330,7 +439,12 @@ def create_fastapi_app(
                 ),
             )
         except RuntimeError:
-            return _json_error(503, "Webhook dispatcher is not accepting new jobs.")
+            return _json_error(
+                503,
+                "Webhook dispatcher is not accepting new jobs.",
+                code="DISPATCHER_UNAVAILABLE",
+                hint="Check the service logs for startup or queue failures and verify the background dispatcher completed startup.",
+            )
 
         logger.info(
             format_console_block(
@@ -399,8 +513,22 @@ def _get_runtime(request: Request) -> WordPressWebhookApplication:
     return request.app.state.runtime  # type: ignore[return-value]
 
 
-def _json_error(status_code: int, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"error": message})
+def _json_error(
+    status_code: int,
+    message: str,
+    *,
+    code: str | None = None,
+    hint: str | None = None,
+    details: dict[str, object] | None = None,
+) -> JSONResponse:
+    payload: dict[str, object] = {"error": message}
+    if code:
+        payload["code"] = code
+    if hint:
+        payload["hint"] = hint
+    if details:
+        payload["details"] = details
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 def _parse_content_length(raw_value: str | None) -> int | None:
@@ -436,8 +564,8 @@ def _get_header_value(request: Request, *names: str) -> str | None:
 def _parse_webhook_payload(raw_body: bytes) -> tuple[dict[str, Any] | None, str | None]:
     try:
         parsed = json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return None, "Request body must be valid JSON."
+    except json.JSONDecodeError as exc:
+        return None, f"Request body must be valid JSON. {exc.msg} at line {exc.lineno}, column {exc.colno}."
 
     if isinstance(parsed, list):
         if len(parsed) != 1:

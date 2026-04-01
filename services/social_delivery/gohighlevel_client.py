@@ -91,6 +91,10 @@ class GoHighLevelClient:
                 f"GoHighLevel request failed: {error}",
                 code="GHL_HTTP_ERROR",
                 context={"method": method.upper(), "path": path},
+                hint=(
+                    "Check outbound network connectivity, DNS resolution, TLS interception, and the configured "
+                    "GO_HIGH_LEVEL_BASE_URL for the deployed host."
+                ),
                 cause=error,
             ) from error
 
@@ -114,6 +118,7 @@ class GoHighLevelClient:
                 "GoHighLevel returned a non-JSON response.",
                 code="GHL_NON_JSON_RESPONSE",
                 context={"method": method.upper(), "path": path},
+                hint="Inspect the upstream response body and verify the GoHighLevel API is not returning HTML or proxy errors.",
                 cause=error,
             ) from error
 

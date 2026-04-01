@@ -1,0 +1,108 @@
+# Rocky Linux Deployment
+
+This project is ready to run on Rocky Linux with `systemd`, a Python virtual environment, and a writable workspace directory.
+
+## Packages
+
+Install the base OS dependencies first:
+
+```bash
+sudo dnf install -y git python3.11 python3.11-pip python3.11-devel
+```
+
+`ffmpeg` is required for reel rendering. On Rocky Linux it usually comes from RPM Fusion or another approved repository:
+
+```bash
+sudo dnf install -y epel-release
+sudo dnf install -y https://download1.rpmfusion.org/free/el/rpmfusion-free-release-9.noarch.rpm
+sudo dnf install -y ffmpeg
+```
+
+If your estate policy does not allow RPM Fusion, install a trusted static `ffmpeg` build and make sure it is on `PATH` for the service user.
+
+## Recommended layout
+
+- App code: `/opt/cpihed`
+- Environment file: `/etc/cpihed/cpihed.env`
+- Service user: `cpihed`
+
+Create the service user and workspace:
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/cpihed --shell /sbin/nologin cpihed
+sudo mkdir -p /opt/cpihed /etc/cpihed
+sudo chown -R cpihed:cpihed /opt/cpihed /etc/cpihed
+```
+
+## Install the app
+
+Clone or copy the repository into `/opt/cpihed`, then:
+
+```bash
+cd /opt/cpihed
+python3.11 -m venv .venv
+.venv/bin/pip install --upgrade pip wheel
+.venv/bin/pip install -r requirements.txt
+install -m 640 .env.example /etc/cpihed/cpihed.env
+```
+
+Edit `/etc/cpihed/cpihed.env` and set at least:
+
+- `WEBHOOK_SITE_SECRETS`
+- `WEBHOOK_DISABLE_SECURITY=false`
+- `GO_HIGH_LEVEL_BASE_URL` if you use a non-default endpoint
+- `GEMINI_API_KEY` only if you want AI photo selection enabled
+
+## Preflight checks
+
+Run the built-in readiness check before enabling the service:
+
+```bash
+cd /opt/cpihed
+sudo -u cpihed bash -lc 'cd /opt/cpihed && set -a && source /etc/cpihed/cpihed.env && set +a && .venv/bin/python main.py --check'
+```
+
+This validates:
+
+- SQLite initialization and write access
+- runtime directories and temp writes
+- `ffmpeg`
+- subtitle font presence
+- background music asset presence
+- webhook secret configuration
+
+If the check fails, the error output now includes a troubleshooting hint and the failing check name.
+
+## systemd
+
+Install the provided unit:
+
+```bash
+sudo install -m 644 deploy/rocky-linux/cpihed.service /etc/systemd/system/cpihed.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cpihed
+```
+
+Useful commands:
+
+```bash
+sudo systemctl status cpihed
+sudo journalctl -u cpihed -f
+curl -fsS http://127.0.0.1:8000/health/ready
+```
+
+## Reverse proxy
+
+The service can bind directly to `0.0.0.0`, but in production it is usually better to keep:
+
+- `WEBHOOK_HOST=127.0.0.1`
+- `WEBHOOK_PORT=8000`
+
+and expose it through Nginx or another reverse proxy with TLS.
+
+## Operational notes
+
+- Keep `/opt/cpihed/generated_media`, `/opt/cpihed/property_media`, and `/opt/cpihed/property_media_raw` writable by the service user.
+- SQLite uses WAL mode, so the database directory must allow creation of sidecar files.
+- If `ffmpeg` fails with `Cannot allocate memory`, reduce `REEL_FFMPEG_FILTER_THREADS` and `REEL_FFMPEG_ENCODER_THREADS`.
+- If webhook authentication fails, compare the incoming headers against the configured `WEBHOOK_*_HEADER` values and confirm the secret for the source `site_id`.

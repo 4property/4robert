@@ -31,6 +31,139 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _build_ffmpeg_reel_command(
+    *,
+    ffmpeg_binary: str,
+    slide_image_paths: list[Path],
+    slide_duration: float,
+    total_duration: float,
+    settings: PropertyReelTemplate,
+    logo_path: Path | None,
+    agent_image_path: Path,
+    ber_icon_path: Path | None,
+    background_audio_path: Path,
+    filter_script_path: Path,
+    output_path: Path,
+    audio_fade_start: float,
+    audio_fade_duration: float,
+) -> list[str]:
+    command = [ffmpeg_binary, "-y"]
+    if settings.ffmpeg_filter_threads > 0:
+        command.extend(
+            [
+                "-filter_complex_threads",
+                str(settings.ffmpeg_filter_threads),
+            ]
+        )
+
+    has_logo_input = settings.include_intro and logo_path is not None
+    for slide_image_path in slide_image_paths:
+        command.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                str(settings.fps),
+                "-t",
+                f"{slide_duration:.6f}",
+                "-i",
+                str(slide_image_path),
+            ]
+        )
+    if has_logo_input and logo_path is not None:
+        command.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                str(settings.fps),
+                "-t",
+                f"{settings.intro_duration_seconds:.6f}",
+                "-i",
+                str(logo_path),
+            ]
+        )
+    command.extend(
+        [
+            "-loop",
+            "1",
+            "-framerate",
+            str(settings.fps),
+            "-t",
+            f"{total_duration:.6f}",
+            "-i",
+            str(agent_image_path),
+        ]
+    )
+    if ber_icon_path is not None:
+        command.extend(
+            [
+                "-loop",
+                "1",
+                "-framerate",
+                str(settings.fps),
+                "-t",
+                f"{total_duration:.6f}",
+                "-i",
+                str(ber_icon_path),
+            ]
+        )
+    command.extend(
+        [
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(background_audio_path),
+        ]
+    )
+
+    audio_input_index = len(slide_image_paths) + (1 if has_logo_input else 0) + 1
+    if ber_icon_path is not None:
+        audio_input_index += 1
+
+    command.extend(
+        [
+            "-filter_complex_script",
+            str(filter_script_path),
+            "-map",
+            "[vout]",
+            "-map",
+            f"{audio_input_index}:a:0",
+            "-r",
+            str(settings.fps),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-af",
+            (
+                f"volume={settings.audio_volume:.3f},"
+                f"afade=t=out:st={audio_fade_start:.3f}:d={audio_fade_duration:.3f}"
+            ),
+            "-c:v",
+            "libx264",
+        ]
+    )
+    if settings.ffmpeg_encoder_threads > 0:
+        command.extend(
+            [
+                "-threads:v",
+                str(settings.ffmpeg_encoder_threads),
+            ]
+        )
+    command.extend(
+        [
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            str(output_path),
+        ]
+    )
+    return command
+
+
 def build_reel_template_for_render_profile(
     render_profile: str,
     *,
@@ -143,95 +276,20 @@ def generate_property_reel_from_data(
             encoding="utf-8",
         )
 
-        command = [ffmpeg_binary, "-y"]
-        for slide_image_path in slide_image_paths:
-            command.extend(
-                [
-                    "-loop",
-                    "1",
-                    "-framerate",
-                    str(settings.fps),
-                    "-t",
-                    f"{slide_duration:.6f}",
-                    "-i",
-                    str(slide_image_path),
-                ]
-            )
-        if has_logo_input:
-            command.extend(
-                [
-                    "-loop",
-                    "1",
-                    "-framerate",
-                    str(settings.fps),
-                    "-t",
-                    f"{settings.intro_duration_seconds:.6f}",
-                    "-i",
-                    str(logo_path),
-                ]
-            )
-        command.extend(
-            [
-                "-loop",
-                "1",
-                "-framerate",
-                str(settings.fps),
-                "-t",
-                f"{total_duration:.6f}",
-                "-i",
-                str(agent_image_path),
-            ]
-        )
-        if ber_icon_path is not None:
-            command.extend(
-                [
-                    "-loop",
-                    "1",
-                    "-framerate",
-                    str(settings.fps),
-                    "-t",
-                    f"{total_duration:.6f}",
-                    "-i",
-                    str(ber_icon_path),
-                ]
-            )
-        command.extend(
-            [
-                "-stream_loop",
-                "-1",
-                "-i",
-                str(background_audio_path),
-            ]
-        )
-        audio_input_index = agent_image_input_index + (2 if ber_icon_path is not None else 1)
-        command.extend(
-            [
-                "-filter_complex_script",
-                str(filter_script_path),
-                "-map",
-                "[vout]",
-                "-map",
-                f"{audio_input_index}:a:0",
-                "-r",
-                str(settings.fps),
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-af",
-                (
-                    f"volume={settings.audio_volume:.3f},"
-                    f"afade=t=out:st={audio_fade_start:.3f}:d={audio_fade_duration:.3f}"
-                ),
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-movflags",
-                "+faststart",
-                "-shortest",
-                str(final_output_path),
-            ]
+        command = _build_ffmpeg_reel_command(
+            ffmpeg_binary=ffmpeg_binary,
+            slide_image_paths=slide_image_paths,
+            slide_duration=slide_duration,
+            total_duration=total_duration,
+            settings=settings,
+            logo_path=logo_path if has_logo_input else None,
+            agent_image_path=agent_image_path,
+            ber_icon_path=ber_icon_path,
+            background_audio_path=background_audio_path,
+            filter_script_path=filter_script_path,
+            output_path=final_output_path,
+            audio_fade_start=audio_fade_start,
+            audio_fade_duration=audio_fade_duration,
         )
 
         completed = subprocess.run(
@@ -245,9 +303,29 @@ def generate_property_reel_from_data(
 
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
-        raise PropertyReelError(f"ffmpeg failed to render the property reel.\n{stderr}")
+        raise PropertyReelError(
+            f"ffmpeg failed to render the property reel.\n{stderr}",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(final_output_path),
+                "ffmpeg_binary": ffmpeg_binary,
+            },
+            hint=_build_ffmpeg_failure_hint(stderr),
+        )
     if not final_output_path.exists() or final_output_path.stat().st_size == 0:
-        raise PropertyReelError("The reel output file was not created.")
+        raise PropertyReelError(
+            "The reel output file was not created.",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(final_output_path),
+            },
+            hint=(
+                "Check the ffmpeg stderr above and verify the service user can write to generated_media "
+                "on the deployed host."
+            ),
+        )
 
     return final_output_path
 
@@ -276,7 +354,31 @@ def generate_property_reel(
     )
 
 
+def _build_ffmpeg_failure_hint(stderr: str) -> str:
+    normalized_stderr = stderr.lower()
+    if "cannot allocate memory" in normalized_stderr:
+        return (
+            "The host ran out of memory while ffmpeg was filtering the reel. Reduce "
+            "REEL_FFMPEG_FILTER_THREADS / REEL_FFMPEG_ENCODER_THREADS or allocate more memory."
+        )
+    if "permission denied" in normalized_stderr:
+        return (
+            "ffmpeg hit a filesystem permission error. Ensure the deployed service user can read assets "
+            "and property_media, and write to generated_media."
+        )
+    if "no such file or directory" in normalized_stderr:
+        return (
+            "ffmpeg could not read one of the referenced inputs. Verify selected photos, background audio, "
+            "fonts, and generated staging files exist on the deployed host."
+        )
+    return (
+        "Inspect the ffmpeg stderr above and verify that all reel assets, fonts, and writable output "
+        "directories are present in the deployment."
+    )
+
+
 __all__ = [
+    "_build_ffmpeg_reel_command",
     "build_reel_template_for_render_profile",
     "generate_property_reel",
     "generate_property_reel_from_data",

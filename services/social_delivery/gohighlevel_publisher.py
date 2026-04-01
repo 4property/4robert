@@ -725,7 +725,9 @@ class GoHighLevelPublisher:
     ) -> SocialAccount:
         if not eligible_accounts:
             raise ResourceNotFoundError(
-                f"No connected {platform} accounts were found for this GoHighLevel location."
+                f"No connected {platform} accounts were found for this GoHighLevel location.",
+                context={"platform": platform},
+                hint="Connect the social account in GoHighLevel before retrying the publish.",
             )
 
         if requested_account_id:
@@ -733,7 +735,9 @@ class GoHighLevelPublisher:
                 if account.id == requested_account_id:
                     return account
             raise ValidationError(
-                f"Requested social account was not found for platform {platform}: {requested_account_id}"
+                f"Requested social account was not found for platform {platform}: {requested_account_id}",
+                context={"platform": platform, "requested_account_id": requested_account_id},
+                hint="Refresh the configured account mapping and confirm the account still exists in GoHighLevel.",
             )
 
         selected_account = sorted(
@@ -756,13 +760,20 @@ class GoHighLevelPublisher:
         requested_user_id: str | None,
     ) -> LocationUser:
         if not location_users:
-            raise ResourceNotFoundError("No location users were found for this GoHighLevel location.")
+            raise ResourceNotFoundError(
+                "No location users were found for this GoHighLevel location.",
+                hint="Add or sync at least one active user in the target GoHighLevel location before publishing.",
+            )
 
         if requested_user_id:
             for user in location_users:
                 if user.id == requested_user_id:
                     return user
-            raise ValidationError(f"Requested GoHighLevel user was not found: {requested_user_id}")
+            raise ValidationError(
+                f"Requested GoHighLevel user was not found: {requested_user_id}",
+                context={"requested_user_id": requested_user_id},
+                hint="Refresh the configured user mapping and confirm the user still exists in GoHighLevel.",
+            )
 
         selected_user = self.fallback_user_selector(location_users)
         if len(location_users) > 1:

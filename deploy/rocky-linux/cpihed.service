@@ -1,0 +1,22 @@
+[Unit]
+Description=CPIHED property webhook pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cpihed
+Group=cpihed
+WorkingDirectory=/opt/cpihed
+EnvironmentFile=/etc/cpihed/cpihed.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cpihed/.venv/bin/python /opt/cpihed/main.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

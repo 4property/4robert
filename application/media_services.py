@@ -235,12 +235,23 @@ def _is_successful_platform_result(result: dict[str, object]) -> bool:
 
 def _extract_successful_platforms(
     details_json: str,
+    *,
+    fallback_platforms: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     details = _parse_json_object(details_json)
     successful_platforms: list[str] = []
-    for platform, result in _extract_platform_results(details).items():
+    platform_results = _extract_platform_results(details)
+    for platform, result in platform_results.items():
         if _is_successful_platform_result(result):
             successful_platforms.append(platform)
+    if successful_platforms:
+        return tuple(successful_platforms)
+    if fallback_platforms and _is_successful_platform_result(details):
+        return tuple(
+            platform
+            for platform in fallback_platforms
+            if platform.strip()
+        )
     return tuple(successful_platforms)
 
 
@@ -567,7 +578,10 @@ class DefaultPropertyInfoService:
 
         previous_target_snapshot = _parse_publish_target_snapshot(state.publish_target_snapshot_json)
         successful_platforms = set(
-            _extract_successful_platforms(state.publish_details_json)
+            _extract_successful_platforms(
+                state.publish_details_json,
+                fallback_platforms=desired_platforms,
+            )
         )
         previous_descriptions = previous_target_snapshot["descriptions_by_platform"]
         if not isinstance(previous_descriptions, dict):
@@ -1129,6 +1143,7 @@ class FileSystemMediaPublisher:
                     property_id=context.property.id,
                     requires_render=context.requires_render,
                 ),
+                hint="Re-render the media or restore the published artifact files before retrying a publish-only workflow.",
             )
         return context.existing_published_media
 
@@ -1188,6 +1203,7 @@ class CompositeMediaPublisher:
                     property_id=context.property.id,
                     requires_render=context.requires_render,
                 ),
+                hint="Re-render the media or restore the published artifact files before retrying a publish-only workflow.",
             )
         return self._publish_externally(context, context.existing_published_media)
 

@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from config import GEMINI_SELECTION_AUDIT_FILENAME
 from settings.images import IMAGE_EXTENSIONS
-from settings.wordpress import HTTP_HEADERS, REQUEST_TIMEOUT_SECONDS
+from settings.http import HTTP_HEADERS, OUTBOUND_HTTP_TIMEOUT_SECONDS
 from core.dependencies import require_dependency
 from core.errors import PropertyReelError, ResourceNotFoundError
 from services.ai_photo_selection.prompting import normalize_caption
@@ -70,7 +70,14 @@ def resolve_font_path(path: Path) -> Path:
         project_relative_path = Path(__file__).resolve().parents[2] / path
         if project_relative_path.exists():
             return project_relative_path
-    raise ResourceNotFoundError(f"Font file not found: {path}")
+    raise ResourceNotFoundError(
+        "Font file not found for reel subtitle rendering.",
+        context={"requested_path": str(path)},
+        hint=(
+            "Set REEL_SUBTITLE_FONT_PATH to a readable .ttf font and ensure the font file is "
+            "present on the deployed host."
+        ),
+    )
 
 
 def resolve_asset_path(
@@ -81,7 +88,14 @@ def resolve_asset_path(
     asset_path = workspace_dir / settings.assets_dirname / filename
     if asset_path.exists():
         return asset_path
-    raise ResourceNotFoundError(f"Asset file not found: {asset_path}")
+    raise ResourceNotFoundError(
+        "Asset file not found for reel rendering.",
+        context={"asset_path": str(asset_path), "filename": filename},
+        hint=(
+            "Ensure the assets directory is deployed with the application and that the service user "
+            "can read the referenced file."
+        ),
+    )
 
 
 def normalize_ber_icon_code(ber_rating: str | None) -> str | None:
@@ -128,7 +142,7 @@ def resolve_ber_icon_path(
 
 def download_remote_image(image_url: str, destination: Path) -> Path:
     request = Request(image_url, headers=HTTP_HEADERS)
-    with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+    with urlopen(request, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
         with destination.open("wb") as file_handle:
             shutil.copyfileobj(response, file_handle)
     return destination
@@ -390,7 +404,18 @@ def select_reel_slides(
     )
 
     if not ordered_slides:
-        raise PropertyReelError("No local images are available for reel generation.")
+        raise PropertyReelError(
+            "No local images are available for reel generation.",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "selected_image_dir": str(property_data.selected_image_dir),
+            },
+            hint=(
+                "Run the asset preparation stage first and verify the selected_photos directory is "
+                "persisted on the deployed host."
+            ),
+        )
 
     return ordered_slides[:max_slide_count]
 
