@@ -356,6 +356,11 @@ def generate_property_reel(
 
 def _build_ffmpeg_failure_hint(stderr: str) -> str:
     normalized_stderr = stderr.lower()
+    if "no such filter" in normalized_stderr or "filter not found" in normalized_stderr:
+        return (
+            "ffmpeg could not parse the generated filter_complex graph. Inspect the generated filter "
+            "script for unescaped commas or malformed drawtext / overlay expressions."
+        )
     if "cannot allocate memory" in normalized_stderr:
         return (
             "The host ran out of memory while ffmpeg was filtering the reel. Reduce "

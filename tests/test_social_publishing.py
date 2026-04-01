@@ -111,7 +111,7 @@ class DescriptionBuilderTests(unittest.TestCase):
         self.assertEqual(
             description,
             (
-                "https://ckp.ie/property/sample-property\n\n"
+                "More properties on ckp.ie\n\n"
                 "Jane Doe\n"
                 "+353 1 234 5678\n"
                 "jane@example.com\n\n"
@@ -134,13 +134,27 @@ class DescriptionBuilderTests(unittest.TestCase):
         self.assertEqual(
             caption,
             (
-                "https://ckp.ie/property/sample-property\n\n"
+                "More properties on ckp.ie\n\n"
                 "Jane Doe\n"
                 "+353 1 234 5678\n"
                 "jane@example.com\n\n"
                 "Agency PSRA: X123456"
             ),
         )
+
+    def test_render_property_caption_uses_clean_site_domain_instead_of_full_url(self) -> None:
+        caption = render_property_caption(
+            PropertyCaptionContext(
+                property_url="https://www.ckp.ie/property/sample-property?utm_source=tiktok",
+                agent_name=None,
+                agent_phone=None,
+                agent_email=None,
+                agency_psra=None,
+            ),
+            layout=DEFAULT_PROPERTY_CAPTION_LAYOUT,
+        )
+
+        self.assertEqual(caption, "More properties on ckp.ie")
 
     def test_build_property_public_url_appends_tracking_params(self) -> None:
         property_url = build_property_public_url(

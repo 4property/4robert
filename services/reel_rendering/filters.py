@@ -23,6 +23,10 @@ def resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
     return icon_width, icon_height
 
 
+def _build_drawtext_enable_expression(start_time: float, end_time: float) -> str:
+    return f"enable='between(t\\,{start_time:.3f}\\,{end_time:.3f})'"
+
+
 def build_overlay_filter(
     property_data: PropertyReelData,
     settings: PropertyReelTemplate,
@@ -92,7 +96,10 @@ def build_overlay_filter(
             )
 
     for segment in active_layout.subtitle_segments:
-        enable = f"enable='between(t,{segment.start_time:.3f},{segment.end_time:.3f})'"
+        enable = _build_drawtext_enable_expression(
+            segment.start_time,
+            segment.end_time,
+        )
         for index, line in enumerate(segment.lines):
             text_filters.append(
                 "drawtext="
@@ -281,6 +288,7 @@ def build_filter_complex(
 
 
 __all__ = [
+    "_build_drawtext_enable_expression",
     "build_filter_complex",
     "build_motion_crop_expressions",
     "build_overlay_filter",

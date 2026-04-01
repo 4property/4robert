@@ -1336,6 +1336,8 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertNotIn("3 bed", filter_text)
         self.assertNotIn("Listed by", filter_text)
         self.assertIn("fontcolor=0xF4D03F", filter_text)
+        self.assertIn("enable='between(t\\,", filter_text)
+        self.assertNotIn("enable='between(t,", filter_text)
         self.assertNotIn("color=black@0.40:t=fill:enable=", filter_text)
         self.assertLess(filter_text.index("FOR SALE"), filter_text.index("650\\,000"))
 

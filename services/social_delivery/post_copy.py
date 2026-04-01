@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
+from urllib.parse import urlsplit
 
 from models.property import Property
 
@@ -99,7 +100,10 @@ def build_property_copy_bundle(
 
 
 def _render_property_url(context: PropertyCaptionContext) -> str | None:
-    return _clean_text(context.property_url)
+    site_label = _extract_site_label(context.property_url)
+    if site_label is None:
+        return None
+    return f"More properties on {site_label}"
 
 
 def _render_agent_name(context: PropertyCaptionContext) -> str | None:
@@ -124,6 +128,25 @@ def _render_agency_psra(context: PropertyCaptionContext) -> str | None:
 def _clean_text(value: str | None) -> str | None:
     cleaned_value = str(value or "").strip()
     return cleaned_value or None
+
+
+def _extract_site_label(property_url: str | None) -> str | None:
+    cleaned_url = _clean_text(property_url)
+    if cleaned_url is None:
+        return None
+
+    parsed_url = urlsplit(cleaned_url)
+    hostname = parsed_url.hostname
+    if hostname:
+        normalized_hostname = hostname.lower()
+        if normalized_hostname.startswith("www."):
+            normalized_hostname = normalized_hostname[4:]
+        return normalized_hostname
+
+    fallback_host = cleaned_url.split("/", 1)[0].strip().lower()
+    if fallback_host.startswith("www."):
+        fallback_host = fallback_host[4:]
+    return fallback_host or cleaned_url
 
 
 DEFAULT_PROPERTY_CAPTION_LAYOUT: CaptionLayout = (
