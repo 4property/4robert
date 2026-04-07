@@ -56,13 +56,13 @@ def main() -> None:
             _log_readiness_report(logger, readiness)
             if args.readiness_json:
                 print(json.dumps(readiness, indent=2))
-            if not readiness["ready"]:
+            if not readiness.get("production_ready", readiness["ready"]):
                 raise ApplicationError(
-                    "Runtime readiness check failed.",
+                    "Production readiness check failed.",
                     context={
                         "workspace_dir": readiness.get("environment", {}).get("workspace_dir"),
                     },
-                    hint="Resolve the failed readiness checks before enabling the systemd service.",
+                    hint="Resolve the failed readiness checks before enabling the production service.",
                 )
             return
 
@@ -129,7 +129,12 @@ def _log_readiness_report(logger: logging.Logger, readiness: dict[str, object]) 
     if not isinstance(environment, dict):
         environment = {}
     lines = [
-        format_detail_line("Ready", "Yes" if readiness.get("ready") else "No", highlight=True),
+        format_detail_line("Runtime ready", "Yes" if readiness.get("ready") else "No", highlight=True),
+        format_detail_line(
+            "Production ready",
+            "Yes" if readiness.get("production_ready", readiness.get("ready")) else "No",
+            highlight=True,
+        ),
         format_detail_line("Workspace", environment.get("workspace_dir")),
         format_detail_line("Database", environment.get("database_path")),
         format_detail_line("Python", environment.get("python_executable")),

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc:*)",
+      "Bash(grep -n \"from.*render import\\\\|from.*runtime import\" /c/Users/4pm/Desktop/warp/CPIHED/services/reel_rendering/*.py)",
+      "Bash(grep \"except:$\")"
+    ]
+  }
+}

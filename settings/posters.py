@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+from settings.app import APP_SETTINGS
+
+
+POSTER_WIDTH = APP_SETTINGS.poster_width
+POSTER_HEIGHT = APP_SETTINGS.poster_height
+POSTER_BACKGROUND_BLUR_RADIUS = APP_SETTINGS.poster_background_blur_radius
+POSTER_BACKGROUND_BLUR_POWER = APP_SETTINGS.poster_background_blur_power
+POSTER_PHOTO_SIDE_MARGIN_RATIO = APP_SETTINGS.poster_photo_side_margin_ratio
+POSTER_PHOTO_SIDE_MARGIN_MIN_PX = APP_SETTINGS.poster_photo_side_margin_min_px
+POSTER_PHOTO_PANEL_GAP_RATIO = APP_SETTINGS.poster_photo_panel_gap_ratio
+POSTER_PHOTO_PANEL_GAP_MIN_PX = APP_SETTINGS.poster_photo_panel_gap_min_px
+
+
+__all__ = [
+    "POSTER_BACKGROUND_BLUR_POWER",
+    "POSTER_BACKGROUND_BLUR_RADIUS",
+    "POSTER_HEIGHT",
+    "POSTER_PHOTO_PANEL_GAP_MIN_PX",
+    "POSTER_PHOTO_PANEL_GAP_RATIO",
+    "POSTER_PHOTO_SIDE_MARGIN_MIN_PX",
+    "POSTER_PHOTO_SIDE_MARGIN_RATIO",
+    "POSTER_WIDTH",
+]

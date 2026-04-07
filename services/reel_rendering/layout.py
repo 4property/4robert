@@ -10,12 +10,12 @@ from services.reel_rendering.formatting import (
     build_status_ribbon_text,
     clean_text,
     fit_wrapped_lines,
+    resolve_agency_logo_box_size,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+    resolve_font_size_bounds,
 )
 from services.reel_rendering.models import PropertyReelData, PropertyReelSlide, PropertyReelTemplate
-
-_BER_ICON_ASPECT_RATIO = 1800 / 582
-_BER_ICON_MIN_HEIGHT = 45
-_BER_ICON_HEIGHT_RATIO = 0.0675
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +125,7 @@ class OverlayLayout:
     top_panel: BoxLayout | None
     bottom_panel: BoxLayout | None
     agent_image_box: BoxLayout | None
+    agency_logo_box: BoxLayout | None
     ber_badge_box: BoxLayout | None
     text_blocks: tuple[TextBlockLayout, ...]
     subtitle_segments: tuple[TimedTextSegmentLayout, ...]
@@ -137,6 +138,7 @@ class OverlayLayout:
             "top_panel": None if self.top_panel is None else self.top_panel.to_dict(),
             "bottom_panel": None if self.bottom_panel is None else self.bottom_panel.to_dict(),
             "agent_image_box": None if self.agent_image_box is None else self.agent_image_box.to_dict(),
+            "agency_logo_box": None if self.agency_logo_box is None else self.agency_logo_box.to_dict(),
             "ber_badge_box": None if self.ber_badge_box is None else self.ber_badge_box.to_dict(),
             "text_blocks": [block.to_dict() for block in self.text_blocks],
             "subtitle_segments": [segment.to_dict() for segment in self.subtitle_segments],
@@ -169,13 +171,7 @@ def _resolve_top_panel_height_range(settings: PropertyReelTemplate) -> tuple[int
 
 
 def _resolve_bottom_panel_height_range(settings: PropertyReelTemplate) -> tuple[int, int]:
-    return max(170, round(settings.height * 0.11)), max(420, round(settings.height * 0.28))
-
-
-def _resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
-    icon_height = max(_BER_ICON_MIN_HEIGHT, round(settings.height * _BER_ICON_HEIGHT_RATIO))
-    icon_width = max(1, round(icon_height * _BER_ICON_ASPECT_RATIO))
-    return icon_width, icon_height
+    return max(208, round(settings.height * 0.145)), max(500, round(settings.height * 0.34))
 
 
 def _candidate_font_sizes(max_size: int, min_size: int, *, step: int = 4) -> tuple[int, ...]:
@@ -261,6 +257,7 @@ def build_overlay_layout(
     slides: tuple[PropertyReelSlide, ...] | list[PropertyReelSlide],
     slide_duration: float | None,
     has_ber_badge: bool,
+    has_agency_logo: bool = False,
     cover_caption: str | None = None,
 ) -> OverlayLayout:
     width = settings.width
@@ -274,7 +271,7 @@ def build_overlay_layout(
     warnings: list[LayoutWarning] = []
     ber_badge_box: BoxLayout | None = None
     ber_icon_gap = max(24, round(width * 0.018))
-    ber_icon_width, ber_icon_height = _resolve_ber_icon_size(settings)
+    ber_icon_width, ber_icon_height = resolve_ber_icon_size(settings)
     header_text_width = panel_width - (panel_padding_x * 2)
     if has_ber_badge:
         header_text_width = max(260, header_text_width - ber_icon_width - ber_icon_gap)
@@ -286,8 +283,16 @@ def build_overlay_layout(
             text=build_status_ribbon_text(property_data),
             usable_width=header_text_width,
             max_lines=2,
-            max_font_size=max(68, round(height * 0.05)),
-            min_font_size=max(34, round(height * 0.026)),
+            max_font_size=resolve_font_size_bounds(
+                "status",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[0],
+            min_font_size=resolve_font_size_bounds(
+                "status",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[1],
             min_chars=8,
         ),
         _measure_text_block(
@@ -295,8 +300,16 @@ def build_overlay_layout(
             text=build_display_price(property_data),
             usable_width=header_text_width,
             max_lines=2,
-            max_font_size=max(62, round(height * 0.046)),
-            min_font_size=max(32, round(height * 0.024)),
+            max_font_size=resolve_font_size_bounds(
+                "price",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[0],
+            min_font_size=resolve_font_size_bounds(
+                "price",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[1],
             min_chars=8,
         ),
         _measure_text_block(
@@ -304,8 +317,16 @@ def build_overlay_layout(
             text=property_data.title,
             usable_width=header_text_width,
             max_lines=4,
-            max_font_size=max(32, round(height * 0.024)),
-            min_font_size=22,
+            max_font_size=resolve_font_size_bounds(
+                "address",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[0],
+            min_font_size=resolve_font_size_bounds(
+                "address",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[1],
             min_chars=18,
         ),
     ):
@@ -358,12 +379,41 @@ def build_overlay_layout(
                 height=ber_icon_height,
             )
 
-    agent_image_size = max(108, min(180, round(height * 0.085)))
+    agent_image_size = resolve_agent_image_size(settings)
     agent_lines = build_agent_lines(property_data)
-    text_width = panel_width - agent_image_size - (panel_padding_x * 3)
-    if text_width < 220:
-        text_width = panel_width - (panel_padding_x * 2)
+    logo_box_width, logo_box_height = (
+        resolve_agency_logo_box_size(settings) if has_agency_logo else (0, 0)
+    )
+    content_width = panel_width - (panel_padding_x * 2)
+    minimum_text_width = max(220, round(width * 0.24))
+    agent_gap = panel_padding_x if agent_image_size > 0 else 0
+    logo_gap = panel_padding_x if has_agency_logo else 0
+    text_width = content_width - agent_image_size - agent_gap - logo_box_width - logo_gap
+
+    logo_min_width = max(72, round(width * 0.11)) if has_agency_logo else 0
+    if has_agency_logo and text_width < minimum_text_width:
+        reducible_logo_width = max(0, logo_box_width - logo_min_width)
+        reduction = min(reducible_logo_width, minimum_text_width - text_width)
+        logo_box_width -= reduction
+        text_width += reduction
+
+    agent_min_size = max(92, round(height * 0.07))
+    if agent_image_size > 0 and text_width < minimum_text_width:
+        reducible_agent_width = max(0, agent_image_size - agent_min_size)
+        reduction = min(reducible_agent_width, minimum_text_width - text_width)
+        agent_image_size -= reduction
+        text_width += reduction
+
+    if text_width < minimum_text_width and agent_image_size > 0:
+        text_width += agent_image_size + agent_gap
         agent_image_size = 0
+        agent_gap = 0
+
+    if has_agency_logo and text_width < minimum_text_width:
+        text_width += max(0, logo_box_width - logo_min_width)
+        logo_box_width = logo_min_width
+
+    text_width = max(180, text_width)
 
     bottom_blocks: list[_MeasuredTextBlock] = []
     agent_name_text = agent_lines[0] if agent_lines else None
@@ -373,8 +423,16 @@ def build_overlay_layout(
             text=agent_name_text,
             usable_width=text_width,
             max_lines=2,
-            max_font_size=max(34, round(height * 0.024)),
-            min_font_size=max(22, round(height * 0.016)),
+            max_font_size=resolve_font_size_bounds(
+                "agent_name",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[0],
+            min_font_size=resolve_font_size_bounds(
+                "agent_name",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[1],
             min_chars=14,
         ),
         *(
@@ -383,8 +441,16 @@ def build_overlay_layout(
                 text=block_text,
                 usable_width=text_width,
                 max_lines=2,
-                max_font_size=max(26, round(height * 0.018)),
-                min_font_size=18,
+                max_font_size=resolve_font_size_bounds(
+                    block_name,
+                    frame_height=height,
+                    subtitle_font_size=settings.subtitle_font_size,
+                )[0],
+                min_font_size=resolve_font_size_bounds(
+                    block_name,
+                    frame_height=height,
+                    subtitle_font_size=settings.subtitle_font_size,
+                )[1],
                 min_chars=16,
             )
             for block_name, block_text in zip(
@@ -400,9 +466,10 @@ def build_overlay_layout(
         if measured_block.warning is not None:
             warnings.append(measured_block.warning)
 
-    show_agent_panel = bool(bottom_blocks or agent_image_size > 0)
+    show_agent_panel = bool(bottom_blocks or agent_image_size > 0 or has_agency_logo)
     bottom_panel: BoxLayout | None = None
     agent_image_box: BoxLayout | None = None
+    agency_logo_box: BoxLayout | None = None
     if show_agent_panel:
         bottom_gap = max(6, round(height * 0.004))
         text_height = (
@@ -412,7 +479,7 @@ def build_overlay_layout(
         bottom_min_height, bottom_max_height = _resolve_bottom_panel_height_range(settings)
         bottom_panel_height = min(
             bottom_max_height,
-            max(bottom_min_height, max(text_height, agent_image_size) + (panel_padding_y * 2)),
+            max(bottom_min_height, max(text_height, agent_image_size, logo_box_height) + (panel_padding_y * 2)),
         )
         bottom_panel = BoxLayout(
             visible=True,
@@ -428,6 +495,14 @@ def build_overlay_layout(
                 y=bottom_panel.y + max(panel_padding_y, round((bottom_panel.height - agent_image_size) / 2)),
                 width=agent_image_size,
                 height=agent_image_size,
+            )
+        if has_agency_logo and logo_box_width > 0 and logo_box_height > 0:
+            agency_logo_box = BoxLayout(
+                visible=True,
+                x=bottom_panel.x + bottom_panel.width - panel_padding_x - logo_box_width,
+                y=bottom_panel.y + max(panel_padding_y, round((bottom_panel.height - logo_box_height) / 2)),
+                width=logo_box_width,
+                height=logo_box_height,
             )
         text_x = (
             bottom_panel.x + panel_padding_x
@@ -464,10 +539,11 @@ def build_overlay_layout(
             - subtitle_gap_y
         )
         raw_segments = []
+        intro_duration = settings.intro_duration_seconds if settings.include_intro else 0.0
         if settings.include_intro:
             intro_caption = normalize_caption(cover_caption if cover_caption is not None else slides[0].caption if slides else None, "")
-            raw_segments.append((0.0, settings.intro_duration_seconds, intro_caption))
-        slide_start_offset = settings.intro_duration_seconds
+            raw_segments.append((0.0, intro_duration, intro_caption))
+        slide_start_offset = intro_duration
         for index, slide in enumerate(slides):
             raw_segments.append(
                 (
@@ -485,8 +561,16 @@ def build_overlay_layout(
                 text=caption_text,
                 usable_width=subtitle_max_width,
                 max_lines=3,
-                max_font_size=settings.subtitle_font_size,
-                min_font_size=max(24, round(settings.subtitle_font_size * 0.55)),
+                max_font_size=resolve_font_size_bounds(
+                    "subtitle_caption",
+                    frame_height=height,
+                    subtitle_font_size=settings.subtitle_font_size,
+                )[0],
+                min_font_size=resolve_font_size_bounds(
+                    "subtitle_caption",
+                    frame_height=height,
+                    subtitle_font_size=settings.subtitle_font_size,
+                )[1],
                 min_chars=18,
             )
             if measured_caption is None:
@@ -517,6 +601,7 @@ def build_overlay_layout(
         top_panel=top_panel,
         bottom_panel=bottom_panel,
         agent_image_box=agent_image_box,
+        agency_logo_box=agency_logo_box,
         ber_badge_box=ber_badge_box,
         text_blocks=tuple(text_blocks),
         subtitle_segments=tuple(subtitle_segments),

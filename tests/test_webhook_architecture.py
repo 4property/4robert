@@ -18,9 +18,18 @@ if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
 from application.dispatching import SqliteJobDispatcher
-from application.default_services import DefaultPropertyInfoService, FileSystemMediaPublisher
+from application.default_services import (
+    DefaultMediaPreparationService,
+    DefaultPropertyInfoService,
+    FileSystemMediaPublisher,
+)
 from application.media_planning import build_media_delivery_plan, normalize_listing_lifecycle
-from application.types import PropertyVideoJob, RenderedMediaArtifact, SocialPublishContext
+from application.types import (
+    PreparedMediaAssets,
+    PropertyVideoJob,
+    RenderedMediaArtifact,
+    SocialPublishContext,
+)
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
     DATABASE_FILENAME,
@@ -320,10 +329,13 @@ class PropertyInfoServiceTests(unittest.TestCase):
         selected_image_path = selected_dir / "primary.jpg"
         selected_image_path.write_bytes(b"image")
         storage_paths.reels_root.mkdir(parents=True, exist_ok=True)
+        storage_paths.generated_posters_root.mkdir(parents=True, exist_ok=True)
         manifest_path = storage_paths.reels_root / f"{property_item.slug}-reel.json"
         video_path = storage_paths.reels_root / f"{property_item.slug}-reel.mp4"
+        poster_path = storage_paths.generated_posters_root / f"{property_item.slug}-poster.jpg"
         manifest_path.write_text("{}", encoding="utf-8")
         video_path.write_bytes(b"video")
+        poster_path.write_bytes(b"poster")
 
         with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
             repository.save_property_images(
@@ -612,8 +624,10 @@ class WorkflowPersistenceTests(unittest.TestCase):
             staging_dir.mkdir(parents=True, exist_ok=True)
             staged_manifest_path = staging_dir / "sample-property-reel.json"
             staged_media_path = staging_dir / "sample-property-reel.mp4"
+            staged_poster_path = staging_dir / "sample-property-poster.jpg"
             staged_manifest_path.write_text("{}", encoding="utf-8")
             staged_media_path.write_bytes(b"video")
+            staged_poster_path.write_bytes(b"poster")
 
             publisher = FileSystemMediaPublisher(
                 unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
@@ -643,6 +657,14 @@ class WorkflowPersistenceTests(unittest.TestCase):
                     site_id=context.site_id,
                     source_property_id=context.property.id,
                 )
+            poster_exists = (
+                workspace_dir
+                / "generated_media"
+                / context.storage_paths.safe_site_dir
+                / "posters"
+                / "sample-property-poster.jpg"
+            ).exists()
+            staging_exists = staging_dir.exists()
 
         self.assertIsNotNone(state)
         assert state is not None
@@ -654,6 +676,151 @@ class WorkflowPersistenceTests(unittest.TestCase):
         self.assertEqual(revisions[0].workflow_state, "rendered")
         self.assertEqual(events[-1].event_type, "media_rendered")
         self.assertEqual(events[-1].payload["revision_id"], "revision-1")
+        self.assertTrue(poster_exists)
+        self.assertFalse(staging_exists)
+
+    def test_local_media_publish_keeps_staging_when_cleanup_mode_is_none(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = DefaultPropertyInfoService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                property_url_template="https://{site_id}/property/{slug}",
+                property_url_tracking_params={},
+                social_publishing_enabled=True,
+            )
+            context = service.ingest_property(build_job())
+            staging_dir = workspace_dir / "staging"
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            staged_manifest_path = staging_dir / "sample-property-reel.json"
+            staged_media_path = staging_dir / "sample-property-reel.mp4"
+            staged_poster_path = staging_dir / "sample-property-poster.jpg"
+            staged_manifest_path.write_text("{}", encoding="utf-8")
+            staged_media_path.write_bytes(b"video")
+            staged_poster_path.write_bytes(b"poster")
+
+            publisher = FileSystemMediaPublisher(
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                cleanup_temporary_files=False,
+            )
+            publisher.publish_media(
+                context,
+                RenderedMediaArtifact(
+                    staging_dir=staging_dir,
+                    media_path=staged_media_path,
+                    metadata_path=staged_manifest_path,
+                    revision_id="revision-1",
+                ),
+            )
+
+            staging_exists = staging_dir.exists()
+
+        self.assertTrue(staging_exists)
+
+    def test_media_preparation_cleanup_removes_selected_dir_when_flag_is_enabled(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = DefaultPropertyInfoService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                property_url_template="https://{site_id}/property/{slug}",
+                property_url_tracking_params={},
+                social_publishing_enabled=True,
+            )
+            context = service.ingest_property(build_job())
+            selected_dir = context.storage_paths.filtered_images_root / context.property.slug / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            (selected_dir / "primary.jpg").write_bytes(b"image")
+
+            preparation_service = DefaultMediaPreparationService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                cleanup_selected_photos=True,
+            )
+            preparation_service.cleanup_prepared_assets(
+                context,
+                PreparedMediaAssets(
+                    selected_dir=selected_dir,
+                    selected_photo_paths=(selected_dir / "primary.jpg",),
+                    downloaded_images=(),
+                    primary_image_path=selected_dir / "primary.jpg",
+                ),
+            )
+
+            selected_dir_exists = selected_dir.exists()
+
+        self.assertFalse(selected_dir_exists)
+
+    def test_missing_local_poster_forces_rerender(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = DefaultPropertyInfoService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                property_url_template="https://{site_id}/property/{slug}",
+                property_url_tracking_params={},
+                social_publishing_enabled=True,
+            )
+            first_context = service.ingest_property(build_job())
+            storage_paths = resolve_site_storage_layout(workspace_dir, "site-a")
+            selected_dir = storage_paths.filtered_images_root / first_context.property.slug / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            selected_image_path = selected_dir / "primary.jpg"
+            selected_image_path.write_bytes(b"image")
+            storage_paths.reels_root.mkdir(parents=True, exist_ok=True)
+            storage_paths.generated_posters_root.mkdir(parents=True, exist_ok=True)
+            manifest_path = storage_paths.reels_root / f"{first_context.property.slug}-reel.json"
+            video_path = storage_paths.reels_root / f"{first_context.property.slug}-reel.mp4"
+            poster_path = storage_paths.generated_posters_root / f"{first_context.property.slug}-poster.jpg"
+            manifest_path.write_text("{}", encoding="utf-8")
+            video_path.write_bytes(b"video")
+            poster_path.write_bytes(b"poster")
+
+            with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+                repository.save_property_images(
+                    first_context.property,
+                    selected_dir,
+                    [
+                        (
+                            1,
+                            first_context.property.featured_image_url or "https://example.com/image.jpg",
+                            selected_image_path,
+                        )
+                    ],
+                    site_id="site-a",
+                )
+                repository.save_local_artifacts(
+                    site_id="site-a",
+                    source_property_id=first_context.property.id,
+                    manifest_path=manifest_path,
+                    video_path=video_path,
+                )
+                repository.update_social_publish_status(
+                    site_id="site-a",
+                    source_property_id=first_context.property.id,
+                    status="published",
+                    details={
+                        "aggregate_status": "published",
+                        "desired_platforms": ["tiktok"],
+                        "successful_platforms": ["tiktok"],
+                        "platform_results": {
+                            "tiktok": {
+                                "platform": "tiktok",
+                                "outcome": "published",
+                                "post_id": "post-1",
+                                "post_status": "published",
+                            }
+                        },
+                    },
+                    last_published_location_id="location-a",
+                )
+            poster_path = (
+                first_context.storage_paths.generated_posters_root
+                / f"{first_context.property.slug}-poster.jpg"
+            )
+            poster_path.unlink()
+
+            rerender_context = service.ingest_property(build_job())
+
+        self.assertFalse(rerender_context.is_noop)
+        self.assertTrue(rerender_context.requires_render)
 
     def test_readiness_report_exposes_optional_capabilities_without_blocking_core(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -671,12 +838,62 @@ class WorkflowPersistenceTests(unittest.TestCase):
                     security_disabled=True,
                 )
 
-        self.assertEqual(readiness["ready"], readiness["capabilities"]["core"]["ready"])
         self.assertTrue(readiness["ready"])
+        self.assertFalse(readiness["production_ready"])
+        self.assertEqual(readiness["ready"], readiness["capabilities"]["core"]["ready"])
         self.assertTrue(readiness["checks"]["background_audio_available"])
         self.assertIn("ai_photo_selection", readiness["capabilities"])
         self.assertIsInstance(readiness["capabilities"]["ai_photo_selection"]["ready"], bool)
         self.assertGreaterEqual(len(readiness["warnings"]), 1)
+
+    def test_readiness_report_requires_effective_site_secret_when_security_is_enabled(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets" / "music"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            with patch(
+                "services.webhook_transport.operations.resolve_ffmpeg_binary",
+                return_value=workspace_dir / "ffmpeg.exe",
+            ):
+                readiness = build_readiness_report(
+                    workspace_dir,
+                    site_secrets={"site-a": "change-me"},
+                    worker_count=1,
+                    security_disabled=False,
+                )
+
+        self.assertFalse(readiness["ready"])
+        self.assertFalse(readiness["production_ready"])
+        self.assertFalse(readiness["checks"]["site_secrets_effective"])
+        self.assertTrue(
+            any(
+                failure.get("check") == "site_secrets_configured"
+                for failure in readiness["failures"]
+                if isinstance(failure, dict)
+            )
+        )
+
+    def test_readiness_report_treats_placeholder_gemini_key_as_not_configured(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets" / "music"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            (assets_dir / "ncs-music.mp3").write_bytes(b"audio")
+            with (
+                patch(
+                    "services.webhook_transport.operations.resolve_ffmpeg_binary",
+                    return_value=workspace_dir / "ffmpeg.exe",
+                ),
+                patch("services.webhook_transport.operations.GEMINI_API_KEY", "replace-me"),
+                patch("services.webhook_transport.operations.GEMINI_MODEL", "gemini-2.5-flash"),
+            ):
+                readiness = build_readiness_report(
+                    workspace_dir,
+                    site_secrets={"site-a": "secret-a"},
+                    worker_count=1,
+                    security_disabled=False,
+                )
+
+        self.assertFalse(readiness["capabilities"]["ai_photo_selection"]["ready"])
 
 
 class MediaPlanningTests(unittest.TestCase):
@@ -722,6 +939,7 @@ class WebhookTransportTests(unittest.TestCase):
         self,
         dispatcher: RecordingDispatcher | None = None,
         *,
+        allowed_hosts: tuple[str, ...] = ("testserver",),
         security_disabled: bool = False,
         site_secrets: dict[str, str] | None = None,
     ) -> tuple[TestClient, RecordingDispatcher]:
@@ -732,6 +950,7 @@ class WebhookTransportTests(unittest.TestCase):
         application = WordPressWebhookApplication(
             workspace_dir=workspace_dir,
             dispatcher=active_dispatcher,
+            allowed_hosts=allowed_hosts,
             site_secrets=site_secrets or {"site-a": "secret-a"},
             security_disabled=security_disabled,
             worker_count=1,
@@ -854,6 +1073,32 @@ class WebhookTransportTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "INVALID_WEBHOOK_CREDENTIALS")
+        self.assertEqual(response.json()["error"], "Invalid webhook credentials.")
+        self.assertNotIn("signature does not match", json.dumps(response.json()).lower())
+
+    def test_health_endpoints_return_minimal_payloads(self) -> None:
+        client, _ = self._build_client()
+
+        with client:
+            live_response = client.get("/health/live")
+            ready_response = client.get("/health/ready")
+
+        self.assertEqual(live_response.status_code, 200)
+        self.assertEqual(live_response.json(), {"status": "ok"})
+        self.assertEqual(ready_response.status_code, 200)
+        self.assertEqual(ready_response.json(), {"status": "ready"})
+
+    def test_allowed_hosts_rejects_unknown_host_headers(self) -> None:
+        client, _ = self._build_client(allowed_hosts=("example.com",))
+
+        with client:
+            response = client.get(
+                "/health/live",
+                headers={"Host": "evil.example"},
+            )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_dispatcher_not_accepting_returns_503(self) -> None:
         payload = build_sample_payload()
@@ -1366,7 +1611,7 @@ class RenderOverlayTests(unittest.TestCase):
             property_county_label="Dublin",
             eircode="D04 TEST",
         )
-        template = PropertyReelTemplate()
+        template = PropertyReelTemplate(include_intro=True)
 
         filter_text = build_overlay_filter(
             property_data,
@@ -1659,6 +1904,8 @@ class StatusReelRenderTests(unittest.TestCase):
         self.assertNotIn("[coverbg][logo]overlay=", filter_text)
         self.assertNotIn("concat=n=2:v=1:a=0[video_base]", filter_text)
         self.assertIn("[slideshow]null[video_base]", filter_text)
+        self.assertNotIn("fade=t=in:st=0:d=", filter_text)
+        self.assertIn("fade=t=out:st=", filter_text)
         self.assertIn("SALE AGREED", filter_text)
         self.assertNotIn("650\\,000", filter_text)
 
@@ -1687,7 +1934,7 @@ class StatusReelRenderTests(unittest.TestCase):
             property_county_label="Dublin",
             eircode="D04 TEST",
         )
-        template = PropertyReelTemplate()
+        template = PropertyReelTemplate(include_intro=True)
         slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
 
         filter_text = build_filter_complex(
@@ -1704,6 +1951,52 @@ class StatusReelRenderTests(unittest.TestCase):
         self.assertIn("[coverbg]null[cover]", filter_text)
         self.assertIn("[cover][slideshow]concat=n=2:v=1:a=0[video_base]", filter_text)
         self.assertNotIn("[coverbg][logo]overlay=", filter_text)
+        self.assertNotIn("fade=t=in:st=0:d=", filter_text)
+
+    def test_multi_slide_filter_only_applies_fade_in_after_first_slide(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+        )
+        template = build_reel_template_for_render_profile("for_sale_reel")
+        slides = (
+            PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None),
+            PropertyReelSlide(image_path=Path("secondary_image.jpg"), caption=None),
+        )
+
+        filter_text = build_filter_complex(
+            property_data,
+            template,
+            slides=slides,
+            slide_frames=120,
+            slide_duration=template.seconds_per_slide,
+            logo_input_index=None,
+            agent_image_input_index=2,
+            ber_icon_input_index=3,
+        )
+
+        self.assertEqual(filter_text.count("fade=t=in:st=0:d="), 1)
+        self.assertEqual(filter_text.count("fade=t=out:st="), 2)
 
 
 class BerIconRuntimeTests(unittest.TestCase):
@@ -1714,7 +2007,6 @@ class BerIconRuntimeTests(unittest.TestCase):
             icon_path = ber_dir / "B2.png"
             icon_path.write_bytes(b"png")
             template = PropertyReelTemplate()
-
             self.assertEqual(resolve_ber_icon_path(workspace_dir, template, "B2"), icon_path)
             self.assertEqual(resolve_ber_icon_path(workspace_dir, template, "ber b2"), icon_path)
             self.assertEqual(resolve_ber_icon_path(workspace_dir, template, "B 2"), icon_path)
@@ -1898,6 +2190,7 @@ class ReelManifestTests(unittest.TestCase):
                 workspace_dir,
                 property_data,
                 template=PropertyReelTemplate(
+                    include_intro=True,
                     intro_duration_seconds=3.0,
                     seconds_per_slide=4.0,
                     total_duration_seconds=10.0,

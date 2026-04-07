@@ -21,13 +21,16 @@ from services.social_delivery.models import (
     LocationUser,
     MultiPlatformPublishRequest,
     MultiPlatformPublishResult,
+    PlatformPublishTarget,
     PlatformPublishOutcome,
     PublishMediaRequest,
     PublishMediaResult,
     SocialAccount,
     UploadedMedia,
 )
+from services.social_delivery.platforms import get_platform_config, list_supported_platforms
 from services.social_delivery.platform_policy import (
+    normalize_platform_name,
     resolve_platform_social_post_type,
     validate_platform_publish_request,
 )
@@ -38,13 +41,7 @@ from services.social_delivery.user_selection import (
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_GOHIGHLEVEL_PLATFORMS = frozenset({"tiktok", "instagram", "linkedin", "youtube"})
-_PLATFORM_ALIASES = {
-    "linked-in": "linkedin",
-    "linked_in": "linkedin",
-    "you-tube": "youtube",
-    "you_tube": "youtube",
-}
+SUPPORTED_GOHIGHLEVEL_PLATFORMS = frozenset(list_supported_platforms())
 
 
 class GoHighLevelPublisher:
@@ -126,7 +123,8 @@ class GoHighLevelPublisher:
         self,
         request: MultiPlatformPublishRequest,
     ) -> MultiPlatformPublishResult:
-        desired_platforms = _normalise_requested_platforms(request.platforms)
+        normalized_targets = _normalise_publish_targets(request.publish_targets)
+        desired_platforms = tuple(target.platform for target in normalized_targets)
         if not desired_platforms:
             return MultiPlatformPublishResult(
                 desired_platforms=(),
@@ -139,8 +137,23 @@ class GoHighLevelPublisher:
                 artifact_kind=request.artifact_kind,
             )
 
+        logger.info(
+            format_console_block(
+                "GoHighLevel Multi-Platform Publish Started",
+                format_detail_line("Location ID", request.location_id),
+                format_detail_line("Desired platforms", ", ".join(desired_platforms)),
+                format_detail_line(
+                    "Artifact targets",
+                    ", ".join(
+                        f"{target.platform}:{target.artifact_kind}"
+                        for target in normalized_targets
+                    ),
+                ),
+                format_detail_line("Source site", request.source_site_id or "<none>"),
+            )
+        )
+
         try:
-            upload_file_name = self._resolve_batch_upload_file_name(request, desired_platforms)
             all_accounts = self._run_with_retry(
                 lambda: self._list_active_accounts(
                     location_id=request.location_id,
@@ -163,16 +176,6 @@ class GoHighLevelPublisher:
                 location_users=location_users,
                 requested_user_id=request.user_id,
             )
-            uploaded_media = self._run_with_retry(
-                lambda: self.media_service.upload_media(
-                    access_token=request.access_token,
-                    media_path=request.media_path,
-                    upload_file_name=upload_file_name,
-                ),
-                location_id=request.location_id,
-                operation_name="Uploading GoHighLevel media",
-                platform_label="all",
-            )
         except Exception as error:
             self._raise_batch_failure(
                 request=request,
@@ -181,6 +184,8 @@ class GoHighLevelPublisher:
                     PlatformPublishOutcome(
                         platform=platform,
                         outcome="failed",
+                        artifact_kind=request.artifact_kind,
+                        social_post_type=request.social_post_type,
                         retryable=self._is_retryable_error(error),
                         error=str(error),
                     )
@@ -193,17 +198,20 @@ class GoHighLevelPublisher:
 
         accounts_by_platform = self._group_accounts_by_platform(all_accounts)
         outcomes: list[PlatformPublishOutcome] = []
-        for platform in desired_platforms:
+        uploaded_media_by_group: dict[tuple[str, str], UploadedMedia] = {}
+        first_uploaded_media: UploadedMedia | None = None
+        for target in normalized_targets:
+            platform = target.platform
             effective_social_post_type = resolve_platform_social_post_type(
                 platform=platform,
-                requested_social_post_type=request.social_post_type,
+                requested_social_post_type=target.social_post_type,
             )
             platform_warnings = validate_platform_publish_request(
                 platform=platform,
-                description=request.descriptions_by_platform.get(platform, ""),
+                description=target.description,
                 social_post_type=effective_social_post_type,
-                artifact_kind=request.artifact_kind,
-                title=request.titles_by_platform.get(platform),
+                artifact_kind=target.artifact_kind,
+                title=target.title,
             )
             for warning in platform_warnings:
                 logger.warning(
@@ -211,6 +219,7 @@ class GoHighLevelPublisher:
                         "Platform Publish Policy Warning",
                         format_detail_line("Location ID", request.location_id),
                         format_detail_line("Platform", platform),
+                        format_detail_line("Artifact kind", target.artifact_kind),
                         format_detail_line("Warning", warning),
                     )
                 )
@@ -219,6 +228,8 @@ class GoHighLevelPublisher:
                     PlatformPublishOutcome(
                         platform=platform,
                         outcome="skipped_unsupported_platform",
+                        artifact_kind=target.artifact_kind,
+                        social_post_type=effective_social_post_type,
                         warnings=platform_warnings,
                         user_id=selected_user.id,
                         user_display_name=selected_user.display_name,
@@ -238,6 +249,8 @@ class GoHighLevelPublisher:
                     PlatformPublishOutcome(
                         platform=platform,
                         outcome="skipped_missing_account",
+                        artifact_kind=target.artifact_kind,
+                        social_post_type=effective_social_post_type,
                         warnings=platform_warnings,
                         user_id=selected_user.id,
                         user_display_name=selected_user.display_name,
@@ -256,6 +269,48 @@ class GoHighLevelPublisher:
                 requested_account_id=None,
                 platform=platform,
             )
+            upload_group_key = (
+                str(target.media_path.resolve()),
+                target.artifact_kind,
+            )
+            uploaded_media = uploaded_media_by_group.get(upload_group_key)
+            if uploaded_media is None:
+                upload_file_name = self._resolve_upload_file_name_for_targets((target,))
+                uploaded_media = self._run_with_retry(
+                    lambda: self.media_service.upload_media(
+                        access_token=request.access_token,
+                        media_path=target.media_path,
+                        upload_file_name=upload_file_name,
+                    ),
+                    location_id=request.location_id,
+                    operation_name="Uploading GoHighLevel media",
+                    platform_label=platform,
+                )
+                uploaded_media_by_group[upload_group_key] = uploaded_media
+                if first_uploaded_media is None:
+                    first_uploaded_media = uploaded_media
+                logger.info(
+                    format_console_block(
+                        "GoHighLevel Artifact Upload Completed",
+                        format_detail_line("Location ID", request.location_id),
+                        format_detail_line("Platform", platform),
+                        format_detail_line("Artifact kind", target.artifact_kind),
+                        format_detail_line("Media path", target.media_path),
+                        format_detail_line("Upload file name", upload_file_name or "<none>"),
+                        format_detail_line("Uploaded media ID", uploaded_media.file_id),
+                    )
+                )
+            else:
+                logger.info(
+                    format_console_block(
+                        "GoHighLevel Artifact Upload Reused",
+                        format_detail_line("Location ID", request.location_id),
+                        format_detail_line("Platform", platform),
+                        format_detail_line("Artifact kind", target.artifact_kind),
+                        format_detail_line("Media path", target.media_path),
+                        format_detail_line("Uploaded media ID", uploaded_media.file_id),
+                    )
+                )
             try:
                 created_post = self._publish_platform_with_retry(
                     location_id=request.location_id,
@@ -264,15 +319,17 @@ class GoHighLevelPublisher:
                     selected_user=selected_user,
                     uploaded_media=uploaded_media,
                     platform=platform,
-                    description=request.descriptions_by_platform.get(platform, ""),
-                    title=request.titles_by_platform.get(platform),
+                    description=target.description,
+                    title=target.title,
                     social_post_type=effective_social_post_type,
-                    target_url=request.target_url,
+                    target_url=target.target_url,
                 )
                 outcomes.append(
                     PlatformPublishOutcome(
                         platform=platform,
                         outcome=(created_post.status or "published").strip().lower() or "published",
+                        artifact_kind=target.artifact_kind,
+                        social_post_type=effective_social_post_type,
                         warnings=platform_warnings,
                         account_id=selected_account.id,
                         account_name=selected_account.name,
@@ -282,6 +339,19 @@ class GoHighLevelPublisher:
                         post_status=created_post.status,
                         message=created_post.message,
                         trace_id=_extract_trace_id(created_post.raw_response),
+                    )
+                )
+                logger.info(
+                    format_console_block(
+                        "GoHighLevel Platform Publish Completed",
+                        format_detail_line("Location ID", request.location_id),
+                        format_detail_line("Platform", platform),
+                        format_detail_line("Artifact kind", target.artifact_kind),
+                        format_detail_line("Social post type", effective_social_post_type),
+                        format_detail_line("Account ID", selected_account.id),
+                        format_detail_line("User ID", selected_user.id),
+                        format_detail_line("Post ID", created_post.post_id or "<none>"),
+                        format_detail_line("Post status", created_post.status or "<none>"),
                     )
                 )
             except Exception as error:
@@ -294,6 +364,8 @@ class GoHighLevelPublisher:
                     PlatformPublishOutcome(
                         platform=platform,
                         outcome="failed",
+                        artifact_kind=target.artifact_kind,
+                        social_post_type=effective_social_post_type,
                         retryable=self._is_retryable_error(error),
                         warnings=platform_warnings,
                         account_id=selected_account.id,
@@ -308,6 +380,10 @@ class GoHighLevelPublisher:
                         "GoHighLevel Platform Publish Failed",
                         format_detail_line("Location ID", request.location_id),
                         format_detail_line("Platform", platform),
+                        format_detail_line("Artifact kind", target.artifact_kind),
+                        format_detail_line("Social post type", effective_social_post_type),
+                        format_detail_line("Account ID", selected_account.id),
+                        format_detail_line("User ID", selected_user.id),
                         format_detail_line("Trace ID", error_trace_id or "<none>"),
                         format_detail_line("Response body", error_response_body or "<none>"),
                         format_detail_line("Reason", error),
@@ -318,7 +394,7 @@ class GoHighLevelPublisher:
             desired_platforms=desired_platforms,
             platform_results=tuple(outcomes),
             selected_user=selected_user,
-            uploaded_media=uploaded_media,
+            uploaded_media=first_uploaded_media,
             source_site_id=request.source_site_id,
             target_url=request.target_url,
             social_post_type=request.social_post_type,
@@ -330,7 +406,7 @@ class GoHighLevelPublisher:
                 desired_platforms=desired_platforms,
                 outcomes=result.platform_results,
                 selected_user=selected_user,
-                uploaded_media=uploaded_media,
+                uploaded_media=first_uploaded_media,
                 error=None,
             )
 
@@ -800,19 +876,35 @@ class GoHighLevelPublisher:
     ) -> str | None:
         if str(request.upload_file_name or "").strip():
             return request.upload_file_name
-        if "youtube" not in desired_platforms:
-            return None
-        youtube_title = str(request.titles_by_platform.get("youtube") or "").strip()
-        return youtube_title or None
+        for platform in desired_platforms:
+            platform_config = get_platform_config(platform)
+            if platform_config is None:
+                continue
+            upload_file_name = platform_config.build_upload_file_name(
+                request.titles_by_platform.get(platform),
+            )
+            if upload_file_name:
+                return upload_file_name
+        return None
+
+    @staticmethod
+    def _resolve_upload_file_name_for_targets(
+        targets: tuple[PlatformPublishTarget, ...],
+    ) -> str | None:
+        for target in targets:
+            normalized_upload_file_name = str(target.upload_file_name or "").strip()
+            if normalized_upload_file_name:
+                return normalized_upload_file_name
+        return None
 
     @staticmethod
     def _resolve_single_upload_file_name(request: PublishMediaRequest) -> str | None:
         if str(request.upload_file_name or "").strip():
             return request.upload_file_name
-        if _normalise_platform_name(request.platform) != "youtube":
+        platform_config = get_platform_config(request.platform)
+        if platform_config is None:
             return None
-        normalized_title = str(request.title or "").strip()
-        return normalized_title or None
+        return platform_config.build_upload_file_name(request.title)
 
 
 def _selector_name(selector: LocationUserFallbackSelector) -> str:
@@ -820,8 +912,7 @@ def _selector_name(selector: LocationUserFallbackSelector) -> str:
 
 
 def _normalise_platform_name(platform: str) -> str:
-    normalized_platform = platform.strip().lower()
-    return _PLATFORM_ALIASES.get(normalized_platform, normalized_platform)
+    return normalize_platform_name(platform)
 
 
 def _normalise_requested_platforms(platforms: tuple[str, ...]) -> tuple[str, ...]:
@@ -834,6 +925,31 @@ def _normalise_requested_platforms(platforms: tuple[str, ...]) -> tuple[str, ...
         seen.add(normalized_platform)
         normalized_platforms.append(normalized_platform)
     return tuple(normalized_platforms)
+
+
+def _normalise_publish_targets(
+    targets: tuple[PlatformPublishTarget, ...],
+) -> tuple[PlatformPublishTarget, ...]:
+    normalized_targets: list[PlatformPublishTarget] = []
+    seen_platforms: set[str] = set()
+    for target in targets:
+        normalized_platform = _normalise_platform_name(target.platform)
+        if not normalized_platform or normalized_platform in seen_platforms:
+            continue
+        seen_platforms.add(normalized_platform)
+        normalized_targets.append(
+            PlatformPublishTarget(
+                platform=normalized_platform,
+                media_path=target.media_path,
+                description=target.description,
+                title=target.title,
+                upload_file_name=target.upload_file_name,
+                target_url=target.target_url,
+                social_post_type=target.social_post_type,
+                artifact_kind=target.artifact_kind,
+            )
+        )
+    return tuple(normalized_targets)
 
 
 def _extract_trace_id(raw_response: dict[str, object]) -> str | None:

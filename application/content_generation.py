@@ -4,13 +4,18 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from models.property import Property
-from services.social_delivery.post_copy import build_property_copy_bundle
+from services.social_delivery.description import (
+    build_platform_descriptions_for_property_with_url,
+    build_platform_titles_for_property,
+)
+from services.social_delivery.post_copy import build_property_caption
 
 
 @dataclass(frozen=True, slots=True)
 class GeneratedPropertyContent:
     default_caption: str
     captions_by_platform: dict[str, str]
+    titles_by_platform: dict[str, str]
     overlay_text: dict[str, str] = field(default_factory=dict)
     narration_script: str = ""
 
@@ -34,14 +39,25 @@ class DeterministicPropertyContentGenerator:
         property_url: str,
         platforms: tuple[str, ...],
     ) -> GeneratedPropertyContent:
-        copy_bundle = build_property_copy_bundle(
-            property_item=property_item,
+        captions_by_platform = build_platform_descriptions_for_property_with_url(
+            property_item,
             property_url=property_url,
             platforms=platforms,
         )
+        titles_by_platform = build_platform_titles_for_property(
+            property_item,
+            platforms=platforms,
+        )
         return GeneratedPropertyContent(
-            default_caption=copy_bundle.default_caption,
-            captions_by_platform=dict(copy_bundle.captions_by_platform),
+            default_caption=build_property_caption(
+                property_url=property_url,
+                agent_name=property_item.agent_name,
+                agent_phone=property_item.agent_mobile or property_item.agent_number,
+                agent_email=property_item.agent_email,
+                agency_psra=property_item.agency_psra,
+            ),
+            captions_by_platform=captions_by_platform,
+            titles_by_platform=titles_by_platform,
             overlay_text={},
             narration_script="",
         )

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config import SOCIAL_PUBLISHING_YOUTUBE_POST_TYPE
-from services.social_delivery.description import TIKTOK_MAX_DESCRIPTION_LENGTH
+from services.social_delivery.platforms import get_platform_config, normalize_platform_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,36 +13,16 @@ class PlatformPolicy:
     allowed_artifact_kinds: tuple[str, ...]
 
 
-_PLATFORM_POLICIES: dict[str, PlatformPolicy] = {
-    "tiktok": PlatformPolicy(
-        platform="tiktok",
-        max_caption_length=TIKTOK_MAX_DESCRIPTION_LENGTH,
-        allowed_social_post_types=("reel",),
-        allowed_artifact_kinds=("reel_video",),
-    ),
-    "instagram": PlatformPolicy(
-        platform="instagram",
-        max_caption_length=None,
-        allowed_social_post_types=("reel",),
-        allowed_artifact_kinds=("reel_video",),
-    ),
-    "linkedin": PlatformPolicy(
-        platform="linkedin",
-        max_caption_length=None,
-        allowed_social_post_types=("reel",),
-        allowed_artifact_kinds=("reel_video",),
-    ),
-    "youtube": PlatformPolicy(
-        platform="youtube",
-        max_caption_length=None,
-        allowed_social_post_types=("post",),
-        allowed_artifact_kinds=("reel_video",),
-    ),
-}
-
-
 def get_platform_policy(platform: str) -> PlatformPolicy | None:
-    return _PLATFORM_POLICIES.get(platform.strip().lower())
+    config = get_platform_config(platform)
+    if config is None:
+        return None
+    return PlatformPolicy(
+        platform=config.platform,
+        max_caption_length=config.max_caption_length,
+        allowed_social_post_types=config.allowed_social_post_types,
+        allowed_artifact_kinds=config.allowed_artifact_kinds,
+    )
 
 
 def validate_platform_publish_request(
@@ -58,6 +37,7 @@ def validate_platform_publish_request(
     if policy is None:
         return (f"No platform policy is registered for {platform}.",)
 
+    normalized_platform = normalize_platform_name(platform)
     warnings: list[str] = []
     if (
         policy.max_caption_length is not None
@@ -74,22 +54,32 @@ def validate_platform_publish_request(
         warnings.append(
             f"Artifact kind {artifact_kind!r} is not allowed by the {platform} policy."
         )
-    if platform.strip().lower() == "youtube" and not str(title or "").strip():
+    if normalized_platform == "youtube" and not str(title or "").strip():
         warnings.append("YouTube posts should include a title.")
     return tuple(warnings)
 
 
 def resolve_platform_social_post_type(*, platform: str, requested_social_post_type: str) -> str:
-    normalized_platform = platform.strip().lower()
-    normalized_type = requested_social_post_type.strip().lower()
-    if normalized_platform == "youtube":
-        return SOCIAL_PUBLISHING_YOUTUBE_POST_TYPE
-    return normalized_type or requested_social_post_type
+    config = get_platform_config(platform)
+    normalized_type = str(requested_social_post_type or "").strip().lower()
+    if config is None:
+        return normalized_type or requested_social_post_type
+    return config.resolve_social_post_type(requested_social_post_type)
+
+
+def resolve_platform_artifact_kind(*, platform: str, requested_artifact_kind: str) -> str:
+    config = get_platform_config(platform)
+    normalized_kind = str(requested_artifact_kind or "").strip().lower()
+    if config is None:
+        return normalized_kind or requested_artifact_kind
+    return config.resolve_artifact_kind(requested_artifact_kind)
 
 
 __all__ = [
     "PlatformPolicy",
     "get_platform_policy",
+    "normalize_platform_name",
+    "resolve_platform_artifact_kind",
     "resolve_platform_social_post_type",
     "validate_platform_publish_request",
 ]

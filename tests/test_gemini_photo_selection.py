@@ -633,6 +633,64 @@ class WordPressImageIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["results"], [])
         self.assertIn("Gemini is not configured", payload["processing_error"])
 
+    def test_download_and_filter_property_images_keeps_raw_downloads_when_cleanup_is_disabled(self) -> None:
+        property_item = build_property()
+
+        class FakeGeminiClient:
+            def __init__(self, *args, **kwargs) -> None:
+                self.model = "fake-gemini"
+
+            def classify_image(self, image_path: Path, property_payload: dict[str, object]) -> dict[str, object]:
+                if image_path.name == "primary_image.jpg":
+                    return {
+                        "area": "exterior",
+                        "confidence": 98,
+                        "showcase_score": 99,
+                        "space_id": "front",
+                        "highlights": ["façade", "private patio"],
+                        "caption": "Exterior",
+                    }
+                return {
+                    "area": "living_room",
+                    "confidence": 92,
+                    "showcase_score": 91,
+                    "space_id": f"space_{image_path.stem}",
+                    "highlights": ["bright", "open-plan"],
+                    "caption": "Living room",
+                }
+
+            def close(self) -> None:
+                return None
+
+        with workspace_temp_dir() as workspace_dir:
+            raw_images_root = workspace_dir / "property_media_raw" / "site-a"
+            filtered_images_root = workspace_dir / "property_media" / "site-a"
+
+            with (
+                patch(
+                    "services.property_media.downloads.download_image",
+                    side_effect=self._fake_download_image,
+                ),
+                patch(
+                    "services.ai_photo_selection.selection.GeminiPhotoSelectionClient",
+                    FakeGeminiClient,
+                ),
+            ):
+                selected_dir, _ = download_and_filter_property_images(
+                    property_item,
+                    raw_images_root,
+                    filtered_images_root,
+                    photos_to_select=2,
+                    cleanup_temporary_files=False,
+                )
+
+            raw_dir = raw_images_root / property_item.folder_name / "raw_photos"
+            selected_files = sorted(path.name for path in selected_dir.iterdir())
+            raw_dir_exists = raw_dir.exists()
+
+        self.assertTrue(raw_dir_exists)
+        self.assertIn("primary_image.jpg", selected_files)
+
 
 if __name__ == "__main__":
     unittest.main()

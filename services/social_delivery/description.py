@@ -5,9 +5,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from models.property import Property
 from repositories.property_pipeline_repository import PropertyReelRecord
-from services.social_delivery.post_copy import build_property_caption, build_property_copy_bundle
-
-TIKTOK_MAX_DESCRIPTION_LENGTH = 150
+from services.social_delivery.platforms import get_platform_config, normalize_platform_name
+from services.social_delivery.platforms.shared import (
+    SocialPlatformPropertyView,
+    TIKTOK_MAX_DESCRIPTION_LENGTH,
+    build_common_description,
+)
 
 
 def build_property_public_url(
@@ -52,12 +55,16 @@ def build_base_social_description(
         property_url_template=property_url_template,
         tracking_query_params=tracking_query_params,
     )
-    return build_property_caption(
-        property_url=property_url,
-        agent_name=agent_name,
-        agent_phone=agent_mobile or agent_number,
-        agent_email=agent_email,
-        agency_psra=agency_psra,
+    return build_common_description(
+        _build_property_view(
+            slug=slug,
+            agent_name=agent_name,
+            agent_email=agent_email,
+            agent_mobile=agent_mobile,
+            agent_number=agent_number,
+            agency_psra=agency_psra,
+        ),
+        property_url,
     )
 
 
@@ -76,18 +83,38 @@ def build_platform_description(
     tracking_query_params: Mapping[str, str] | None = None,
     **_: object,
 ) -> str:
-    del platform
-    return build_base_social_description(
+    property_url = build_property_public_url(
         site_id=site_id,
+        slug=slug,
+        property_link=property_link,
+        property_url_template=property_url_template,
+        tracking_query_params=tracking_query_params,
+    )
+    property_view = _build_property_view(
         slug=slug,
         agent_name=agent_name,
         agent_email=agent_email,
         agent_mobile=agent_mobile,
         agent_number=agent_number,
         agency_psra=agency_psra,
-        property_link=property_link,
-        property_url_template=property_url_template,
-        tracking_query_params=tracking_query_params,
+    )
+    return _build_platform_description_for_source(
+        property_view,
+        platform=platform,
+        property_url=property_url,
+    )
+
+
+def build_platform_description_for_property(
+    property_item: Property,
+    *,
+    platform: str,
+    property_url: str,
+) -> str:
+    return _build_platform_description_for_source(
+        property_item,
+        platform=platform,
+        property_url=property_url,
     )
 
 
@@ -106,12 +133,61 @@ def build_platform_descriptions_for_property(
         property_url_template=property_url_template,
         tracking_query_params=tracking_query_params,
     )
-    copy_bundle = build_property_copy_bundle(
-        property_item=property_item,
+    return build_platform_descriptions_for_property_with_url(
+        property_item,
         property_url=property_url,
         platforms=platforms,
     )
-    return dict(copy_bundle.captions_by_platform)
+
+
+def build_platform_descriptions_for_property_with_url(
+    property_item: Property,
+    *,
+    property_url: str,
+    platforms: tuple[str, ...],
+) -> dict[str, str]:
+    descriptions: dict[str, str] = {}
+    for platform in platforms:
+        normalized_platform = normalize_platform_name(platform)
+        if not normalized_platform:
+            continue
+        descriptions[normalized_platform] = build_platform_description_for_property(
+            property_item,
+            platform=normalized_platform,
+            property_url=property_url,
+        )
+    return descriptions
+
+
+def build_platform_title_for_property(
+    property_item: Property,
+    *,
+    platform: str,
+) -> str | None:
+    normalized_platform = normalize_platform_name(platform)
+    config = get_platform_config(normalized_platform)
+    if config is None:
+        return None
+    return config.build_title(property_item)
+
+
+def build_platform_titles_for_property(
+    property_item: Property,
+    *,
+    platforms: tuple[str, ...],
+) -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for platform in platforms:
+        normalized_platform = normalize_platform_name(platform)
+        if not normalized_platform:
+            continue
+        title = build_platform_title_for_property(
+            property_item,
+            platform=normalized_platform,
+        )
+        if title:
+            titles[normalized_platform] = title
+    return titles
 
 
 def build_tiktok_description(
@@ -128,7 +204,8 @@ def build_tiktok_description(
     tracking_query_params: Mapping[str, str] | None = None,
     **_: object,
 ) -> str:
-    return build_base_social_description(
+    return build_platform_description(
+        platform="tiktok",
         site_id=site_id,
         slug=slug,
         agent_name=agent_name,
@@ -151,17 +228,17 @@ def build_tiktok_description_for_property(
     max_length: int = TIKTOK_MAX_DESCRIPTION_LENGTH,
 ) -> str:
     del max_length
-    return build_tiktok_description(
+    property_url = build_property_public_url(
         site_id=site_id,
         slug=property_item.slug,
-        agent_name=property_item.agent_name,
-        agent_email=property_item.agent_email,
-        agent_mobile=property_item.agent_mobile,
-        agent_number=property_item.agent_number,
-        agency_psra=property_item.agency_psra,
         property_link=property_item.link,
         property_url_template=property_url_template,
         tracking_query_params=tracking_query_params,
+    )
+    return build_platform_description_for_property(
+        property_item,
+        platform="tiktok",
+        property_url=property_url,
     )
 
 
@@ -173,17 +250,62 @@ def build_tiktok_description_for_record(
     max_length: int = TIKTOK_MAX_DESCRIPTION_LENGTH,
 ) -> str:
     del max_length
-    return build_tiktok_description(
+    property_url = build_property_public_url(
         site_id=record.site_id,
         slug=record.slug,
-        agent_name=record.agent_name,
-        agent_email=record.agent_email,
-        agent_mobile=record.agent_mobile,
-        agent_number=record.agent_number,
-        agency_psra=record.agency_psra,
         property_link=record.link,
         property_url_template=property_url_template,
         tracking_query_params=tracking_query_params,
+    )
+    return _build_platform_description_for_source(
+        _build_property_view(
+            slug=record.slug,
+            title=record.title,
+            price=record.price,
+            agent_name=record.agent_name,
+            agent_email=record.agent_email,
+            agent_mobile=record.agent_mobile,
+            agent_number=record.agent_number,
+            agency_psra=record.agency_psra,
+        ),
+        platform="tiktok",
+        property_url=property_url,
+    )
+
+
+def _build_platform_description_for_source(
+    property_item,
+    *,
+    platform: str,
+    property_url: str,
+) -> str:
+    normalized_platform = normalize_platform_name(platform)
+    config = get_platform_config(normalized_platform)
+    if config is None:
+        return build_common_description(property_item, property_url)
+    return config.build_description(property_item, property_url)
+
+
+def _build_property_view(
+    *,
+    slug: str,
+    title: str | None = None,
+    price: str | None = None,
+    agent_name: str | None = None,
+    agent_email: str | None = None,
+    agent_mobile: str | None = None,
+    agent_number: str | None = None,
+    agency_psra: str | None = None,
+) -> SocialPlatformPropertyView:
+    return SocialPlatformPropertyView(
+        slug=slug,
+        title=title,
+        price=price,
+        agent_name=agent_name,
+        agent_email=agent_email,
+        agent_mobile=agent_mobile,
+        agent_number=agent_number,
+        agency_psra=agency_psra,
     )
 
 
@@ -213,7 +335,11 @@ def _apply_tracking_query_params(
             site_id=site_id,
             slug=slug,
         )
-        merged_query_items = [(existing_key, existing_value) for existing_key, existing_value in merged_query_items if existing_key != key]
+        merged_query_items = [
+            (existing_key, existing_value)
+            for existing_key, existing_value in merged_query_items
+            if existing_key != key
+        ]
         merged_query_items.append((key, formatted_value))
 
     return urlunsplit(
@@ -240,7 +366,11 @@ __all__ = [
     "TIKTOK_MAX_DESCRIPTION_LENGTH",
     "build_base_social_description",
     "build_platform_description",
+    "build_platform_description_for_property",
     "build_platform_descriptions_for_property",
+    "build_platform_descriptions_for_property_with_url",
+    "build_platform_title_for_property",
+    "build_platform_titles_for_property",
     "build_property_public_url",
     "build_tiktok_description",
     "build_tiktok_description_for_property",

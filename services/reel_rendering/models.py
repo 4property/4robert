@@ -6,7 +6,9 @@ from pathlib import Path
 from settings.reels import (
     ASSETS_DIRNAME,
     REEL_AUDIO_VOLUME,
+    REEL_AGENCY_LOGO_SCALE,
     REEL_BACKGROUND_AUDIO_FILENAME,
+    REEL_BER_ICON_SCALE,
     REEL_BER_ICONS_DIRNAME,
     REEL_COVER_LOGO_FILENAME,
     REEL_FFMPEG_ENCODER_THREADS,
@@ -47,13 +49,38 @@ class PropertyReelTemplate:
     bold_font_path: Path = DEFAULT_REEL_FONT_BOLD_PATH
     subtitle_font_path: Path = REEL_SUBTITLE_FONT_PATH
     subtitle_font_size: int = REEL_SUBTITLE_FONT_SIZE
-    include_intro: bool = True
+    ber_icon_scale: float = REEL_BER_ICON_SCALE
+    agency_logo_scale: float = REEL_AGENCY_LOGO_SCALE
+    include_intro: bool = False
 
 
 @dataclass(slots=True)
 class PropertyReelSlide:
     image_path: Path
     caption: str | None = None
+
+
+@dataclass(slots=True)
+class PreparedReelSlide:
+    original_path: Path
+    working_path: Path
+    caption: str | None = None
+    working_width: int = 0
+    working_height: int = 0
+    motion_mode: str = "diagonal"
+    source_width: int | None = None
+    source_height: int | None = None
+
+
+@dataclass(slots=True)
+class PreparedReelAssets:
+    working_dir: Path
+    slides: tuple[PreparedReelSlide, ...]
+    cover_background_path: Path
+    cover_logo_path: Path | None
+    agent_image_path: Path
+    ber_icon_path: Path | None
+    background_audio_path: Path
 
 
 @dataclass(slots=True)
@@ -95,6 +122,8 @@ __all__ = [
     "DEFAULT_REEL_FONT_BOLD_PATH",
     "DEFAULT_REEL_FONT_PATH",
     "PRIMARY_IMAGE_NAME",
+    "PreparedReelAssets",
+    "PreparedReelSlide",
     "PropertyReelData",
     "PropertyRenderData",
     "PropertyReelSlide",

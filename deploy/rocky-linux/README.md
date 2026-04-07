@@ -50,6 +50,7 @@ Edit `/etc/cpihed/cpihed.env` and set at least:
 
 - `WEBHOOK_SITE_SECRETS`
 - `WEBHOOK_DISABLE_SECURITY=false`
+- `WEBHOOK_ALLOWED_HOSTS` if your public webhook hostname does not match the dotted `site_id` values in `WEBHOOK_SITE_SECRETS`
 - `GO_HIGH_LEVEL_BASE_URL` if you use a non-default endpoint
 - `GEMINI_API_KEY` only if you want AI photo selection enabled
 
@@ -71,7 +72,12 @@ This validates:
 - background music asset presence
 - webhook secret configuration
 
-If the check fails, the error output now includes a troubleshooting hint and the failing check name.
+For a production deployment, the command must report both `Runtime ready: Yes` and `Production ready: Yes`.
+
+If the check fails, the error output now includes a troubleshooting hint and the failing check name. A deployment check will also fail if:
+
+- `WEBHOOK_DISABLE_SECURITY=true`
+- `WEBHOOK_SITE_SECRETS` still uses placeholder values such as `change-me`
 
 ## systemd
 
@@ -91,14 +97,27 @@ sudo journalctl -u cpihed -f
 curl -fsS http://127.0.0.1:8000/health/ready
 ```
 
+The `/health` endpoints are intentionally minimal in production:
+
+- `/health/live` returns only `{"status":"ok"}`
+- `/health/ready` returns only `{"status":"ready"}` or `{"status":"not_ready"}`
+
+Use `python main.py --check` or `journalctl -u cpihed -f` for detailed troubleshooting instead of relying on HTTP health output.
+
 ## Reverse proxy
 
 The service can bind directly to `0.0.0.0`, but in production it is usually better to keep:
 
 - `WEBHOOK_HOST=127.0.0.1`
 - `WEBHOOK_PORT=8000`
+- `WEBHOOK_TRUST_PROXY_HEADERS=true`
+- `WEBHOOK_FORWARDED_ALLOW_IPS=127.0.0.1`
 
 and expose it through Nginx or another reverse proxy with TLS.
+
+If the public webhook hostname differs from the dotted `site_id` values you use in `WEBHOOK_SITE_SECRETS`, set:
+
+- `WEBHOOK_ALLOWED_HOSTS=example-api.yourdomain.tld`
 
 ## Operational notes
 

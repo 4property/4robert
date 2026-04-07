@@ -101,6 +101,7 @@ class PropertyMediaPipeline:
 
             with LoggedProcess(logger, "MEDIA PUBLISH", shared_details) as publish_process:
                 published_media = self.media_publisher.publish_media(context, rendered_media)
+                self._cleanup_prepared_assets(context, prepared_assets)
                 publish_process.complete(
                     format_detail_line("Artifact kind", published_media.artifact_kind),
                     format_detail_line("Media path", published_media.media_path),
@@ -115,6 +116,20 @@ class PropertyMediaPipeline:
                 total_label="Total time",
             )
             return published_media
+
+    def _cleanup_prepared_assets(
+        self,
+        context,
+        prepared_assets,
+    ) -> None:
+        try:
+            self.media_preparation_service.cleanup_prepared_assets(context, prepared_assets)
+        except Exception:
+            logger.exception(
+                "Prepared media cleanup failed for site %s property %s.",
+                context.site_id,
+                context.property.id,
+            )
 
 
 PropertyVideoPipeline = PropertyMediaPipeline

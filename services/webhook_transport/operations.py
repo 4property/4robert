@@ -32,6 +32,21 @@ from services.reel_rendering.runtime import resolve_asset_path, resolve_ffmpeg_b
 logger = logging.getLogger(__name__)
 
 
+_PLACEHOLDER_SECRET_TOKENS = frozenset(
+    {
+        "changeme",
+        "change-me",
+        "replace-me",
+        "replaceme",
+        "example",
+        "example-secret",
+        "secret",
+        "test",
+        "todo",
+    }
+)
+
+
 def cleanup_stale_staging_directories(base_dir: str | Path) -> list[Path]:
     workspace_dir = Path(base_dir).expanduser().resolve()
     removed_directories: list[Path] = []
@@ -70,13 +85,19 @@ def build_readiness_report(
     workspace_dir = Path(base_dir).expanduser().resolve()
     database_path = workspace_dir / DATABASE_FILENAME
     reel_template = PropertyReelTemplate()
+    effective_site_secrets = _has_effective_site_secrets(site_secrets)
+    gemini_configured = _has_effective_gemini_credentials(
+        api_key=GEMINI_API_KEY,
+        model=GEMINI_MODEL,
+    )
     checks = {
         "database_writable": False,
         "storage_writable": False,
         "ffmpeg_available": False,
         "reel_font_available": False,
         "background_audio_available": False,
-        "site_secrets_configured": bool(site_secrets) or security_disabled,
+        "site_secrets_configured": effective_site_secrets or security_disabled,
+        "site_secrets_effective": effective_site_secrets,
         "worker_count_valid": worker_count >= 1,
         "webhook_security_disabled": security_disabled,
     }
@@ -178,6 +199,10 @@ def build_readiness_report(
         warnings.append(
             "Webhook signature validation is disabled. This should stay false in production."
         )
+    elif site_secrets and not effective_site_secrets:
+        warnings.append(
+            "Webhook site secrets appear to use placeholder values. Replace them before production."
+        )
 
     capabilities["core"]["ready"] = bool(
         checks["database_writable"]
@@ -186,15 +211,16 @@ def build_readiness_report(
         and checks["reel_font_available"]
         and checks["background_audio_available"]
         and checks["worker_count_valid"]
+        and checks["site_secrets_configured"]
     )
     if not capabilities["core"]["ready"]:
         capabilities["core"]["reason"] = "; ".join(errors) or "Core runtime checks failed."
 
-    capabilities["social"]["ready"] = bool(checks["site_secrets_configured"])
+    capabilities["social"]["ready"] = True
     if not capabilities["social"]["ready"]:
         capabilities["social"]["reason"] = "Webhook site secrets are not configured."
 
-    capabilities["ai_photo_selection"]["ready"] = bool(GEMINI_API_KEY.strip()) and bool(GEMINI_MODEL.strip())
+    capabilities["ai_photo_selection"]["ready"] = gemini_configured
     if not capabilities["ai_photo_selection"]["ready"]:
         capabilities["ai_photo_selection"]["reason"] = (
             "Gemini photo selection is not configured. Set GEMINI_API_KEY and GEMINI_MODEL to enable it."
@@ -216,8 +242,15 @@ def build_readiness_report(
         capabilities["notifications"]["ready"] = False
         capabilities["notifications"]["reason"] = "Notifications are enabled but no delivery transport is configured."
 
+    production_ready = bool(
+        capabilities["core"]["ready"]
+        and not security_disabled
+        and checks["site_secrets_effective"]
+    )
+
     return {
         "ready": capabilities["core"]["ready"],
+        "production_ready": production_ready,
         "checks": checks,
         "capabilities": capabilities,
         "errors": errors,
@@ -265,6 +298,35 @@ def run_startup_checks(
             )
         )
     return readiness
+
+
+def _has_effective_site_secrets(site_secrets: dict[str, str]) -> bool:
+    for site_id, secret in site_secrets.items():
+        normalized_site_id = str(site_id or "").strip()
+        normalized_secret = str(secret or "").strip()
+        if not normalized_site_id or not normalized_secret:
+            continue
+        if _looks_like_placeholder_secret(normalized_secret):
+            continue
+        return True
+    return False
+
+
+def _has_effective_gemini_credentials(*, api_key: str, model: str) -> bool:
+    normalized_model = str(model or "").strip()
+    normalized_api_key = str(api_key or "").strip()
+    return bool(normalized_model and normalized_api_key and not _looks_like_placeholder_secret(normalized_api_key))
+
+
+def _looks_like_placeholder_secret(value: str) -> bool:
+    normalized_value = str(value or "").strip().lower()
+    if not normalized_value:
+        return True
+    collapsed = "".join(character for character in normalized_value if character.isalnum())
+    return normalized_value in _PLACEHOLDER_SECRET_TOKENS or collapsed in {
+        token.replace("-", "")
+        for token in _PLACEHOLDER_SECRET_TOKENS
+    }
 
 
 def _ensure_database_writable(database_path: Path, workspace_dir: Path) -> None:

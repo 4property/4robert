@@ -7,6 +7,7 @@ from typing import Any
 
 from models.property import Property
 from repositories.property_pipeline_repository import DownloadedImage
+from services.social_delivery.platforms import normalize_platform_name
 from services.webhook_transport.site_storage import SiteStorageLayout
 
 
@@ -14,7 +15,7 @@ def _normalise_platforms(raw_platforms: list[object] | tuple[object, ...]) -> tu
     normalized_platforms: list[str] = []
     seen: set[str] = set()
     for raw_platform in raw_platforms:
-        platform = str(raw_platform or "").strip().lower()
+        platform = normalize_platform_name(str(raw_platform or ""))
         if not platform or platform in seen:
             continue
         seen.add(platform)
@@ -77,6 +78,16 @@ class MediaDeliveryPlan:
     @property
     def uses_primary_image_only(self) -> bool:
         return self.asset_strategy == "primary_only"
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformPublishTargetPlan:
+    platform: str
+    artifact_kind: str
+    social_post_type: str
+    description: str
+    title: str | None = None
+    target_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +216,8 @@ class PropertyContext:
     )
     publish_context: SocialPublishContext | None = None
     publish_descriptions_by_platform: dict[str, str] = field(default_factory=dict)
+    publish_titles_by_platform: dict[str, str] = field(default_factory=dict)
+    publish_targets: tuple[PlatformPublishTargetPlan, ...] = field(default_factory=tuple)
     publish_target_url: str | None = None
     content_fingerprint: str = ""
     content_snapshot_json: str = ""
@@ -245,6 +258,7 @@ SelectedPhotoSet = PreparedMediaAssets
 
 __all__ = [
     "MediaDeliveryPlan",
+    "PlatformPublishTargetPlan",
     "PreparedMediaAssets",
     "PropertyContext",
     "PropertyMediaJob",

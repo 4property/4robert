@@ -36,6 +36,13 @@ class MediaPreparationService(Protocol):
     def prepare_assets(self, context: PropertyContext) -> PreparedMediaAssets:
         ...
 
+    def cleanup_prepared_assets(
+        self,
+        context: PropertyContext,
+        prepared_assets: PreparedMediaAssets,
+    ) -> None:
+        ...
+
 
 class PhotoSelectionService(MediaPreparationService, Protocol):
     def select_photos(self, context: PropertyContext) -> PreparedMediaAssets:

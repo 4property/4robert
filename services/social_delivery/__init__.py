@@ -2,7 +2,11 @@ from services.social_delivery.description import (
     TIKTOK_MAX_DESCRIPTION_LENGTH,
     build_base_social_description,
     build_platform_description,
+    build_platform_description_for_property,
     build_platform_descriptions_for_property,
+    build_platform_descriptions_for_property_with_url,
+    build_platform_title_for_property,
+    build_platform_titles_for_property,
     build_property_public_url,
     build_tiktok_description,
     build_tiktok_description_for_property,
@@ -34,6 +38,7 @@ from services.social_delivery.models import (
     LocationUser,
     MultiPlatformPublishRequest,
     MultiPlatformPublishResult,
+    PlatformPublishTarget,
     PlatformPublishOutcome,
     PublishMediaRequest,
     PublishMediaResult,
@@ -43,7 +48,12 @@ from services.social_delivery.models import (
     SUCCESSFUL_PLATFORM_OUTCOMES,
     UploadedMedia,
 )
-from services.social_delivery.property_publisher import GoHighLevelPropertyPublisher
+from services.social_delivery.platforms import (
+    SocialPlatformConfig,
+    get_platform_config,
+    list_supported_platforms,
+    normalize_platform_name,
+)
 from services.social_delivery.user_selection import (
     LocationUserFallbackSelector,
     select_first_available_location_user,
@@ -66,6 +76,7 @@ __all__ = [
     "MAX_GHL_VIDEO_UPLOAD_BYTES",
     "MultiPlatformPublishRequest",
     "MultiPlatformPublishResult",
+    "PlatformPublishTarget",
     "PlatformPublishOutcome",
     "PropertyCaptionContext",
     "PublishMediaRequest",
@@ -74,6 +85,7 @@ __all__ = [
     "PublishVideoResult",
     "SocialCopyBundle",
     "SocialMediaPublisher",
+    "SocialPlatformConfig",
     "SUPPORTED_GOHIGHLEVEL_PLATFORMS",
     "SUCCESSFUL_PLATFORM_OUTCOMES",
     "SocialAccount",
@@ -82,10 +94,17 @@ __all__ = [
     "UploadedMedia",
     "build_base_social_description",
     "build_platform_description",
+    "build_platform_description_for_property",
     "build_platform_descriptions_for_property",
+    "build_platform_descriptions_for_property_with_url",
+    "build_platform_title_for_property",
+    "build_platform_titles_for_property",
     "build_property_caption",
     "build_property_copy_bundle",
     "build_property_public_url",
+    "get_platform_config",
+    "list_supported_platforms",
+    "normalize_platform_name",
     "render_property_caption",
     "build_tiktok_description",
     "build_tiktok_description_for_property",
@@ -93,3 +112,11 @@ __all__ = [
     "select_first_available_location_user",
     "select_random_location_user",
 ]
+
+
+def __getattr__(name: str):
+    if name == "GoHighLevelPropertyPublisher":
+        from services.social_delivery.property_publisher import GoHighLevelPropertyPublisher
+
+        return GoHighLevelPropertyPublisher
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

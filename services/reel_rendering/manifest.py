@@ -14,9 +14,15 @@ from services.reel_rendering.formatting import (
     build_property_facts_line,
 )
 from services.reel_rendering.layout import build_overlay_layout
-from services.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
+from services.reel_rendering.models import (
+    PreparedReelAssets,
+    PropertyRenderData,
+    PropertyReelSlide,
+    PropertyReelTemplate,
+)
+from services.reel_rendering.preparation import prepare_reel_render_assets
 from services.reel_rendering.runtime import (
-    compute_slide_timing,
+    compute_segment_timing,
     prepare_cover_logo_image,
     resolve_ber_icon_path,
     resolve_manifest_output_path,
@@ -32,19 +38,44 @@ def build_property_reel_manifest_from_data(
     property_data: PropertyRenderData,
     *,
     template: PropertyReelTemplate | None = None,
+    prepared_assets: PreparedReelAssets | None = None,
+    working_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     workspace_dir = Path(base_dir).expanduser().resolve()
     settings = template or PropertyReelTemplate()
 
-    temp_dir = Path(tempfile.mkdtemp(prefix="reel_manifest_", dir=workspace_dir))
+    created_temp_dir = prepared_assets is None and working_dir is None
+    temp_dir = (
+        Path(working_dir).expanduser().resolve()
+        if working_dir is not None
+        else Path(tempfile.mkdtemp(prefix="reel_manifest_", dir=workspace_dir))
+    )
     try:
-        slides = select_reel_slides(
-            property_data,
-            max_slide_count=settings.max_slide_count,
-            temp_dir=temp_dir,
-        )
+        if prepared_assets is None and working_dir is not None:
+            prepared_assets = prepare_reel_render_assets(
+                workspace_dir,
+                property_data,
+                template=settings,
+                working_dir=temp_dir,
+            )
+
+        if prepared_assets is None:
+            slides = select_reel_slides(
+                property_data,
+                max_slide_count=settings.max_slide_count,
+                temp_dir=temp_dir,
+            )
+        else:
+            slides = [
+                PropertyReelSlide(
+                    image_path=prepared_slide.original_path,
+                    caption=prepared_slide.caption,
+                )
+                for prepared_slide in prepared_assets.slides
+            ]
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if created_temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
     property_data.selected_slides = tuple(slides)
     slide_image_paths = [slide.image_path for slide in slides]
     ber_icon_path = resolve_ber_icon_path(
@@ -52,7 +83,15 @@ def build_property_reel_manifest_from_data(
         settings,
         property_data.ber_rating,
     )
-    _, slide_duration, actual_total_duration = compute_slide_timing(settings, len(slide_image_paths))
+    segment_frames, segment_durations, actual_total_duration = compute_segment_timing(
+        settings,
+        len(slide_image_paths),
+    )
+    slide_duration = (
+        segment_durations[0]
+        if segment_durations
+        else 0.0
+    )
     duration_delta = round(actual_total_duration - settings.total_duration_seconds, 3)
     if abs(duration_delta) > 0.001:
         logger.warning(
@@ -62,15 +101,52 @@ def build_property_reel_manifest_from_data(
             property_data.slug,
             duration_delta,
         )
+    cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
     overlay_layout = build_overlay_layout(
         property_data,
         settings,
         slides=tuple(slides),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_path is not None,
+        has_agency_logo=cover_logo_path is not None,
         cover_caption=slides[0].caption if settings.include_intro and slides else None,
     )
-    cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+    has_intro_segment = settings.include_intro and settings.intro_duration_seconds > 0.0
+    actual_intro_duration = settings.intro_duration_seconds if settings.include_intro else 0.0
+    prepared_manifest: dict[str, Any] | None = None
+    if prepared_assets is not None:
+        prepared_manifest = {
+            "working_dir": str(prepared_assets.working_dir),
+            "segment_count": len(prepared_assets.slides) + (1 if has_intro_segment else 0),
+            "slides": [
+                {
+                    "original_image_path": str(slide.original_path),
+                    "working_image_path": str(slide.working_path),
+                    "caption": slide.caption,
+                    "working_resolution": [slide.working_width, slide.working_height],
+                    "motion_mode": slide.motion_mode,
+                    "source_resolution": (
+                        [slide.source_width, slide.source_height]
+                        if slide.source_width is not None and slide.source_height is not None
+                        else None
+                    ),
+                }
+                for slide in prepared_assets.slides
+            ],
+            "cover_background_path": str(prepared_assets.cover_background_path),
+            "cover_logo_path": (
+                str(prepared_assets.cover_logo_path)
+                if prepared_assets.cover_logo_path is not None
+                else None
+            ),
+            "agent_image_path": str(prepared_assets.agent_image_path),
+            "ber_icon_path": (
+                str(prepared_assets.ber_icon_path)
+                if prepared_assets.ber_icon_path is not None
+                else None
+            ),
+            "background_audio_path": str(prepared_assets.background_audio_path),
+        }
 
     return {
         "site_id": property_data.site_id,
@@ -105,15 +181,19 @@ def build_property_reel_manifest_from_data(
         "configured_total_duration_seconds": settings.total_duration_seconds,
         "actual_total_duration_seconds": actual_total_duration,
         "duration_delta_seconds": duration_delta,
-        "intro_duration_seconds": settings.intro_duration_seconds,
+        "intro_duration_seconds": actual_intro_duration,
         "seconds_per_slide": settings.seconds_per_slide,
+        "actual_segment_durations_seconds": segment_durations,
+        "actual_segment_frame_counts": segment_frames,
         "slide_count": len(slide_image_paths),
+        "segment_count": len(slide_image_paths) + (1 if has_intro_segment else 0),
         "fps": settings.fps,
         "resolution": [settings.width, settings.height],
         "property_facts": build_property_facts_line(property_data),
         "agent_lines": build_agent_lines(property_data),
         "price": build_display_price(property_data),
         "overlay_layout": overlay_layout.to_dict(),
+        "prepared_assets": prepared_manifest,
     }
 
 
@@ -123,6 +203,8 @@ def write_property_reel_manifest_from_data(
     *,
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
+    prepared_assets: PreparedReelAssets | None = None,
+    working_dir: str | Path | None = None,
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
     settings = template or PropertyReelTemplate()
@@ -130,6 +212,8 @@ def write_property_reel_manifest_from_data(
         workspace_dir,
         property_data,
         template=settings,
+        prepared_assets=prepared_assets,
+        working_dir=working_dir,
     )
     manifest_path = resolve_manifest_output_path(
         workspace_dir,
@@ -149,6 +233,7 @@ def build_property_reel_manifest(
     property_id: int | None = None,
     slug: str | None = None,
     template: PropertyReelTemplate | None = None,
+    working_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     workspace_dir = Path(base_dir).expanduser().resolve()
     property_data = load_property_reel_data(
@@ -161,6 +246,7 @@ def build_property_reel_manifest(
         workspace_dir,
         property_data,
         template=template,
+        working_dir=working_dir,
     )
 
 
@@ -172,6 +258,7 @@ def write_property_reel_manifest(
     slug: str | None = None,
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
+    working_dir: str | Path | None = None,
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
     property_data = load_property_reel_data(
@@ -185,6 +272,7 @@ def write_property_reel_manifest(
         property_data,
         output_path=output_path,
         template=template,
+        working_dir=working_dir,
     )
 
 

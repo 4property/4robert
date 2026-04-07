@@ -21,6 +21,8 @@ from config import (
     GO_HIGH_LEVEL_API_VERSION,
     GO_HIGH_LEVEL_BASE_URL,
     OUTBOUND_HTTP_TIMEOUT_SECONDS,
+    PROPERTY_MEDIA_DELETE_SELECTED_PHOTOS,
+    PROPERTY_MEDIA_DELETE_TEMPORARY_FILES,
     SOCIAL_PUBLISHING_ENABLED,
     SOCIAL_PUBLISHING_LOCAL_ONLY,
     SOCIAL_PUBLISHING_POST_STATUS_POLL_ATTEMPTS,
@@ -92,11 +94,14 @@ def build_default_property_media_pipeline(workspace_dir: str | Path) -> Property
         media_preparation_service=DefaultMediaPreparationService(
             workspace_path,
             unit_of_work_factory=unit_of_work_factory,
+            cleanup_temporary_files=PROPERTY_MEDIA_DELETE_TEMPORARY_FILES,
+            cleanup_selected_photos=PROPERTY_MEDIA_DELETE_SELECTED_PHOTOS,
         ),
         media_renderer=DefaultMediaRenderer(workspace_path),
         media_publisher=CompositeMediaPublisher(
             local_publisher=FileSystemMediaPublisher(
                 unit_of_work_factory=unit_of_work_factory,
+                cleanup_temporary_files=PROPERTY_MEDIA_DELETE_TEMPORARY_FILES,
             ),
             unit_of_work_factory=unit_of_work_factory,
             social_publisher=social_property_publisher,

@@ -7,6 +7,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from config import DEFAULT_PHOTOS_TO_SELECT, GEMINI_SELECTION_AUDIT_FILENAME
+from core.media_cleanup import (
+    DEFAULT_DELETE_TEMPORARY_FILES,
+    should_cleanup_raw_property_dir,
+)
 from core.logging import LoggedProcess, format_detail_line
 from core.errors import PhotoFilteringError
 from models.property import Property
@@ -258,6 +262,7 @@ def download_and_filter_property_images(
     raw_images_root: Path,
     filtered_images_root: Path | None = None,
     photos_to_select: int = DEFAULT_PHOTOS_TO_SELECT,
+    cleanup_temporary_files: bool = DEFAULT_DELETE_TEMPORARY_FILES,
 ) -> tuple[Path, list[DownloadedImage]]:
     started_at = time.perf_counter()
     if filtered_images_root is None:
@@ -288,7 +293,8 @@ def download_and_filter_property_images(
         )
 
     if not has_downloaded_images(downloaded_images):
-        cleanup_raw_property_dir(raw_property_dir)
+        if should_cleanup_raw_property_dir(cleanup_temporary_files):
+            cleanup_raw_property_dir(raw_property_dir)
         return property_dir, downloaded_images
 
     with LoggedProcess(
@@ -365,7 +371,8 @@ def download_and_filter_property_images(
     finally:
         if temporary_selected_dir.exists():
             shutil.rmtree(temporary_selected_dir, ignore_errors=True)
-        cleanup_raw_property_dir(raw_property_dir)
+        if should_cleanup_raw_property_dir(cleanup_temporary_files):
+            cleanup_raw_property_dir(raw_property_dir)
 
 
 __all__ = [

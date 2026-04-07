@@ -3,24 +3,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from services.reel_rendering.formatting import escape_drawtext_text, escape_filter_path
+from services.reel_rendering.formatting import (
+    escape_drawtext_text,
+    escape_filter_path,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+    resolve_text_color,
+)
 from services.reel_rendering.layout import OverlayLayout, build_overlay_layout
 from services.reel_rendering.models import PropertyReelData, PropertyReelSlide, PropertyReelTemplate
 from services.reel_rendering.runtime import resolve_font_path
-
-_BER_ICON_ASPECT_RATIO = 1800 / 582
-_BER_ICON_MIN_HEIGHT = 45
-_BER_ICON_HEIGHT_RATIO = 0.0675
-
-
-def resolve_agent_image_size(settings: PropertyReelTemplate) -> int:
-    return max(108, min(180, round(settings.height * 0.085)))
-
-
-def resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
-    icon_height = max(_BER_ICON_MIN_HEIGHT, round(settings.height * _BER_ICON_HEIGHT_RATIO))
-    icon_width = max(1, round(icon_height * _BER_ICON_ASPECT_RATIO))
-    return icon_width, icon_height
 
 
 def _build_drawtext_enable_expression(start_time: float, end_time: float) -> str:
@@ -36,6 +28,7 @@ def build_overlay_filter(
     slide_duration: float | None = None,
     video_input_label: str = "video_base",
     agent_image_label: str = "agent_panel_image",
+    logo_image_label: str | None = None,
     ber_icon_label: str | None = None,
     output_label: str = "vout",
     layout: OverlayLayout | None = None,
@@ -49,6 +42,7 @@ def build_overlay_filter(
         ),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_label is not None,
+        has_agency_logo=logo_image_label is not None,
         cover_caption=cover_caption,
     )
     font_path = escape_filter_path(resolve_font_path(settings.font_path))
@@ -90,7 +84,7 @@ def build_overlay_filter(
                 "drawtext="
                 f"fontfile='{font_file}':"
                 f"text='{escape_drawtext_text(line)}':"
-                f"fontcolor=white:fontsize={block.font_size}:"
+                f"fontcolor={resolve_text_color(block.block)}:fontsize={block.font_size}:"
                 f"x={block.x}:y={block.y + index * block.line_gap}:"
                 "fix_bounds=1"
             )
@@ -105,7 +99,7 @@ def build_overlay_filter(
                 "drawtext="
                 f"fontfile='{subtitle_font_path}':"
                 f"text='{escape_drawtext_text(line)}':"
-                "fontcolor=0xF4D03F:"
+                f"fontcolor={resolve_text_color(segment.block)}:"
                 f"fontsize={segment.font_size}:"
                 f"x={segment.x}+max(({segment.max_width}-text_w)/2\\,0):"
                 f"y={segment.y + index * segment.line_gap}:"
@@ -151,6 +145,20 @@ def build_overlay_filter(
         )
         current_video_label = "video_with_agent_panel"
 
+    if (
+        logo_image_label is not None
+        and active_layout.agency_logo_box is not None
+        and active_layout.agency_logo_box.visible
+    ):
+        filters.append(
+            (
+                f"[{current_video_label}][{logo_image_label}]"
+                f"overlay=x={active_layout.agency_logo_box.x}:y={active_layout.agency_logo_box.y}"
+                "[video_with_agency_logo]"
+            )
+        )
+        current_video_label = "video_with_agency_logo"
+
     filters.append(f"[{current_video_label}]null[{output_label}]")
     return ";".join(filters)
 
@@ -187,6 +195,7 @@ def build_filter_complex(
         slides=tuple(slides),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_input_index is not None,
+        has_agency_logo=logo_input_index is not None,
         cover_caption=slides[0].caption if settings.include_intro and slides else None,
     )
 
@@ -214,6 +223,18 @@ def build_filter_complex(
             f"scale=w=-1:h={ber_height},"
             "format=rgba"
             "[ber_header_icon]"
+        )
+    if (
+        logo_input_index is not None
+        and overlay_layout.agency_logo_box is not None
+        and overlay_layout.agency_logo_box.visible
+    ):
+        filter_parts.append(
+            f"[{logo_input_index}:v]"
+            f"scale=w={overlay_layout.agency_logo_box.width}:h={overlay_layout.agency_logo_box.height}:force_original_aspect_ratio=decrease,"
+            f"pad={overlay_layout.agency_logo_box.width}:{overlay_layout.agency_logo_box.height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0,"
+            "format=rgba"
+            "[agency_logo]"
         )
     if settings.include_intro:
         filter_parts.append(
@@ -245,20 +266,24 @@ def build_filter_complex(
 
     for index in range(slide_count):
         crop_x, crop_y = build_motion_crop_expressions(slide_frames=slide_frames)
-        filter_parts.append(
-            f"[{index}:v]"
+        slide_filters = [
             f"scale=w='if(gte(iw/ih,{target_aspect_ratio:.8f}),-2,{settings.width})':"
             f"h='if(gte(iw/ih,{target_aspect_ratio:.8f}),{settings.height},-2)':"
-            "eval=init,"
-            f"crop={settings.width}:{settings.height}:x='{crop_x}':y='{crop_y}',"
-            "eq=saturation=1.03:contrast=1.02:brightness=0.01,"
-            "format=yuv420p,"
-            "setsar=1,"
-            f"trim=duration={slide_duration:.6f},"
-            "setpts=PTS-STARTPTS,"
-            f"fade=t=in:st=0:d={fade_duration:.3f},"
+            "eval=init",
+            f"crop={settings.width}:{settings.height}:x='{crop_x}':y='{crop_y}'",
+            "eq=saturation=1.03:contrast=1.02:brightness=0.01",
+            "format=yuv420p",
+            "setsar=1",
+            f"trim=duration={slide_duration:.6f}",
+            "setpts=PTS-STARTPTS",
+        ]
+        if index != 0:
+            slide_filters.append(f"fade=t=in:st=0:d={fade_duration:.3f}")
+        slide_filters.append(
             f"fade=t=out:st={max(slide_duration - fade_duration, 0.0):.3f}:d={fade_duration:.3f}"
-            f"[v{index}]"
+        )
+        filter_parts.append(
+            f"[{index}:v]{','.join(slide_filters)}[v{index}]"
         )
 
     if slide_count == 1:
@@ -279,6 +304,13 @@ def build_filter_complex(
             slide_duration=slide_duration,
             video_input_label="video_base",
             agent_image_label="agent_panel_image",
+            logo_image_label=(
+                "agency_logo"
+                if logo_input_index is not None
+                and overlay_layout.agency_logo_box is not None
+                and overlay_layout.agency_logo_box.visible
+                else None
+            ),
             ber_icon_label="ber_header_icon" if ber_icon_input_index is not None else None,
             output_label="vout",
             layout=overlay_layout,

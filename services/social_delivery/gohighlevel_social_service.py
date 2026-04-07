@@ -10,6 +10,7 @@ from services.social_delivery.models import (
     SocialAccount,
     UploadedMedia,
 )
+from services.social_delivery.platforms import get_platform_config
 
 
 class GoHighLevelSocialService:
@@ -265,8 +266,10 @@ class GoHighLevelSocialService:
         target_url: str | None,
         title: str | None,
     ) -> dict[str, object]:
-        del platform, target_url, title
-        return {}
+        platform_config = get_platform_config(platform)
+        if platform_config is None:
+            return {}
+        return platform_config.build_gohighlevel_payload(target_url, title)
 
     @staticmethod
     def _extract_post_payload(payload: dict[str, object]) -> dict[str, object]:

@@ -5,6 +5,8 @@ import json
 import logging
 import re
 import shutil
+import struct
+import zlib
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -25,11 +27,6 @@ from services.webhook_transport.site_storage import resolve_site_storage_layout,
 
 logger = logging.getLogger(__name__)
 _BRANDING_CACHE_DIRNAME = "_branding"
-_TRANSPARENT_PNG_BYTES = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc`\x00"
-    b"\x00\x00\x02\x00\x01\xe5'\xd4\xa2\x00\x00\x00\x00IEND\xaeB`\x82"
-)
 _VALID_BER_ICON_CODES = {
     "A1",
     "A2",
@@ -157,9 +154,6 @@ def prepare_cover_logo_image(
     property_data: PropertyRenderData,
     settings: PropertyReelTemplate,
 ) -> Path | None:
-    if not settings.include_intro:
-        return None
-
     agency_logo_url = str(property_data.agency_logo_url or "").strip()
     if not agency_logo_url:
         return None
@@ -190,7 +184,7 @@ def prepare_cover_logo_image(
         except OSError:
             pass
         logger.warning(
-            "Failed to download agency logo %r for property %s (%s). Continuing without intro logo. Error: %s",
+            "Failed to download agency logo %r for property %s (%s). Continuing without agency logo. Error: %s",
             agency_logo_url,
             property_data.property_id,
             property_data.slug,
@@ -479,10 +473,39 @@ def compute_slide_timing(
     settings: PropertyReelTemplate,
     slide_count: int,
 ) -> tuple[int, float, float]:
+    segment_frames, segment_durations, total_duration = compute_segment_timing(
+        settings,
+        slide_count,
+    )
+    if not segment_frames or not segment_durations:
+        return 0, 0.0, total_duration
+    return segment_frames[0], segment_durations[0], total_duration
+
+
+def compute_segment_timing(
+    settings: PropertyReelTemplate,
+    slide_count: int,
+) -> tuple[list[int], list[float], float]:
+    if slide_count <= 0:
+        intro_duration = settings.intro_duration_seconds if settings.include_intro else 0.0
+        return [], [], intro_duration
+
     slide_frames = max(1, round(settings.seconds_per_slide * settings.fps))
-    slide_duration = slide_frames / settings.fps
-    total_duration = settings.intro_duration_seconds + (slide_count * slide_duration)
-    return slide_frames, slide_duration, total_duration
+    segment_frames = [slide_frames for _ in range(slide_count)]
+    intro_duration = settings.intro_duration_seconds if settings.include_intro else 0.0
+    if slide_count >= settings.max_slide_count:
+        available_duration = max(settings.total_duration_seconds - intro_duration, 0.0)
+        target_total_frames = max(slide_count, round(available_duration * settings.fps))
+        base_frames, remainder = divmod(target_total_frames, slide_count)
+        base_frames = max(base_frames, 1)
+        segment_frames = [
+            base_frames + (1 if index < remainder else 0)
+            for index in range(slide_count)
+        ]
+
+    segment_durations = [frame_count / settings.fps for frame_count in segment_frames]
+    total_duration = intro_duration + sum(segment_durations)
+    return segment_frames, segment_durations, total_duration
 
 
 def _resolve_cached_branding_destination(
@@ -520,8 +543,25 @@ def _has_explicit_unsupported_image_suffix(image_url: str) -> bool:
 
 
 def _write_transparent_placeholder(destination: Path) -> Path:
+    def _chunk(chunk_type: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + chunk_type
+            + payload
+            + struct.pack(">I", zlib.crc32(chunk_type + payload) & 0xFFFFFFFF)
+        )
+
+    png_payload = (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(
+            b"IHDR",
+            struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0),
+        )
+        + _chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00\x00"))
+        + _chunk(b"IEND", b"")
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(_TRANSPARENT_PNG_BYTES)
+    destination.write_bytes(png_payload)
     return destination
 
 

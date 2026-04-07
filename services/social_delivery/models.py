@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from services.social_delivery.platforms import get_platform_config
+
 
 @dataclass(frozen=True, slots=True)
 class SocialAccount:
@@ -49,6 +51,18 @@ class CreatedSocialPost:
     status: str | None
     message: str | None
     raw_response: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformPublishTarget:
+    platform: str
+    media_path: Path
+    description: str = ""
+    title: str | None = None
+    upload_file_name: str | None = None
+    target_url: str | None = None
+    social_post_type: str = "reel"
+    artifact_kind: str = "reel_video"
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -134,6 +148,8 @@ FAILED_PLATFORM_OUTCOMES = frozenset({"failed", "error", "rejected", "cancelled"
 class PlatformPublishOutcome:
     platform: str
     outcome: str
+    artifact_kind: str = "reel_video"
+    social_post_type: str = "reel"
     retryable: bool = False
     warnings: tuple[str, ...] = field(default_factory=tuple)
     account_id: str | None = None
@@ -164,6 +180,8 @@ class PlatformPublishOutcome:
         return {
             "platform": self.platform,
             "outcome": self.outcome,
+            "artifact_kind": self.artifact_kind,
+            "social_post_type": self.social_post_type,
             "retryable": self.retryable,
             "warnings": list(self.warnings),
             "account_id": self.account_id,
@@ -183,6 +201,7 @@ class MultiPlatformPublishRequest:
     media_path: Path
     descriptions_by_platform: dict[str, str]
     titles_by_platform: dict[str, str]
+    publish_targets: tuple[PlatformPublishTarget, ...]
     upload_file_name: str | None
     target_url: str | None
     provider: str
@@ -201,6 +220,7 @@ class MultiPlatformPublishRequest:
         video_path: Path | None = None,
         descriptions_by_platform: dict[str, str] | None = None,
         titles_by_platform: dict[str, str] | None = None,
+        publish_targets: tuple[PlatformPublishTarget, ...] | None = None,
         upload_file_name: str | None = None,
         target_url: str | None = None,
         provider: str = "gohighlevel",
@@ -212,19 +232,78 @@ class MultiPlatformPublishRequest:
         social_post_type: str = "reel",
         artifact_kind: str = "reel_video",
     ) -> None:
-        resolved_media_path = media_path or video_path
-        if resolved_media_path is None:
-            raise TypeError("MultiPlatformPublishRequest requires a media_path.")
+        raw_descriptions = dict(descriptions_by_platform or {})
+        raw_titles = dict(titles_by_platform or {})
+        if publish_targets:
+            resolved_targets = tuple(
+                PlatformPublishTarget(
+                    platform=str(target.platform or "").strip(),
+                    media_path=Path(target.media_path),
+                    description=target.description,
+                    title=target.title,
+                    upload_file_name=target.upload_file_name,
+                    target_url=target.target_url,
+                    social_post_type=target.social_post_type,
+                    artifact_kind=target.artifact_kind,
+                )
+                for target in publish_targets
+            )
+            resolved_media_path = Path(resolved_targets[0].media_path)
+        else:
+            resolved_media_path = media_path or video_path
+            if resolved_media_path is None:
+                raise TypeError("MultiPlatformPublishRequest requires a media_path.")
+            resolved_targets = tuple(
+                PlatformPublishTarget(
+                    platform=str(platform or "").strip(),
+                    media_path=Path(resolved_media_path),
+                    description=str(raw_descriptions.get(str(platform or "").strip(), "")),
+                    title=raw_titles.get(str(platform or "").strip()),
+                    upload_file_name=_resolve_default_target_upload_file_name(
+                        platform=str(platform or "").strip(),
+                        title=raw_titles.get(str(platform or "").strip()),
+                        fallback_upload_file_name=upload_file_name,
+                    ),
+                    target_url=target_url,
+                    social_post_type=social_post_type,
+                    artifact_kind=artifact_kind,
+                )
+                for platform in platforms
+            )
+
+        descriptions_from_targets = {
+            target.platform: target.description
+            for target in resolved_targets
+            if str(target.platform or "").strip()
+        }
+        titles_from_targets = {
+            target.platform: str(target.title or "").strip()
+            for target in resolved_targets
+            if str(target.platform or "").strip() and str(target.title or "").strip()
+        }
 
         object.__setattr__(self, "media_path", Path(resolved_media_path))
-        object.__setattr__(self, "descriptions_by_platform", dict(descriptions_by_platform or {}))
-        object.__setattr__(self, "titles_by_platform", dict(titles_by_platform or {}))
+        object.__setattr__(
+            self,
+            "descriptions_by_platform",
+            descriptions_from_targets or raw_descriptions,
+        )
+        object.__setattr__(
+            self,
+            "titles_by_platform",
+            titles_from_targets or raw_titles,
+        )
+        object.__setattr__(self, "publish_targets", resolved_targets)
         object.__setattr__(self, "upload_file_name", upload_file_name)
         object.__setattr__(self, "target_url", target_url)
         object.__setattr__(self, "provider", provider)
         object.__setattr__(self, "location_id", location_id)
         object.__setattr__(self, "access_token", access_token)
-        object.__setattr__(self, "platforms", tuple(platforms))
+        object.__setattr__(
+            self,
+            "platforms",
+            tuple(target.platform for target in resolved_targets) or tuple(platforms),
+        )
         object.__setattr__(self, "user_id", user_id)
         object.__setattr__(self, "source_site_id", source_site_id)
         object.__setattr__(self, "social_post_type", social_post_type)
@@ -302,12 +381,28 @@ PublishVideoRequest = PublishMediaRequest
 PublishVideoResult = PublishMediaResult
 
 
+def _resolve_default_target_upload_file_name(
+    *,
+    platform: str,
+    title: str | None,
+    fallback_upload_file_name: str | None,
+) -> str | None:
+    normalized_upload_file_name = str(fallback_upload_file_name or "").strip()
+    if normalized_upload_file_name:
+        return normalized_upload_file_name
+    platform_config = get_platform_config(platform)
+    if platform_config is None:
+        return None
+    return platform_config.build_upload_file_name(title)
+
+
 __all__ = [
     "CreatedSocialPost",
     "FAILED_PLATFORM_OUTCOMES",
     "LocationUser",
     "MultiPlatformPublishRequest",
     "MultiPlatformPublishResult",
+    "PlatformPublishTarget",
     "PlatformPublishOutcome",
     "PublishMediaRequest",
     "PublishMediaResult",

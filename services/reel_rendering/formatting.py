@@ -5,21 +5,99 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from services.reel_rendering.models import PropertyRenderData
+from services.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
+
+_BER_ICON_ASPECT_RATIO = 1800 / 582
+_BER_ICON_MIN_HEIGHT = 45
+_BER_ICON_HEIGHT_RATIO = 0.0675
+
+OVERLAY_TEXT_COLOR_PRIMARY = "white"
+OVERLAY_TEXT_COLOR_SUBTITLE = "0xF4D03F"
+
+OVERLAY_TEXT_COLORS: dict[str, str] = {
+    "status": OVERLAY_TEXT_COLOR_PRIMARY,
+    "price": OVERLAY_TEXT_COLOR_PRIMARY,
+    "address": OVERLAY_TEXT_COLOR_PRIMARY,
+    "agent_name": OVERLAY_TEXT_COLOR_PRIMARY,
+    "agent_phone": OVERLAY_TEXT_COLOR_PRIMARY,
+    "agent_email": OVERLAY_TEXT_COLOR_PRIMARY,
+    "agency_psra": OVERLAY_TEXT_COLOR_PRIMARY,
+    "subtitle_caption": OVERLAY_TEXT_COLOR_SUBTITLE,
+}
+
+OVERLAY_FONT_SIZE_RULES: dict[str, tuple[float, int, float, int]] = {
+    "status": (0.050, 68, 0.026, 34),
+    "price": (0.046, 62, 0.024, 32),
+    "address": (0.024, 32, 0.0, 22),
+    "agent_name": (0.026, 38, 0.017, 24),
+    "agent_phone": (0.020, 29, 0.0, 19),
+    "agent_email": (0.020, 29, 0.0, 19),
+    "agency_psra": (0.020, 29, 0.0, 19),
+}
 
 
 def escape_drawtext_text(value: str) -> str:
+    sanitized = (
+        value.replace("\r\n", " ")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .replace("\t", " ")
+        .replace("'", "\u2019")
+        .replace("`", "\u2019")
+    )
     return (
-        value.replace("\\", "\\\\")
+        sanitized.replace("\\", "\\\\")
         .replace(":", r"\:")
-        .replace("'", r"\'")
         .replace(",", r"\,")
+        .replace(";", r"\;")
         .replace("%", r"\%")
     )
 
 
 def escape_filter_path(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace(":", r"\:")
+
+
+def resolve_text_color(block: str) -> str:
+    return OVERLAY_TEXT_COLORS.get(block, OVERLAY_TEXT_COLOR_PRIMARY)
+
+
+def resolve_font_size_bounds(
+    block: str,
+    *,
+    frame_height: int,
+    subtitle_font_size: int,
+) -> tuple[int, int]:
+    if block == "subtitle_caption":
+        return subtitle_font_size, max(24, round(subtitle_font_size * 0.55))
+
+    max_ratio, max_floor, min_ratio, min_floor = OVERLAY_FONT_SIZE_RULES.get(
+        block,
+        OVERLAY_FONT_SIZE_RULES["address"],
+    )
+    max_size = max(max_floor, round(frame_height * max_ratio))
+    min_size = min_floor if min_ratio <= 0 else max(min_floor, round(frame_height * min_ratio))
+    return max_size, min_size
+
+
+def resolve_agent_image_size(settings: PropertyReelTemplate) -> int:
+    return max(120, min(196, round(settings.height * 0.094)))
+
+
+def resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
+    base_height = max(_BER_ICON_MIN_HEIGHT, round(settings.height * _BER_ICON_HEIGHT_RATIO))
+    icon_height = max(1, round(base_height * settings.ber_icon_scale))
+    icon_width = max(1, round(icon_height * _BER_ICON_ASPECT_RATIO))
+    return icon_width, icon_height
+
+
+def resolve_agency_logo_box_size(settings: PropertyReelTemplate) -> tuple[int, int]:
+    base_width = max(96, round(settings.width * 0.18))
+    base_height = max(62, round(settings.height * 0.058))
+    return (
+        max(1, round(base_width * settings.agency_logo_scale)),
+        max(1, round(base_height * settings.agency_logo_scale)),
+    )
 
 
 def format_price(value: str | None) -> str | None:
@@ -133,6 +211,10 @@ def build_display_price(property_data: PropertyRenderData) -> str | None:
 
 
 __all__ = [
+    "OVERLAY_FONT_SIZE_RULES",
+    "OVERLAY_TEXT_COLORS",
+    "OVERLAY_TEXT_COLOR_PRIMARY",
+    "OVERLAY_TEXT_COLOR_SUBTITLE",
     "WrappedTextResult",
     "build_agent_lines",
     "build_display_price",
@@ -144,5 +226,10 @@ __all__ = [
     "escape_filter_path",
     "fit_wrapped_lines",
     "format_price",
+    "resolve_agency_logo_box_size",
+    "resolve_agent_image_size",
+    "resolve_ber_icon_size",
+    "resolve_font_size_bounds",
+    "resolve_text_color",
     "wrap_lines",
 ]

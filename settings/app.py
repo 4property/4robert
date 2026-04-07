@@ -52,6 +52,32 @@ def _parse_platforms(
     return tuple(normalized_values)
 
 
+def _parse_csv_values(
+    value: str | list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    if value is None:
+        return ()
+
+    raw_values: list[str] = []
+    if isinstance(value, str):
+        raw_values.extend(part.strip() for part in value.split(","))
+    else:
+        raw_values.extend(str(part).strip() for part in value)
+
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        normalized_value = raw_value.strip()
+        if not normalized_value:
+            continue
+        lowered = normalized_value.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_values.append(normalized_value)
+    return tuple(normalized_values)
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -66,7 +92,7 @@ class AppSettings(BaseSettings):
     )
 
     webhook_host: str = Field(
-        "0.0.0.0",
+        "127.0.0.1",
         validation_alias="WEBHOOK_HOST",
     )
     webhook_port: int = Field(
@@ -146,6 +172,23 @@ class AppSettings(BaseSettings):
         None,
         validation_alias="WEBHOOK_SITE_SECRETS",
     )
+    webhook_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = Field(
+        (),
+        validation_alias="WEBHOOK_ALLOWED_HOSTS",
+    )
+    webhook_trust_proxy_headers: bool = Field(
+        True,
+        validation_alias="WEBHOOK_TRUST_PROXY_HEADERS",
+    )
+    webhook_forwarded_allow_ips: str = Field(
+        "127.0.0.1",
+        validation_alias="WEBHOOK_FORWARDED_ALLOW_IPS",
+    )
+    webhook_limit_concurrency: int = Field(
+        64,
+        validation_alias="WEBHOOK_LIMIT_CONCURRENCY",
+        ge=1,
+    )
     sqlite_busy_timeout_ms: int = Field(
         5_000,
         validation_alias="SQLITE_BUSY_TIMEOUT_MS",
@@ -160,7 +203,14 @@ class AppSettings(BaseSettings):
         validation_alias="GO_HIGH_LEVEL_API_VERSION",
     )
     social_publishing_default_platforms: Annotated[tuple[str, ...], NoDecode] = Field(
-        ("tiktok", "instagram", "linkedin", "youtube"),
+        (
+            "tiktok",
+            "instagram",
+            "linkedin",
+            "youtube",
+            "facebook",
+            "google_business_profile",
+        ),
         validation_alias=AliasChoices(
             "SOCIAL_PUBLISHING_DEFAULT_PLATFORMS",
             "SOCIAL_PUBLISHING_DEFAULT_PLATFORM",
@@ -206,8 +256,16 @@ class AppSettings(BaseSettings):
         validation_alias="SOCIAL_PUBLISHING_POST_STATUS_POLL_INTERVAL_SECONDS",
         ge=0.0,
     )
+    property_media_delete_temporary_files: bool = Field(
+        True,
+        validation_alias="PROPERTY_MEDIA_DELETE_TEMPORARY_FILES",
+    )
+    property_media_delete_selected_photos: bool = Field(
+        False,
+        validation_alias="PROPERTY_MEDIA_DELETE_SELECTED_PHOTOS",
+    )
     reel_total_duration_seconds: float = Field(
-        43.0,
+        35.0,
         validation_alias="REEL_TOTAL_DURATION_SECONDS",
         gt=0.0,
     )
@@ -217,9 +275,64 @@ class AppSettings(BaseSettings):
         gt=0.0,
     )
     reel_intro_duration_seconds: float = Field(
-        3.0,
+        0.0,
         validation_alias="REEL_INTRO_DURATION_SECONDS",
         ge=0.0,
+    )
+    reel_width: int = Field(
+        1080,
+        validation_alias="REEL_WIDTH",
+        ge=2,
+    )
+    reel_height: int = Field(
+        1440,
+        validation_alias="REEL_HEIGHT",
+        ge=2,
+    )
+    reel_fps: int = Field(
+        24,
+        validation_alias="REEL_FPS",
+        ge=1,
+    )
+    poster_width: int = Field(
+        1080,
+        validation_alias="POSTER_WIDTH",
+        ge=2,
+    )
+    poster_height: int = Field(
+        1920,
+        validation_alias="POSTER_HEIGHT",
+        ge=2,
+    )
+    poster_background_blur_radius: int = Field(
+        36,
+        validation_alias="POSTER_BACKGROUND_BLUR_RADIUS",
+        ge=0,
+    )
+    poster_background_blur_power: int = Field(
+        12,
+        validation_alias="POSTER_BACKGROUND_BLUR_POWER",
+        ge=0,
+    )
+    poster_photo_side_margin_ratio: float = Field(
+        0.06,
+        validation_alias="POSTER_PHOTO_SIDE_MARGIN_RATIO",
+        ge=0.0,
+    )
+    poster_photo_side_margin_min_px: int = Field(
+        24,
+        validation_alias="POSTER_PHOTO_SIDE_MARGIN_MIN_PX",
+        ge=0,
+    )
+    poster_photo_panel_gap_ratio: float = Field(
+        0.016,
+        validation_alias="POSTER_PHOTO_PANEL_GAP_RATIO",
+        ge=0.0,
+    )
+    poster_photo_panel_gap_min_px: int = Field(
+        16,
+        validation_alias="POSTER_PHOTO_PANEL_GAP_MIN_PX",
+        ge=0,
     )
     reel_subtitle_font_path: str = Field(
         "assets/fonts/Inter/static/Inter_28pt-Bold.ttf",
@@ -239,6 +352,16 @@ class AppSettings(BaseSettings):
         2,
         validation_alias="REEL_FFMPEG_ENCODER_THREADS",
         ge=0,
+    )
+    reel_ber_icon_scale: float = Field(
+        0.5,
+        validation_alias="REEL_BER_ICON_SCALE",
+        gt=0.0,
+    )
+    reel_agency_logo_scale: float = Field(
+        1.5,
+        validation_alias="REEL_AGENCY_LOGO_SCALE",
+        gt=0.0,
     )
     gemini_api_key: str = Field(
         "",
@@ -300,6 +423,13 @@ class AppSettings(BaseSettings):
             return _parse_platforms(value)
         return ()
 
+    @field_validator("webhook_allowed_hosts", mode="before")
+    @classmethod
+    def _validate_webhook_allowed_hosts(cls, value: object) -> tuple[str, ...]:
+        if value is None or isinstance(value, (str, list, tuple)):
+            return _parse_csv_values(value)
+        return ()
+
     @field_validator("webhook_path")
     @classmethod
     def _validate_webhook_path(cls, value: str) -> str:
@@ -318,6 +448,14 @@ class AppSettings(BaseSettings):
             return "INFO"
         return normalized_value
 
+    @field_validator("webhook_forwarded_allow_ips")
+    @classmethod
+    def _validate_forwarded_allow_ips(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            return "127.0.0.1"
+        return normalized_value
+
     @model_validator(mode="after")
     def _apply_defaults(self) -> "AppSettings":
         if not self.webhook_site_secrets:
@@ -330,7 +468,14 @@ class AppSettings(BaseSettings):
             self.social_publishing_property_url_tracking_params = {}
 
         if not self.social_publishing_default_platforms:
-            self.social_publishing_default_platforms = ("tiktok",)
+            self.social_publishing_default_platforms = (
+                "tiktok",
+                "instagram",
+                "linkedin",
+                "youtube",
+                "facebook",
+                "google_business_profile",
+            )
 
         self.social_publishing_youtube_post_type = (
             self.social_publishing_youtube_post_type.strip().lower() or "post"

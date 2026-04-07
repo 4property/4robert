@@ -6,6 +6,7 @@ import sys
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import httpx
@@ -22,7 +23,12 @@ from core.errors import (
     TransientSocialPublishingError,
 )
 from models.property import Property
-from services.social_delivery.description import build_property_public_url, build_tiktok_description
+from services.social_delivery.description import (
+    build_platform_description_for_property,
+    build_property_public_url,
+    build_tiktok_description,
+)
+from services.social_delivery.platform_policy import resolve_platform_social_post_type
 from services.social_delivery.post_copy import (
     DEFAULT_PROPERTY_CAPTION_LAYOUT,
     PropertyCaptionContext,
@@ -32,9 +38,15 @@ from services.social_delivery.gohighlevel_client import GoHighLevelApiError, GoH
 from services.social_delivery.gohighlevel_media_service import GoHighLevelMediaService
 from services.social_delivery.gohighlevel_publisher import GoHighLevelPublisher
 from services.social_delivery.gohighlevel_social_service import GoHighLevelSocialService
+from services.social_delivery.platforms import (
+    get_platform_config,
+    list_supported_platforms,
+    normalize_platform_name,
+)
 from services.social_delivery.user_selection import select_first_available_location_user
 from services.social_delivery.models import (
     MultiPlatformPublishRequest,
+    PlatformPublishTarget,
     PublishVideoRequest,
     PublishVideoResult,
 )
@@ -177,6 +189,83 @@ class DescriptionBuilderTests(unittest.TestCase):
                 "&utm_campaign=ckp.ie-sample-property"
             ),
         )
+
+    def test_google_business_profile_description_is_shorter_and_image_friendly(self) -> None:
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        description = build_platform_description_for_property(
+            property_item,
+            platform="google_business_profile",
+            property_url="https://ckp.ie/property/sample-property",
+        )
+
+        self.assertEqual(
+            description,
+            "46 Example Street, Dublin 4\n650000\nMore properties on ckp.ie\nJane Doe",
+        )
+
+
+class PlatformRegistryTests(unittest.TestCase):
+    def test_platform_registry_normalizes_aliases_and_lists_supported_platforms(self) -> None:
+        self.assertEqual(normalize_platform_name("linked-in"), "linkedin")
+        self.assertEqual(normalize_platform_name("you_tube"), "youtube")
+        self.assertEqual(normalize_platform_name("gbp"), "google_business_profile")
+        self.assertEqual(
+            list_supported_platforms(),
+            (
+                "tiktok",
+                "instagram",
+                "linkedin",
+                "youtube",
+                "facebook",
+                "google_business_profile",
+            ),
+        )
+
+    def test_youtube_platform_config_exposes_expected_publish_defaults(self) -> None:
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        config = get_platform_config("youtube")
+
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.default_artifact_kind, "reel_video")
+        self.assertEqual(config.allowed_social_post_types, ("post",))
+        self.assertEqual(
+            config.build_description(property_item, "https://ckp.ie/property/sample-property"),
+            (
+                "More properties on ckp.ie\n\n"
+                "Jane Doe\n"
+                "+353 1 234 5678\n"
+                "jane@example.com\n\n"
+                "Agency PSRA: X123456"
+            ),
+        )
+        self.assertEqual(config.build_title(property_item), "46 Example Street, Dublin 4")
+        self.assertEqual(
+            config.build_upload_file_name("46 Example Street, Dublin 4"),
+            "46 Example Street, Dublin 4",
+        )
+        self.assertEqual(
+            config.build_gohighlevel_payload(None, "46 Example Street, Dublin 4"),
+            {"youtubePostDetails": {"type": "video"}},
+        )
+
+    def test_google_business_profile_config_stays_on_post_and_poster(self) -> None:
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        config = get_platform_config("google_business_profile")
+
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.default_artifact_kind, "poster_image")
+        self.assertEqual(config.default_social_post_type, "post")
+        self.assertEqual(config.resolve_artifact_kind("reel_video"), "poster_image")
+        self.assertEqual(resolve_platform_social_post_type(platform="google_business_profile", requested_social_post_type="reel"), "post")
+        self.assertEqual(
+            config.build_description(property_item, "https://ckp.ie/property/sample-property"),
+            "46 Example Street, Dublin 4\n650000\nMore properties on ckp.ie\nJane Doe",
+        )
+        self.assertEqual(config.build_title(property_item), "46 Example Street, Dublin 4")
+        self.assertIsNone(config.build_upload_file_name("46 Example Street, Dublin 4"))
+        self.assertEqual(config.build_gohighlevel_payload(None, "46 Example Street, Dublin 4"), {})
 
 
 class GoHighLevelPublisherRetryTests(unittest.TestCase):
@@ -819,6 +908,119 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
         self.assertEqual(platform_results["instagram"]["outcome"], "skipped_missing_account")
         self.assertEqual(platform_results["linkedin"]["outcome"], "failed")
 
+    def test_publish_video_to_platforms_supports_facebook_and_google_business_profile(self) -> None:
+        call_counts = {"accounts": 0, "users": 0, "upload": 0, "posts": 0}
+        created_posts: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/accounts"):
+                call_counts["accounts"] += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": {
+                            "accounts": [
+                                {
+                                    "id": "fb-1",
+                                    "name": "Facebook Page",
+                                    "platform": "facebook",
+                                    "type": "profile",
+                                    "isExpired": False,
+                                },
+                                {
+                                    "id": "gbp-1",
+                                    "name": "Google Business Profile",
+                                    "platform": "google_business_profile",
+                                    "type": "profile",
+                                    "isExpired": False,
+                                },
+                            ]
+                        }
+                    },
+                )
+            if request.url.path == "/users/":
+                call_counts["users"] += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "users": [
+                            {
+                                "id": "user-1",
+                                "firstName": "Jane",
+                                "lastName": "Doe",
+                                "email": "jane@example.com",
+                            }
+                        ]
+                    },
+                )
+            if request.url.path == "/medias/upload-file":
+                call_counts["upload"] += 1
+                if call_counts["upload"] == 1:
+                    return httpx.Response(
+                        200,
+                        json={"fileId": "file-video", "url": "https://storage.googleapis.com/example/reel.mp4"},
+                    )
+                return httpx.Response(
+                    200,
+                    json={"fileId": "file-poster", "url": "https://storage.googleapis.com/example/poster.jpg"},
+                )
+            if request.url.path.endswith("/posts"):
+                call_counts["posts"] += 1
+                created_posts.append(json.loads(request.content.decode("utf-8")))
+                return httpx.Response(
+                    201,
+                    json={"results": {"id": f"post-{call_counts['posts']}", "status": "published"}},
+                )
+            raise AssertionError(f"Unexpected path: {request.url.path}")
+
+        with workspace_temp_dir() as temp_dir:
+            video_path = temp_dir / "sample-reel.mp4"
+            poster_path = temp_dir / "sample-poster.jpg"
+            video_path.write_bytes(b"video-bytes")
+            poster_path.write_bytes(b"poster-bytes")
+            client = build_client_with_transport(handler)
+            publisher = GoHighLevelPublisher(
+                media_service=GoHighLevelMediaService(client=client),
+                social_service=GoHighLevelSocialService(client=client),
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+            )
+
+            result = publisher.publish_video_to_platforms(
+                MultiPlatformPublishRequest(
+                    location_id="location-1",
+                    access_token="token-1",
+                    source_site_id="ckp.ie",
+                    publish_targets=(
+                        PlatformPublishTarget(
+                            platform="facebook",
+                            media_path=video_path,
+                            description="Facebook description",
+                            social_post_type="reel",
+                            artifact_kind="reel_video",
+                        ),
+                        PlatformPublishTarget(
+                            platform="google_business_profile",
+                            media_path=poster_path,
+                            description="GBP description",
+                            social_post_type="post",
+                            artifact_kind="poster_image",
+                        ),
+                    ),
+                )
+            )
+
+        self.assertEqual(result.aggregate_status, "published")
+        self.assertEqual(result.successful_platforms, ("facebook", "google_business_profile"))
+        self.assertEqual(call_counts, {"accounts": 1, "users": 1, "upload": 2, "posts": 2})
+        self.assertEqual(created_posts[0]["accountIds"], ["fb-1"])
+        self.assertEqual(created_posts[0]["type"], "reel")
+        self.assertEqual(created_posts[1]["accountIds"], ["gbp-1"])
+        self.assertEqual(created_posts[1]["type"], "post")
+        platform_results = result.to_dict()["platform_results"]
+        self.assertEqual(platform_results["facebook"]["artifact_kind"], "reel_video")
+        self.assertEqual(platform_results["google_business_profile"]["artifact_kind"], "poster_image")
+
     def test_publish_video_to_platforms_raises_when_no_platform_succeeds(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             if request.url.path.endswith("/accounts"):
@@ -967,6 +1169,7 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
         self.assertEqual(created_posts[0]["type"], "post")
         self.assertEqual(created_posts[0]["accountIds"], ["yt-1"])
         self.assertNotIn("title", created_posts[0])
+        self.assertEqual(created_posts[0]["youtubePostDetails"], {"type": "video"})
         self.assertEqual(len(upload_requests), 1)
         self.assertIn(b'filename="46 Example Street, Dublin 4.mp4"', upload_requests[0])
         self.assertIn(b'name="name"', upload_requests[0])
@@ -1302,6 +1505,110 @@ class PropertyPublisherTests(unittest.TestCase):
         self.assertEqual(
             publisher.last_request.upload_file_name,
             "46 Example Street, Dublin 4",
+        )
+
+    def test_property_publisher_reuses_existing_local_poster(self) -> None:
+        class FakePublisher:
+            def publish_video_to_platforms(
+                self,
+                request: MultiPlatformPublishRequest,
+            ):
+                raise TransientSocialPublishingError("stop after capture")
+
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        with workspace_temp_dir() as workspace_dir:
+            storage_paths = resolve_site_storage_layout(workspace_dir, "ckp.ie")
+            storage_paths.generated_posters_root.mkdir(parents=True, exist_ok=True)
+            expected_poster_path = storage_paths.generated_posters_root / "sample-property-poster.jpg"
+            expected_poster_path.write_bytes(b"poster-bytes")
+            context = PropertyContext(
+                workspace_dir=workspace_dir,
+                storage_paths=storage_paths,
+                site_id="ckp.ie",
+                property=property_item,
+            )
+
+            with patch(
+                "services.social_delivery.property_publisher.generate_property_poster_from_data",
+                side_effect=AssertionError("poster should not be regenerated"),
+            ):
+                poster_path = GoHighLevelPropertyPublisher(
+                    publisher=FakePublisher()
+                )._ensure_poster_artifact(context)
+
+        self.assertEqual(poster_path, expected_poster_path)
+
+    def test_property_publisher_builds_mixed_artifact_targets_for_facebook_and_gbp(self) -> None:
+        class FakePublisher:
+            def __init__(self) -> None:
+                self.last_request: MultiPlatformPublishRequest | None = None
+
+            def publish_video_to_platforms(
+                self,
+                request: MultiPlatformPublishRequest,
+            ):
+                self.last_request = request
+                raise TransientSocialPublishingError("stop after capture")
+
+        publisher = FakePublisher()
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        with workspace_temp_dir() as workspace_dir:
+            storage_paths = resolve_site_storage_layout(workspace_dir, "ckp.ie")
+            context = PropertyContext(
+                workspace_dir=workspace_dir,
+                storage_paths=storage_paths,
+                site_id="ckp.ie",
+                property=property_item,
+                publish_context=SocialPublishContext(
+                    provider="gohighlevel",
+                    location_id="location-1",
+                    access_token="token-1",
+                    platforms=("facebook", "google_business_profile"),
+                ),
+                publish_descriptions_by_platform={
+                    "facebook": "Facebook description",
+                    "google_business_profile": "GBP description",
+                },
+                publish_titles_by_platform={
+                    "facebook": "46 Example Street, Dublin 4",
+                    "google_business_profile": "46 Example Street, Dublin 4",
+                },
+                publish_target_url="https://ckp.ie/property/sample-property",
+                pending_publish_platforms=("facebook", "google_business_profile"),
+            )
+            published_video = PublishedVideoArtifact(
+                manifest_path=workspace_dir / "sample.json",
+                video_path=workspace_dir / "sample.mp4",
+            )
+            published_video.media_path.write_bytes(b"video-bytes")
+
+            social_publisher = GoHighLevelPropertyPublisher(publisher=publisher)
+            social_publisher._ensure_poster_artifact = lambda *_args, **_kwargs: workspace_dir / "sample-poster.jpg"  # type: ignore[method-assign]
+            (workspace_dir / "sample-poster.jpg").write_bytes(b"poster-bytes")
+
+            with self.assertRaises(TransientSocialPublishingError):
+                social_publisher.publish_property_reel(
+                    context,
+                    published_video,
+                )
+
+        self.assertIsNotNone(publisher.last_request)
+        assert publisher.last_request is not None
+        self.assertEqual(
+            tuple(target.platform for target in publisher.last_request.publish_targets),
+            ("facebook", "google_business_profile"),
+        )
+        self.assertEqual(
+            tuple(target.artifact_kind for target in publisher.last_request.publish_targets),
+            ("reel_video", "poster_image"),
+        )
+        self.assertEqual(
+            publisher.last_request.publish_targets[0].media_path.name,
+            "sample.mp4",
+        )
+        self.assertEqual(
+            publisher.last_request.publish_targets[1].media_path.name,
+            "sample-poster.jpg",
         )
 
 

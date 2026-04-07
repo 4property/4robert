@@ -15,6 +15,7 @@ from application.content_generation import ContentGenerator, DeterministicProper
 from application.media_planning import build_media_delivery_plan
 from application.persistence import UnitOfWork
 from application.types import (
+    PlatformPublishTargetPlan,
     PreparedMediaAssets,
     PropertyContext,
     PropertyVideoJob,
@@ -23,6 +24,13 @@ from application.types import (
     SocialPublishContext,
 )
 from config import DEFAULT_PHOTOS_TO_SELECT, REVIEW_WORKFLOW_ENABLED, SELECTED_PHOTOS_DIRNAME
+from core.media_cleanup import (
+    DEFAULT_DELETE_SELECTED_PHOTOS,
+    DEFAULT_DELETE_TEMPORARY_FILES,
+    should_cleanup_raw_property_dir,
+    should_cleanup_render_staging_dir,
+    should_cleanup_selected_assets,
+)
 from core.errors import (
     PhotoFilteringError,
     SocialPublishingResultError,
@@ -44,11 +52,20 @@ from services.reel_rendering import (
     generate_property_reel_from_data,
     write_property_reel_manifest_from_data,
 )
+from services.reel_rendering.poster import (
+    generate_property_poster_from_data,
+    resolve_property_poster_output_path,
+)
+from services.reel_rendering.preparation import prepare_reel_render_assets
 from services.reel_rendering.runtime import build_local_selected_slides
 from services.social_delivery import (
     GoHighLevelPropertyPublisher,
     MultiPlatformPublishResult,
     build_property_public_url,
+)
+from services.social_delivery.platforms import get_platform_config
+from services.social_delivery.platform_policy import (
+    normalize_platform_name,
 )
 from services.webhook_transport.site_storage import resolve_site_storage_layout
 
@@ -143,6 +160,14 @@ def _build_workflow_payload(
     if context.publish_context is not None:
         payload["location_id"] = context.publish_context.location_id
         payload["platforms"] = list(context.pending_publish_platforms or context.publish_context.platforms)
+    if context.publish_targets:
+        payload["publish_targets"] = {
+            target.platform: {
+                "artifact_kind": target.artifact_kind,
+                "social_post_type": target.social_post_type,
+            }
+            for target in context.publish_targets
+        }
     if extra:
         payload.update(extra)
     return payload
@@ -160,7 +185,7 @@ def _normalise_platforms(value: object) -> tuple[str, ...]:
     normalized_values: list[str] = []
     seen: set[str] = set()
     for raw_value in raw_values:
-        normalized_value = str(raw_value or "").strip().lower()
+        normalized_value = normalize_platform_name(str(raw_value or "").strip().lower())
         if not normalized_value or normalized_value in seen:
             continue
         seen.add(normalized_value)
@@ -176,6 +201,8 @@ def _parse_publish_target_snapshot(value: str) -> dict[str, object]:
             "location_id": "",
             "platforms": (),
             "descriptions_by_platform": {},
+            "titles_by_platform": {},
+            "targets_by_platform": {},
             "target_url": "",
             "artifact_kind": "",
             "render_profile": "",
@@ -187,10 +214,37 @@ def _parse_publish_target_snapshot(value: str) -> dict[str, object]:
     descriptions_by_platform: dict[str, str] = {}
     if isinstance(raw_descriptions, dict):
         for raw_platform, raw_description in raw_descriptions.items():
-            platform = str(raw_platform or "").strip().lower()
+            platform = normalize_platform_name(str(raw_platform or "").strip().lower())
             if not platform:
                 continue
             descriptions_by_platform[platform] = str(raw_description or "")
+
+    raw_titles = raw_snapshot.get("titles_by_platform")
+    titles_by_platform: dict[str, str] = {}
+    if isinstance(raw_titles, dict):
+        for raw_platform, raw_title in raw_titles.items():
+            platform = normalize_platform_name(str(raw_platform or "").strip().lower())
+            title = str(raw_title or "").strip()
+            if not platform or not title:
+                continue
+            titles_by_platform[platform] = title
+
+    raw_targets = raw_snapshot.get("targets_by_platform")
+    targets_by_platform: dict[str, dict[str, str]] = {}
+    if isinstance(raw_targets, dict):
+        for raw_platform, raw_target in raw_targets.items():
+            if not isinstance(raw_target, dict):
+                continue
+            platform = normalize_platform_name(str(raw_platform or "").strip().lower())
+            if not platform:
+                continue
+            targets_by_platform[platform] = {
+                "artifact_kind": str(raw_target.get("artifact_kind") or "").strip(),
+                "social_post_type": str(raw_target.get("social_post_type") or "").strip(),
+                "description": str(raw_target.get("description") or ""),
+                "title": str(raw_target.get("title") or "").strip(),
+                "target_url": str(raw_target.get("target_url") or "").strip(),
+            }
 
     platforms = _normalise_platforms(raw_snapshot.get("platforms"))
 
@@ -199,6 +253,8 @@ def _parse_publish_target_snapshot(value: str) -> dict[str, object]:
         "location_id": str(raw_snapshot.get("location_id") or "").strip(),
         "platforms": platforms,
         "descriptions_by_platform": descriptions_by_platform,
+        "titles_by_platform": titles_by_platform,
+        "targets_by_platform": targets_by_platform,
         "target_url": str(raw_snapshot.get("target_url") or "").strip(),
         "artifact_kind": str(raw_snapshot.get("artifact_kind") or "").strip(),
         "render_profile": str(raw_snapshot.get("render_profile") or "").strip(),
@@ -256,8 +312,14 @@ def _extract_successful_platforms(
 
 
 class LocalPhotoSelectionEngine:
-    def __init__(self, *, photos_to_select: int = DEFAULT_PHOTOS_TO_SELECT) -> None:
+    def __init__(
+        self,
+        *,
+        photos_to_select: int = DEFAULT_PHOTOS_TO_SELECT,
+        cleanup_temporary_files: bool = DEFAULT_DELETE_TEMPORARY_FILES,
+    ) -> None:
         self.photos_to_select = photos_to_select
+        self.cleanup_temporary_files = bool(cleanup_temporary_files)
 
     def select_photos(
         self,
@@ -271,6 +333,7 @@ class LocalPhotoSelectionEngine:
             raw_images_root,
             filtered_images_root,
             photos_to_select=self.photos_to_select,
+            cleanup_temporary_files=self.cleanup_temporary_files,
         )
 
 
@@ -302,9 +365,12 @@ class DefaultPropertyInfoService:
             desired_platforms,
             publish_target_url,
             publish_descriptions_by_platform,
+            publish_titles_by_platform,
+            publish_targets,
         ) = self._resolve_publish_inputs(
             job=job,
             property_item=property_item,
+            delivery_plan=delivery_plan,
         )
         content_snapshot = self._build_content_snapshot(
             property_item=property_item,
@@ -315,6 +381,8 @@ class DefaultPropertyInfoService:
         publish_target_snapshot = self._build_publish_target_snapshot(
             publish_context=publish_context,
             descriptions_by_platform=publish_descriptions_by_platform,
+            titles_by_platform=publish_titles_by_platform,
+            publish_targets=publish_targets,
             target_url=publish_target_url,
             delivery_plan=delivery_plan,
         )
@@ -339,6 +407,8 @@ class DefaultPropertyInfoService:
                 state=state,
                 storage_root=self.workspace_dir,
                 artifact_kind=delivery_plan.artifact_kind,
+                site_id=job.site_id,
+                property_slug=property_item.slug,
             )
             content_changed = (
                 state.content_snapshot_json != content_snapshot_json
@@ -357,6 +427,8 @@ class DefaultPropertyInfoService:
                 publish_context=publish_context,
                 desired_platforms=desired_platforms,
                 publish_descriptions_by_platform=publish_descriptions_by_platform,
+                publish_titles_by_platform=publish_titles_by_platform,
+                publish_targets=publish_targets,
                 publish_target_url=publish_target_url,
                 delivery_plan=delivery_plan,
                 requires_render=requires_render,
@@ -391,6 +463,33 @@ class DefaultPropertyInfoService:
                 )
                 unit_of_work.pipeline_state_repository.save_property_pipeline_state(next_state)
 
+        logger.info(
+            format_console_block(
+                "Property Ingest Decision",
+                format_detail_line("Site ID", job.site_id),
+                format_detail_line("Property ID", property_item.id),
+                format_detail_line("Content changed", "yes" if content_changed else "no"),
+                format_detail_line("Has local artifacts", "yes" if has_local_artifacts else "no"),
+                format_detail_line(
+                    "Requires asset preparation",
+                    "yes" if requires_asset_preparation else "no",
+                ),
+                format_detail_line("Requires render", "yes" if requires_render else "no"),
+                format_detail_line(
+                    "Pending publish platforms",
+                    ", ".join(pending_publish_platforms) or "<none>",
+                ),
+                format_detail_line(
+                    "Publish targets",
+                    ", ".join(
+                        f"{target.platform}:{target.artifact_kind}"
+                        for target in publish_targets
+                    ) or "<none>",
+                ),
+                format_detail_line("Noop", "yes" if is_noop else "no"),
+            )
+        )
+
         return PropertyContext(
             workspace_dir=self.workspace_dir,
             storage_paths=storage_paths,
@@ -399,6 +498,8 @@ class DefaultPropertyInfoService:
             delivery_plan=delivery_plan,
             publish_context=publish_context,
             publish_descriptions_by_platform=publish_descriptions_by_platform,
+            publish_titles_by_platform=publish_titles_by_platform,
+            publish_targets=publish_targets,
             publish_target_url=publish_target_url,
             content_fingerprint=content_fingerprint,
             content_snapshot_json=content_snapshot_json,
@@ -417,11 +518,21 @@ class DefaultPropertyInfoService:
         *,
         job: PropertyVideoJob,
         property_item: Property,
-    ) -> tuple[SocialPublishContext | None, tuple[str, ...], str | None, dict[str, str]]:
+        delivery_plan,
+    ) -> tuple[
+        SocialPublishContext | None,
+        tuple[str, ...],
+        str | None,
+        dict[str, str],
+        dict[str, str],
+        tuple[PlatformPublishTargetPlan, ...],
+    ]:
         publish_context: SocialPublishContext | None = None
         desired_platforms: tuple[str, ...] = ()
         publish_target_url: str | None = None
         publish_descriptions_by_platform: dict[str, str] = {}
+        publish_titles_by_platform: dict[str, str] = {}
+        publish_targets: tuple[PlatformPublishTargetPlan, ...] = ()
 
         if self.social_publishing_enabled:
             publish_context = job.publish_context
@@ -437,18 +548,48 @@ class DefaultPropertyInfoService:
             )
 
         if publish_context is not None and publish_target_url is not None:
+            logger.info(
+                format_console_block(
+                    "Property Content Generation Started",
+                    format_detail_line("Site ID", job.site_id),
+                    format_detail_line("Property ID", property_item.id),
+                    format_detail_line("Platforms", ", ".join(desired_platforms)),
+                    format_detail_line("Target URL", publish_target_url),
+                )
+            )
             generated_content = self.content_generator.generate_property_content(
                 property_item=property_item,
                 property_url=publish_target_url,
                 platforms=desired_platforms,
             )
             publish_descriptions_by_platform = dict(generated_content.captions_by_platform)
+            publish_titles_by_platform = dict(generated_content.titles_by_platform)
+            publish_targets = self._build_publish_targets(
+                property_item=property_item,
+                desired_platforms=desired_platforms,
+                publish_descriptions_by_platform=publish_descriptions_by_platform,
+                publish_titles_by_platform=publish_titles_by_platform,
+                publish_target_url=publish_target_url,
+                delivery_plan=delivery_plan,
+            )
+            logger.info(
+                format_console_block(
+                    "Property Content Generation Completed",
+                    format_detail_line("Site ID", job.site_id),
+                    format_detail_line("Property ID", property_item.id),
+                    format_detail_line("Generated captions", len(publish_descriptions_by_platform)),
+                    format_detail_line("Generated titles", len(publish_titles_by_platform)),
+                    format_detail_line("Publish targets", len(publish_targets)),
+                )
+            )
 
         return (
             publish_context,
             desired_platforms,
             publish_target_url,
             publish_descriptions_by_platform,
+            publish_titles_by_platform,
+            publish_targets,
         )
 
     @staticmethod
@@ -543,6 +684,8 @@ class DefaultPropertyInfoService:
         *,
         publish_context,
         descriptions_by_platform: dict[str, str],
+        titles_by_platform: dict[str, str],
+        publish_targets: tuple[PlatformPublishTargetPlan, ...],
         target_url: str | None,
         delivery_plan,
     ) -> dict[str, object]:
@@ -553,6 +696,17 @@ class DefaultPropertyInfoService:
             "location_id": publish_context.location_id,
             "platforms": list(publish_context.platforms),
             "descriptions_by_platform": dict(descriptions_by_platform),
+            "titles_by_platform": dict(titles_by_platform),
+            "targets_by_platform": {
+                target.platform: {
+                    "artifact_kind": target.artifact_kind,
+                    "social_post_type": target.social_post_type,
+                    "description": target.description,
+                    "title": target.title or "",
+                    "target_url": target.target_url or "",
+                }
+                for target in publish_targets
+            },
             "target_url": target_url or "",
             "artifact_kind": delivery_plan.artifact_kind,
             "render_profile": delivery_plan.render_profile,
@@ -561,12 +715,57 @@ class DefaultPropertyInfoService:
         }
 
     @staticmethod
+    def _build_publish_targets(
+        *,
+        property_item: Property,
+        desired_platforms: tuple[str, ...],
+        publish_descriptions_by_platform: dict[str, str],
+        publish_titles_by_platform: dict[str, str],
+        publish_target_url: str | None,
+        delivery_plan,
+    ) -> tuple[PlatformPublishTargetPlan, ...]:
+        publish_targets: list[PlatformPublishTargetPlan] = []
+        for platform in desired_platforms:
+            normalized_platform = normalize_platform_name(platform)
+            if not normalized_platform:
+                continue
+            platform_config = get_platform_config(normalized_platform)
+            if platform_config is None:
+                continue
+            publish_targets.append(
+                PlatformPublishTargetPlan(
+                    platform=normalized_platform,
+                    artifact_kind=platform_config.resolve_artifact_kind(
+                        delivery_plan.artifact_kind,
+                    ),
+                    social_post_type=platform_config.resolve_social_post_type(
+                        delivery_plan.social_post_type,
+                    ),
+                    description=str(
+                        publish_descriptions_by_platform.get(normalized_platform)
+                        or platform_config.build_description(
+                            property_item,
+                            str(publish_target_url or property_item.link or ""),
+                        )
+                    ),
+                    title=(
+                        str(publish_titles_by_platform.get(normalized_platform) or "").strip() or None
+                    )
+                    or platform_config.build_title(property_item),
+                    target_url=publish_target_url or None,
+                )
+            )
+        return tuple(publish_targets)
+
+    @staticmethod
     def _determine_pending_publish_platforms(
         *,
         state: PropertyPipelineState,
         publish_context,
         desired_platforms: tuple[str, ...],
         publish_descriptions_by_platform: dict[str, str],
+        publish_titles_by_platform: dict[str, str],
+        publish_targets: tuple[PlatformPublishTargetPlan, ...],
         publish_target_url: str | None,
         delivery_plan,
         requires_render: bool,
@@ -586,9 +785,23 @@ class DefaultPropertyInfoService:
         previous_descriptions = previous_target_snapshot["descriptions_by_platform"]
         if not isinstance(previous_descriptions, dict):
             previous_descriptions = {}
+        previous_titles = previous_target_snapshot["titles_by_platform"]
+        if not isinstance(previous_titles, dict):
+            previous_titles = {}
+        previous_targets = previous_target_snapshot["targets_by_platform"]
+        if not isinstance(previous_targets, dict):
+            previous_targets = {}
+        current_targets = {
+            target.platform: target
+            for target in publish_targets
+        }
 
         pending_publish_platforms: list[str] = []
         for platform in desired_platforms:
+            current_target = current_targets.get(platform)
+            if current_target is None:
+                pending_publish_platforms.append(platform)
+                continue
             if platform not in successful_platforms:
                 pending_publish_platforms.append(platform)
                 continue
@@ -598,24 +811,55 @@ class DefaultPropertyInfoService:
             if str(previous_target_snapshot.get("location_id") or "") != publish_context.location_id:
                 pending_publish_platforms.append(platform)
                 continue
-            if str(previous_target_snapshot.get("target_url") or "") != (publish_target_url or ""):
+            previous_target_entry = previous_targets.get(platform)
+            previous_target_url = str(
+                (previous_target_entry or {}).get("target_url")
+                or previous_target_snapshot.get("target_url")
+                or ""
+            )
+            if previous_target_url != (current_target.target_url or publish_target_url or ""):
                 pending_publish_platforms.append(platform)
                 continue
-            if str(previous_target_snapshot.get("artifact_kind") or "") != delivery_plan.artifact_kind:
+            previous_artifact_kind = str(
+                (previous_target_entry or {}).get("artifact_kind")
+                or previous_target_snapshot.get("artifact_kind")
+                or ""
+            )
+            if previous_artifact_kind != current_target.artifact_kind:
                 pending_publish_platforms.append(platform)
                 continue
             if str(previous_target_snapshot.get("render_profile") or "") != delivery_plan.render_profile:
                 pending_publish_platforms.append(platform)
                 continue
-            if str(previous_target_snapshot.get("social_post_type") or "") != delivery_plan.social_post_type:
+            previous_social_post_type = str(
+                (previous_target_entry or {}).get("social_post_type")
+                or previous_target_snapshot.get("social_post_type")
+                or ""
+            )
+            if previous_social_post_type != current_target.social_post_type:
                 pending_publish_platforms.append(platform)
                 continue
             if str(previous_target_snapshot.get("listing_lifecycle") or "") != delivery_plan.listing_lifecycle:
                 pending_publish_platforms.append(platform)
                 continue
-            previous_description = str(previous_descriptions.get(platform) or "")
-            current_description = str(publish_descriptions_by_platform.get(platform) or "")
+            previous_description = str(
+                (previous_target_entry or {}).get("description")
+                or previous_descriptions.get(platform)
+                or ""
+            )
+            current_description = current_target.description or str(
+                publish_descriptions_by_platform.get(platform) or ""
+            )
             if previous_description != current_description:
+                pending_publish_platforms.append(platform)
+                continue
+            previous_title = str(
+                (previous_target_entry or {}).get("title")
+                or previous_titles.get(platform)
+                or ""
+            )
+            current_title = str(current_target.title or publish_titles_by_platform.get(platform) or "")
+            if previous_title != current_title:
                 pending_publish_platforms.append(platform)
 
         return tuple(pending_publish_platforms)
@@ -646,6 +890,8 @@ class DefaultPropertyInfoService:
         state: PropertyPipelineState,
         storage_root: Path,
         artifact_kind: str,
+        site_id: str,
+        property_slug: str,
     ) -> bool:
         artifact_path = _resolve_absolute_path(
             storage_root,
@@ -656,6 +902,11 @@ class DefaultPropertyInfoService:
             state.local_metadata_path or state.local_manifest_path,
         )
         if artifact_kind == "reel_video":
+            poster_path = resolve_property_poster_output_path(
+                storage_root,
+                site_id=site_id,
+                slug=property_slug,
+            )
             return bool(
                 artifact_path
                 and metadata_path
@@ -663,6 +914,8 @@ class DefaultPropertyInfoService:
                 and artifact_path.stat().st_size > 0
                 and metadata_path.exists()
                 and metadata_path.stat().st_size > 0
+                and poster_path.exists()
+                and poster_path.stat().st_size > 0
                 and state.render_status == "completed"
             )
         return bool(
@@ -722,10 +975,16 @@ class DefaultMediaPreparationService:
         *,
         unit_of_work_factory: Callable[[], UnitOfWork],
         engine: LocalPhotoSelectionEngine | None = None,
+        cleanup_temporary_files: bool = DEFAULT_DELETE_TEMPORARY_FILES,
+        cleanup_selected_photos: bool = DEFAULT_DELETE_SELECTED_PHOTOS,
     ) -> None:
         self.workspace_dir = Path(workspace_dir).expanduser().resolve()
         self.unit_of_work_factory = unit_of_work_factory
-        self.engine = engine or LocalPhotoSelectionEngine()
+        self.cleanup_temporary_files = bool(cleanup_temporary_files)
+        self.cleanup_selected_photos = bool(cleanup_selected_photos)
+        self.engine = engine or LocalPhotoSelectionEngine(
+            cleanup_temporary_files=self.cleanup_temporary_files
+        )
 
     def prepare_assets(self, context: PropertyContext) -> PreparedMediaAssets:
         if not context.requires_asset_preparation:
@@ -739,6 +998,29 @@ class DefaultMediaPreparationService:
 
     def select_photos(self, context: PropertyContext) -> PreparedMediaAssets:
         return self.prepare_assets(context)
+
+    def cleanup_prepared_assets(
+        self,
+        context: PropertyContext,
+        prepared_assets: PreparedMediaAssets,
+    ) -> None:
+        if not should_cleanup_selected_assets(self.cleanup_selected_photos):
+            return
+        if not prepared_assets.selected_dir.exists():
+            return
+        shutil.rmtree(prepared_assets.selected_dir, ignore_errors=True)
+        logger.info(
+            format_console_block(
+                "Prepared Media Assets Cleaned",
+                format_detail_line("Site ID", context.site_id),
+                format_detail_line("Property ID", context.property.id),
+                format_detail_line(
+                    "Delete selected photos",
+                    "yes" if self.cleanup_selected_photos else "no",
+                ),
+                format_detail_line("Selected directory", prepared_assets.selected_dir),
+            )
+        )
 
     @staticmethod
     def resolve_selected_dir(*, storage_paths, property_item: Property, state: PropertyPipelineState | None = None) -> Path:
@@ -884,7 +1166,8 @@ class DefaultMediaPreparationService:
                 cause=exc,
             ) from exc
         finally:
-            shutil.rmtree(raw_property_dir, ignore_errors=True)
+            if should_cleanup_raw_property_dir(self.cleanup_temporary_files):
+                shutil.rmtree(raw_property_dir, ignore_errors=True)
 
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.property_repository.save_property_images(
@@ -953,6 +1236,7 @@ class DefaultMediaRenderer:
         )
         manifest_path = staging_dir / f"{context.property.slug}-reel.json"
         media_path = staging_dir / f"{context.property.slug}-reel.mp4"
+        poster_path = staging_dir / f"{context.property.slug}-poster.jpg"
         selected_slides = build_local_selected_slides(
             prepared_assets.selected_dir,
             prepared_assets.selected_photo_paths,
@@ -962,18 +1246,34 @@ class DefaultMediaRenderer:
             prepared_assets=prepared_assets,
             selected_slides=selected_slides,
         )
+        render_working_dir = staging_dir / "_prepared"
+        prepared_render_assets = prepare_reel_render_assets(
+            self.workspace_dir,
+            property_render_data,
+            template=template,
+            working_dir=render_working_dir,
+        )
 
         write_property_reel_manifest_from_data(
             self.workspace_dir,
             property_render_data,
             output_path=manifest_path,
             template=template,
+            prepared_assets=prepared_render_assets,
+            working_dir=render_working_dir,
         )
         generate_property_reel_from_data(
             self.workspace_dir,
             property_render_data,
             output_path=media_path,
             template=template,
+            prepared_assets=prepared_render_assets,
+            working_dir=render_working_dir,
+        )
+        generate_property_poster_from_data(
+            self.workspace_dir,
+            property_render_data,
+            output_path=poster_path,
         )
         logger.info(
             format_console_block(
@@ -985,6 +1285,7 @@ class DefaultMediaRenderer:
                 format_detail_line("Staging directory", staging_dir),
                 format_detail_line("Manifest path", manifest_path),
                 format_detail_line("Media path", media_path),
+                format_detail_line("Poster path", poster_path),
             )
         )
         return RenderedMediaArtifact(
@@ -1039,8 +1340,14 @@ class DefaultVideoRenderer(DefaultMediaRenderer):
 
 
 class FileSystemMediaPublisher:
-    def __init__(self, *, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(
+        self,
+        *,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+        cleanup_temporary_files: bool = DEFAULT_DELETE_TEMPORARY_FILES,
+    ) -> None:
         self.unit_of_work_factory = unit_of_work_factory
+        self.cleanup_temporary_files = bool(cleanup_temporary_files)
 
     def publish_media(
         self,
@@ -1056,11 +1363,13 @@ class FileSystemMediaPublisher:
             if rendered_media.metadata_path is None
             else final_output_dir / rendered_media.metadata_path.name
         )
+        final_poster_path = self._publish_related_poster(context, rendered_media)
 
         if rendered_media.metadata_path is not None and final_metadata_path is not None:
             self._replace_atomically(rendered_media.metadata_path, final_metadata_path)
         self._replace_atomically(rendered_media.media_path, final_media_path)
-        shutil.rmtree(rendered_media.staging_dir, ignore_errors=True)
+        if should_cleanup_render_staging_dir(self.cleanup_temporary_files):
+            shutil.rmtree(rendered_media.staging_dir, ignore_errors=True)
 
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.pipeline_state_repository.save_local_artifacts(
@@ -1114,8 +1423,13 @@ class FileSystemMediaPublisher:
                 format_detail_line("Property ID", context.property.id),
                 format_detail_line("Artifact kind", rendered_media.artifact_kind),
                 format_detail_line("Revision ID", revision_id),
+                format_detail_line(
+                    "Delete temporary files",
+                    "yes" if self.cleanup_temporary_files else "no",
+                ),
                 format_detail_line("Media path", final_media_path),
                 format_detail_line("Metadata path", final_metadata_path or "<none>"),
+                format_detail_line("Poster path", final_poster_path or "<none>"),
             )
         )
         return PublishedMediaArtifact(
@@ -1152,8 +1466,24 @@ class FileSystemMediaPublisher:
 
     @staticmethod
     def _resolve_output_dir(context: PropertyContext, artifact_kind: str) -> Path:
-        del artifact_kind
+        if artifact_kind == "poster_image":
+            return context.storage_paths.generated_posters_root
         return context.storage_paths.generated_reels_root
+
+    @classmethod
+    def _publish_related_poster(
+        cls,
+        context: PropertyContext,
+        rendered_media: RenderedMediaArtifact,
+    ) -> Path | None:
+        poster_source_path = rendered_media.staging_dir / f"{context.property.slug}-poster.jpg"
+        if not poster_source_path.exists() or poster_source_path.stat().st_size == 0:
+            return None
+        poster_output_dir = cls._resolve_output_dir(context, "poster_image")
+        poster_output_dir.mkdir(parents=True, exist_ok=True)
+        final_poster_path = poster_output_dir / poster_source_path.name
+        cls._replace_atomically(poster_source_path, final_poster_path)
+        return final_poster_path
 
     @staticmethod
     def _replace_atomically(source_path: Path, destination_path: Path) -> None:
@@ -1250,6 +1580,26 @@ class CompositeMediaPublisher:
                 )
             )
             return published_media
+
+        logger.info(
+            format_console_block(
+                "Social Media Publish Started",
+                format_detail_line("Site ID", context.site_id),
+                format_detail_line("Property ID", context.property.id),
+                format_detail_line("Artifact kind", published_media.artifact_kind),
+                format_detail_line("Revision ID", published_media.revision_id or "<none>"),
+                format_detail_line("Location ID", context.publish_context.location_id),
+                format_detail_line("Desired platforms", ", ".join(context.pending_publish_platforms)),
+                format_detail_line(
+                    "Publish targets",
+                    ", ".join(
+                        f"{target.platform}:{target.artifact_kind}"
+                        for target in context.publish_targets
+                        if target.platform in context.pending_publish_platforms
+                    ) or "<none>",
+                ),
+            )
+        )
 
         try:
             publish_result = self.social_publisher.publish_property_media(context, published_media)

@@ -9,6 +9,7 @@ if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
 from services.reel_rendering.models import PropertyReelTemplate
+from services.reel_rendering.formatting import resolve_agency_logo_box_size, resolve_ber_icon_size
 from services.reel_rendering.render import _build_ffmpeg_reel_command
 
 
@@ -56,6 +57,29 @@ class ReelRenderCommandTests(unittest.TestCase):
 
         self.assertNotIn("-filter_complex_threads", command)
         self.assertNotIn("-threads:v", command)
+
+    def test_overlay_asset_scales_resize_ber_icon_and_logo(self) -> None:
+        base_settings = PropertyReelTemplate(
+            width=1080,
+            height=1440,
+            ber_icon_scale=1.0,
+            agency_logo_scale=1.0,
+        )
+        scaled_settings = PropertyReelTemplate(
+            width=1080,
+            height=1440,
+            ber_icon_scale=0.5,
+            agency_logo_scale=1.5,
+        )
+
+        base_ber_size = resolve_ber_icon_size(base_settings)
+        scaled_ber_size = resolve_ber_icon_size(scaled_settings)
+        self.assertEqual(scaled_ber_size[1], round(base_ber_size[1] * 0.5))
+        self.assertLess(scaled_ber_size[0], base_ber_size[0])
+
+        base_logo_size = resolve_agency_logo_box_size(base_settings)
+        scaled_logo_size = resolve_agency_logo_box_size(scaled_settings)
+        self.assertEqual(scaled_logo_size, (round(base_logo_size[0] * 1.5), round(base_logo_size[1] * 1.5)))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from application.bootstrap import build_default_job_dispatcher, build_default_unit_of_work_factory
 from application.interfaces import JobDispatcher
@@ -16,11 +17,14 @@ from application.types import SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
+    WEBHOOK_ALLOWED_HOSTS,
     WEBHOOK_DISABLE_SECURITY,
+    WEBHOOK_FORWARDED_ALLOW_IPS,
     WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER,
     WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER,
     WEBHOOK_HOST,
     WEBHOOK_JOB_MAX_ATTEMPTS,
+    WEBHOOK_LIMIT_CONCURRENCY,
     WEBHOOK_MAX_PAYLOAD_BYTES,
     WEBHOOK_PATH,
     WEBHOOK_PORT,
@@ -30,6 +34,7 @@ from config import (
     WEBHOOK_SITE_SECRETS,
     WEBHOOK_TIMESTAMP_HEADER,
     WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
+    WEBHOOK_TRUST_PROXY_HEADERS,
     WEBHOOK_WORKER_COUNT,
 )
 from core.errors import DependencyNotInstalledError
@@ -57,6 +62,7 @@ class WordPressWebhookApplication:
         timestamp_header: str = WEBHOOK_TIMESTAMP_HEADER,
         signature_header: str = WEBHOOK_SIGNATURE_HEADER,
         site_secrets: dict[str, str] | None = None,
+        allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
@@ -78,6 +84,7 @@ class WordPressWebhookApplication:
         self.timestamp_header = timestamp_header
         self.signature_header = signature_header
         self.site_secrets = dict(site_secrets or WEBHOOK_SITE_SECRETS)
+        self.allowed_hosts = tuple(allowed_hosts)
         self.security_disabled = security_disabled
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.timestamp_tolerance_seconds = timestamp_tolerance_seconds
@@ -91,6 +98,7 @@ class WordPressWebhookApplication:
             worker_count=self.worker_count,
             security_disabled=self.security_disabled,
         )
+        effective_allowed_hosts = _resolve_allowed_hosts(self)
         self.dispatcher.start()
         logger.info(
             format_console_block(
@@ -108,6 +116,10 @@ class WordPressWebhookApplication:
                     readiness.get("environment", {}).get("ffmpeg_binary"),
                 ),
                 format_detail_line("Security disabled", "Yes" if self.security_disabled else "No"),
+                format_detail_line(
+                    "Allowed hosts",
+                    ", ".join(effective_allowed_hosts) if effective_allowed_hosts else "Disabled",
+                ),
             )
         )
         if self.security_disabled:
@@ -244,6 +256,7 @@ class WordPressWebhookServer:
         timestamp_header: str = WEBHOOK_TIMESTAMP_HEADER,
         signature_header: str = WEBHOOK_SIGNATURE_HEADER,
         site_secrets: dict[str, str] | None = None,
+        allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
@@ -264,6 +277,7 @@ class WordPressWebhookServer:
             timestamp_header=timestamp_header,
             signature_header=signature_header,
             site_secrets=site_secrets,
+            allowed_hosts=allowed_hosts,
             security_disabled=security_disabled,
             shutdown_timeout_seconds=shutdown_timeout_seconds,
             timestamp_tolerance_seconds=timestamp_tolerance_seconds,
@@ -295,6 +309,12 @@ def create_fastapi_app(
         openapi_url=None,
         lifespan=lifespan,
     )
+    allowed_hosts = _resolve_allowed_hosts(application)
+    if allowed_hosts:
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=list(allowed_hosts),
+        )
     app.state.runtime = application
 
     @app.get("/health/live")
@@ -306,7 +326,10 @@ def create_fastapi_app(
         runtime = _get_runtime(request)
         readiness = runtime.build_readiness_report()
         status_code = 200 if readiness["ready"] else 503
-        return JSONResponse(status_code=status_code, content=readiness)
+        return JSONResponse(
+            status_code=status_code,
+            content=_build_minimal_readiness_payload(readiness),
+        )
 
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
@@ -415,11 +438,20 @@ def create_fastapi_app(
             raw_body=raw_body,
         )
         if not is_authenticated:
+            logger.warning(
+                format_console_block(
+                    "Webhook Authentication Failed",
+                    format_detail_line("Client", _format_client(request)),
+                    format_detail_line("Site ID", site_id or "<unresolved>"),
+                    format_detail_line("Reason", auth_message or "Invalid webhook credentials."),
+                    format_detail_line("Hint", auth_hint),
+                )
+            )
             return _json_error(
                 401,
-                auth_message or "Invalid webhook credentials.",
+                "Invalid webhook credentials.",
                 code="INVALID_WEBHOOK_CREDENTIALS",
-                hint=auth_hint,
+                hint="Check the webhook signing secret, timestamp, and required security headers.",
                 details={"site_id": site_id},
             )
 
@@ -505,9 +537,13 @@ def run_wordpress_webhook_server(
         host=host,
         port=port,
         http=VerboseAutoHTTPProtocol,
+        proxy_headers=WEBHOOK_TRUST_PROXY_HEADERS,
+        forwarded_allow_ips=WEBHOOK_FORWARDED_ALLOW_IPS,
+        limit_concurrency=WEBHOOK_LIMIT_CONCURRENCY,
         log_level=logging.getLevelName(logger.getEffectiveLevel()).lower(),
         access_log=False,
         log_config=None,
+        server_header=False,
     )
 
 
@@ -531,6 +567,67 @@ def _json_error(
     if details:
         payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
+
+
+def _build_minimal_readiness_payload(readiness: dict[str, object]) -> dict[str, str]:
+    return {"status": "ready" if readiness.get("ready") else "not_ready"}
+
+
+def _resolve_allowed_hosts(application: WordPressWebhookApplication) -> tuple[str, ...]:
+    candidates: list[str] = []
+    candidates.extend(application.allowed_hosts)
+    candidates.extend(
+        site_id
+        for site_id in application.site_secrets
+        if _looks_like_hostname(site_id)
+    )
+    candidates.extend(("127.0.0.1", "localhost"))
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized_candidate = _normalise_allowed_host(candidate)
+        if not normalized_candidate:
+            continue
+        lowered = normalized_candidate.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized.append(normalized_candidate)
+    return tuple(normalized)
+
+
+def _normalise_allowed_host(value: str) -> str | None:
+    raw_value = str(value or "").strip().lower()
+    if not raw_value:
+        return None
+    if raw_value == "*":
+        return raw_value
+    if "://" in raw_value:
+        parsed = urlparse(raw_value)
+        raw_value = parsed.hostname or parsed.path or ""
+    else:
+        raw_value = raw_value.split("/", 1)[0]
+        if raw_value.count(":") == 1 and raw_value not in {"localhost", "127.0.0.1"}:
+            raw_value = raw_value.split(":", 1)[0]
+    return raw_value or None
+
+
+def _looks_like_hostname(value: str) -> bool:
+    normalized_value = _normalise_allowed_host(value)
+    if not normalized_value:
+        return False
+    return (
+        normalized_value in {"localhost", "127.0.0.1"}
+        or normalized_value.startswith("*.")
+        or "." in normalized_value
+    )
+
+
+def _format_client(request: Request) -> str:
+    if request.client is None:
+        return "<unknown>"
+    return f"{request.client.host}:{request.client.port}"
 
 
 def _parse_content_length(raw_value: str | None) -> int | None:
