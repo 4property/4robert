@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import random
 import re
 import shutil
 import struct
@@ -44,6 +45,9 @@ _VALID_BER_ICON_CODES = {
     "F",
     "G",
 }
+_SUPPORTED_BACKGROUND_AUDIO_EXTENSIONS = frozenset(
+    {".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"}
+)
 
 
 def resolve_ffmpeg_binary() -> str:
@@ -93,6 +97,45 @@ def resolve_asset_path(
             "can read the referenced file."
         ),
     )
+
+
+def resolve_background_audio_paths(
+    workspace_dir: Path,
+    settings: PropertyReelTemplate,
+    *,
+    shuffle_candidates: bool,
+) -> tuple[Path, ...]:
+    configured_audio_path = workspace_dir / settings.assets_dirname / settings.background_audio_filename
+    audio_directory = configured_audio_path.parent
+    if not audio_directory.exists():
+        raise ResourceNotFoundError(
+            "Background audio directory not found for reel rendering.",
+            context={"audio_directory": str(audio_directory)},
+            hint=(
+                "Ensure the assets/music directory is deployed with the application and contains "
+                "at least one readable audio track."
+            ),
+        )
+
+    candidates = [
+        candidate
+        for candidate in sorted(audio_directory.iterdir())
+        if candidate.is_file() and candidate.suffix.lower() in _SUPPORTED_BACKGROUND_AUDIO_EXTENSIONS
+    ]
+    if not candidates:
+        raise ResourceNotFoundError(
+            "No background audio tracks were found for reel rendering.",
+            context={"audio_directory": str(audio_directory)},
+            hint=(
+                "Add at least one readable audio file under assets/music before starting reel generation."
+            ),
+        )
+
+    if shuffle_candidates and len(candidates) > 1:
+        randomized_candidates = list(candidates)
+        random.SystemRandom().shuffle(randomized_candidates)
+        return tuple(randomized_candidates)
+    return tuple(candidates)
 
 
 def normalize_ber_icon_code(ber_rating: str | None) -> str | None:
@@ -582,6 +625,7 @@ __all__ = [
     "prepare_agent_image",
     "resolve_ber_icon_path",
     "resolve_asset_path",
+    "resolve_background_audio_paths",
     "resolve_ffmpeg_binary",
     "resolve_font_path",
     "resolve_manifest_output_path",

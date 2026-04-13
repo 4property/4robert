@@ -39,6 +39,7 @@ PROPERTY_REEL_SELECT_FIELDS = (
     "properties.property_type_label AS property_type_label",
     "properties.property_area_label AS property_area_label",
     "properties.property_county_label AS property_county_label",
+    "properties.property_size AS property_size",
     "properties.eircode AS eircode",
     "pps.selected_image_folder AS selected_image_folder",
     "pps.artifact_kind AS artifact_kind",
@@ -111,6 +112,7 @@ class PropertyReelRecord:
     property_type_label: str | None
     property_area_label: str | None
     property_county_label: str | None
+    property_size: str | None
     eircode: str | None
     artifact_kind: str
     local_artifact_path: str
@@ -529,6 +531,7 @@ class PropertyPipelineRepository:
             property_type_label=None if row["property_type_label"] is None else str(row["property_type_label"]),
             property_area_label=None if row["property_area_label"] is None else str(row["property_area_label"]),
             property_county_label=None if row["property_county_label"] is None else str(row["property_county_label"]),
+            property_size=None if row["property_size"] is None else str(row["property_size"]),
             eircode=None if row["eircode"] is None else str(row["eircode"]),
             artifact_kind="" if row["artifact_kind"] is None else str(row["artifact_kind"]),
             local_artifact_path="" if row["local_artifact_path"] is None else str(row["local_artifact_path"]),

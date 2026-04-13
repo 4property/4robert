@@ -20,6 +20,7 @@ class PropertyJobEnqueueRequest:
     raw_payload_hash: str
     payload_json: str
     publish_context_json: str
+    gohighlevel_access_token: str
     max_attempts: int
     available_at: str
     created_at: str
@@ -36,6 +37,7 @@ class QueuedPropertyJobRecord:
     status: str
     payload_json: str
     publish_context_json: str
+    gohighlevel_access_token: str
     attempt_count: int
     max_attempts: int
     available_at: str
@@ -60,6 +62,7 @@ def _build_job_queue_table_sql() -> str:
             status TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             publish_context_json TEXT NOT NULL DEFAULT '',
+            gohighlevel_access_token TEXT NOT NULL DEFAULT '',
             attempt_count INTEGER NOT NULL DEFAULT 0,
             max_attempts INTEGER NOT NULL DEFAULT 1,
             available_at TEXT NOT NULL,
@@ -113,6 +116,25 @@ class PropertyJobRepository:
 
     def initialise(self) -> None:
         self.connection.executescript(_build_job_queue_table_sql())
+        self._ensure_job_queue_columns()
+
+    def _get_table_columns(self) -> set[str]:
+        return {
+            str(row[1])
+            for row in self.connection.execute(f"PRAGMA table_info({PROPERTY_JOB_TABLE_NAME})")
+        }
+
+    def _ensure_job_queue_columns(self) -> None:
+        existing_columns = self._get_table_columns()
+        required_columns = {
+            "gohighlevel_access_token": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column, definition in required_columns.items():
+            if column in existing_columns:
+                continue
+            self.connection.execute(
+                f"ALTER TABLE {PROPERTY_JOB_TABLE_NAME} ADD COLUMN {column} {definition}"
+            )
 
     def enqueue_job(self, request: PropertyJobEnqueueRequest) -> None:
         self.connection.execute(
@@ -127,6 +149,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
+                gohighlevel_access_token,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -138,7 +161,7 @@ class PropertyJobRepository:
                 finished_at,
                 superseded_by_job_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?, '', '', NULL, ?, ?, '', '')
+            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, '', '', NULL, ?, ?, '', '')
             """,
             (
                 request.job_id,
@@ -149,6 +172,7 @@ class PropertyJobRepository:
                 request.raw_payload_hash,
                 request.payload_json,
                 request.publish_context_json,
+                request.gohighlevel_access_token,
                 max(1, request.max_attempts),
                 request.available_at,
                 request.created_at,
@@ -185,6 +209,7 @@ class PropertyJobRepository:
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'superseded',
                 publish_context_json = '',
+                gohighlevel_access_token = '',
                 last_error = 'Superseded by a newer queued job.',
                 updated_at = ?,
                 finished_at = ?,
@@ -258,6 +283,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
+                gohighlevel_access_token,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -304,6 +330,7 @@ class PropertyJobRepository:
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'completed',
                 publish_context_json = '',
+                gohighlevel_access_token = '',
                 lease_expires_at = '',
                 worker_id = '',
                 last_error = NULL,
@@ -327,6 +354,7 @@ class PropertyJobRepository:
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'failed',
                 publish_context_json = '',
+                gohighlevel_access_token = '',
                 lease_expires_at = '',
                 worker_id = '',
                 last_error = ?,
@@ -384,6 +412,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
+                gohighlevel_access_token,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -421,6 +450,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
+                gohighlevel_access_token,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -452,6 +482,7 @@ def _row_to_queued_job(row: sqlite3.Row) -> QueuedPropertyJobRecord:
         status=str(row["status"]),
         payload_json=str(row["payload_json"] or ""),
         publish_context_json=str(row["publish_context_json"] or ""),
+        gohighlevel_access_token=str(row["gohighlevel_access_token"] or ""),
         attempt_count=int(row["attempt_count"] or 0),
         max_attempts=int(row["max_attempts"] or 1),
         available_at=str(row["available_at"] or ""),

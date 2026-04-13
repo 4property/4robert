@@ -329,6 +329,7 @@ class GoHighLevelPropertyPublisher:
             property_area_label=context.property.property_area_label,
             property_county_label=context.property.property_county_label,
             eircode=context.property.eircode,
+            property_size=context.property.property_size,
             selected_slides=tuple(selected_slides),
         )
 

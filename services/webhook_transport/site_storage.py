@@ -10,6 +10,8 @@ _INVALID_SITE_DIR_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
 GENERATED_MEDIA_ROOT_DIRNAME = "generated_media"
 GENERATED_MEDIA_REELS_DIRNAME = "reels"
 GENERATED_MEDIA_POSTERS_DIRNAME = "posters"
+GENERATED_MEDIA_SCRIPTED_VIDEOS_DIRNAME = "scripted_videos"
+GENERATED_MEDIA_SCRIPTED_ASSETS_DIRNAME = "scripted_assets"
 
 
 def safe_site_dirname(site_id: str) -> str:
@@ -29,6 +31,8 @@ class SiteStorageLayout:
     generated_media_root: Path
     generated_reels_root: Path
     generated_posters_root: Path
+    scripted_videos_root: Path
+    scripted_assets_root: Path
     reels_root: Path
 
 
@@ -45,6 +49,8 @@ def resolve_site_storage_layout(base_dir: str | Path, site_id: str) -> SiteStora
         generated_media_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir,
         generated_reels_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir / GENERATED_MEDIA_REELS_DIRNAME,
         generated_posters_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir / GENERATED_MEDIA_POSTERS_DIRNAME,
+        scripted_videos_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir / GENERATED_MEDIA_SCRIPTED_VIDEOS_DIRNAME,
+        scripted_assets_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir / GENERATED_MEDIA_SCRIPTED_ASSETS_DIRNAME,
         reels_root=workspace_dir / GENERATED_MEDIA_ROOT_DIRNAME / safe_site_dir / GENERATED_MEDIA_REELS_DIRNAME,
     )
 
@@ -53,6 +59,8 @@ __all__ = [
     "GENERATED_MEDIA_POSTERS_DIRNAME",
     "GENERATED_MEDIA_REELS_DIRNAME",
     "GENERATED_MEDIA_ROOT_DIRNAME",
+    "GENERATED_MEDIA_SCRIPTED_ASSETS_DIRNAME",
+    "GENERATED_MEDIA_SCRIPTED_VIDEOS_DIRNAME",
     "SiteStorageLayout",
     "resolve_site_storage_layout",
     "safe_site_dirname",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Any
 
 from services.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
@@ -24,6 +25,8 @@ OVERLAY_TEXT_COLORS: dict[str, str] = {
     "agency_psra": OVERLAY_TEXT_COLOR_PRIMARY,
     "subtitle_caption": OVERLAY_TEXT_COLOR_SUBTITLE,
 }
+
+_PROPERTY_SIZE_NUMERIC_PATTERN = re.compile(r"^\d+(?:[.,]\d+)?$")
 
 OVERLAY_FONT_SIZE_RULES: dict[str, tuple[float, int, float, int]] = {
     "status": (0.050, 68, 0.026, 34),
@@ -121,6 +124,29 @@ def clean_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def format_property_size(value: str | None) -> str | None:
+    normalized = clean_text(value)
+    if not normalized:
+        return None
+
+    compact = re.sub(r"\s+", " ", normalized)
+    normalized_lower = compact.lower()
+    if any(unit in normalized_lower for unit in ("m²", "m2", "sqm", "sq.m", "sq m")):
+        return compact
+
+    compact_numeric = compact.replace(",", ".")
+    if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
+        try:
+            numeric_value = float(compact_numeric)
+        except ValueError:
+            return compact
+        if numeric_value.is_integer():
+            return f"{int(numeric_value)} sq m"
+        return f"{numeric_value:g} sq m"
+
+    return compact
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +252,7 @@ __all__ = [
     "escape_filter_path",
     "fit_wrapped_lines",
     "format_price",
+    "format_property_size",
     "resolve_agency_logo_box_size",
     "resolve_agent_image_size",
     "resolve_ber_icon_size",

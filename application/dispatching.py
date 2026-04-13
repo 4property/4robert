@@ -104,12 +104,14 @@ class SqliteJobDispatcher:
 
         now = _now_iso()
         publish_context_json = ""
+        gohighlevel_access_token = ""
         if job.publish_context is not None:
             publish_context_json = json.dumps(
-                job.publish_context.to_dict(include_access_token=True),
+                job.publish_context.to_dict(include_access_token=False),
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            gohighlevel_access_token = job.publish_context.access_token
 
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
@@ -147,6 +149,7 @@ class SqliteJobDispatcher:
                 request=_build_enqueue_request(
                     job=job,
                     publish_context_json=publish_context_json,
+                    gohighlevel_access_token=gohighlevel_access_token,
                     available_at=now,
                     created_at=now,
                     max_attempts=self.job_max_attempts,
@@ -371,6 +374,7 @@ def _build_enqueue_request(
     *,
     job: PropertyVideoJob,
     publish_context_json: str,
+    gohighlevel_access_token: str,
     available_at: str,
     created_at: str,
     max_attempts: int,
@@ -386,6 +390,7 @@ def _build_enqueue_request(
         raw_payload_hash=job.raw_payload_hash,
         payload_json=json.dumps(job.payload, ensure_ascii=False, sort_keys=True),
         publish_context_json=publish_context_json,
+        gohighlevel_access_token=gohighlevel_access_token,
         max_attempts=max_attempts,
         available_at=available_at,
         created_at=created_at,
@@ -402,6 +407,8 @@ def _build_property_video_job(claimed_job) -> PropertyVideoJob:
         parsed_context = json.loads(claimed_job.publish_context_json)
         if not isinstance(parsed_context, dict):
             raise ValueError("Queued job publish context must be a JSON object.")
+        if claimed_job.gohighlevel_access_token.strip():
+            parsed_context["access_token"] = claimed_job.gohighlevel_access_token
         publish_context = SocialPublishContext.from_dict(parsed_context)
 
     return PropertyVideoJob(

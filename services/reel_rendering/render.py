@@ -728,25 +728,48 @@ def generate_property_reel_from_data(
         )
 
         audio_fade_duration, audio_fade_start = compute_audio_fade(total_duration)
-        _run_ffmpeg_command(
-            _build_audio_mux_command(
-                ffmpeg_binary=ffmpeg_binary,
-                video_path=silent_reel_path,
-                background_audio_path=prepared_assets.background_audio_path,
-                settings=settings,
-                audio_fade_start=audio_fade_start,
-                audio_fade_duration=audio_fade_duration,
-                output_path=final_output_path,
-            ),
-            property_data=property_data,
-            ffmpeg_binary=ffmpeg_binary,
-            output_path=final_output_path,
-            failure_message="ffmpeg failed to render the property reel.",
-            hint=(
-                "The staged reel video could not be muxed with background audio. Verify the staged "
-                "silent reel and background music assets are both readable."
-            ),
+        audio_candidates = (
+            prepared_assets.background_audio_candidates
+            if prepared_assets.background_audio_candidates
+            else (prepared_assets.background_audio_path,)
         )
+        last_audio_error: PropertyReelError | None = None
+        for audio_index, background_audio_path in enumerate(audio_candidates, start=1):
+            try:
+                _run_ffmpeg_command(
+                    _build_audio_mux_command(
+                        ffmpeg_binary=ffmpeg_binary,
+                        video_path=silent_reel_path,
+                        background_audio_path=background_audio_path,
+                        settings=settings,
+                        audio_fade_start=audio_fade_start,
+                        audio_fade_duration=audio_fade_duration,
+                        output_path=final_output_path,
+                    ),
+                    property_data=property_data,
+                    ffmpeg_binary=ffmpeg_binary,
+                    output_path=final_output_path,
+                    failure_message="ffmpeg failed to render the property reel.",
+                    hint=(
+                        "The staged reel video could not be muxed with background audio. Verify the staged "
+                        "silent reel and background music assets are both readable."
+                    ),
+                )
+                prepared_assets.background_audio_path = background_audio_path
+                break
+            except PropertyReelError as exc:
+                last_audio_error = exc
+                if audio_index >= len(audio_candidates):
+                    raise
+                logger.warning(
+                    "Background audio mux failed for property %s (%s) with %s. Trying the next track.",
+                    property_data.property_id,
+                    property_data.slug,
+                    background_audio_path.name,
+                )
+                final_output_path.unlink(missing_ok=True)
+        if last_audio_error is not None and not final_output_path.exists():
+            raise last_audio_error
     finally:
         if created_temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)

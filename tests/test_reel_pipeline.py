@@ -36,8 +36,11 @@ from services.reel_rendering.render import (
     build_reel_template_for_render_profile,
     generate_property_reel_from_data,
 )
-from services.reel_rendering.runtime import resolve_ffmpeg_binary
-from services.reel_rendering.runtime import compute_segment_timing
+from services.reel_rendering.runtime import (
+    compute_segment_timing,
+    resolve_background_audio_paths,
+    resolve_ffmpeg_binary,
+)
 from settings.app import AppSettings
 
 
@@ -411,6 +414,27 @@ class ReelPreparationIntegrationTests(_FFmpegTestCase):
                 )
                 self.assertGreaterEqual(prepared_slide.working_width - template.width, slide_frames)
 
+    def test_background_audio_candidates_are_shuffled_from_assets_music(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            music_dir = workspace_dir / "assets" / "music"
+            self._create_audio_asset(music_dir / "a-track.mp3")
+            self._create_audio_asset(music_dir / "b-track.mp3")
+            self._create_audio_asset(music_dir / "c-track.mp3")
+            template = PropertyReelTemplate(background_audio_filename="music/a-track.mp3")
+
+            with patch("services.reel_rendering.runtime.random.SystemRandom") as system_random:
+                system_random.return_value.shuffle.side_effect = lambda sequence: sequence.reverse()
+                audio_candidates = resolve_background_audio_paths(
+                    workspace_dir,
+                    template,
+                    shuffle_candidates=True,
+                )
+
+            self.assertEqual(
+                tuple(path.name for path in audio_candidates),
+                ("c-track.mp3", "b-track.mp3", "a-track.mp3"),
+            )
+
 
 class ReelRenderIntegrationTests(_FFmpegTestCase):
     def test_concat_command_reencodes_staged_segments_with_cfr_timeline(self) -> None:
@@ -649,6 +673,58 @@ class ReelRenderIntegrationTests(_FFmpegTestCase):
             segment_files = sorted((working_dir / "segments").glob("*.mp4"))
             self.assertEqual(len(segment_files), 1)
             self.assertNotIn("segment_00_intro.mp4", {path.name for path in segment_files})
+
+    def test_generate_property_reel_falls_back_to_next_audio_track(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            broken_audio_path = workspace_dir / "assets" / "music" / "broken.mp3"
+            valid_audio_path = workspace_dir / "assets" / "music" / "fallback.mp3"
+            broken_audio_path.parent.mkdir(parents=True, exist_ok=True)
+            broken_audio_path.write_text("not-audio", encoding="utf-8")
+            self._create_audio_asset(valid_audio_path)
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            source_path = selected_dir / "primary_image.png"
+            self._create_image(source_path, "1800x1200", "teal")
+
+            property_data = self._build_property_data(
+                selected_dir=selected_dir,
+                selected_paths=(source_path,),
+            )
+            template = PropertyReelTemplate(
+                width=320,
+                height=480,
+                fps=12,
+                max_slide_count=1,
+                include_intro=False,
+                intro_duration_seconds=0.0,
+                total_duration_seconds=0.5,
+                seconds_per_slide=0.5,
+                subtitle_font_size=28,
+                background_audio_filename="music/fallback.mp3",
+            )
+            prepared_assets = prepare_reel_render_assets(
+                workspace_dir,
+                property_data,
+                template=template,
+                working_dir=workspace_dir / "_prepared_reel",
+            )
+            prepared_assets.background_audio_candidates = (broken_audio_path, valid_audio_path)
+            prepared_assets.background_audio_path = broken_audio_path
+            output_path = workspace_dir / "fallback-reel.mp4"
+
+            render_path = generate_property_reel_from_data(
+                workspace_dir,
+                property_data,
+                output_path=output_path,
+                template=template,
+                prepared_assets=prepared_assets,
+                working_dir=workspace_dir / "_render_reel",
+            )
+
+            self.assertEqual(render_path, output_path)
+            self.assertTrue(output_path.exists())
+            self.assertGreater(output_path.stat().st_size, 0)
+            self.assertEqual(prepared_assets.background_audio_path, valid_audio_path)
 
 
 class PosterRenderIntegrationTests(_FFmpegTestCase):

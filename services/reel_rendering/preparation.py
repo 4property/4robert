@@ -18,7 +18,7 @@ from services.reel_rendering.models import (
 from services.reel_rendering.runtime import (
     prepare_agent_image,
     prepare_cover_logo_image,
-    resolve_asset_path,
+    resolve_background_audio_paths,
     resolve_ber_icon_path,
     resolve_ffmpeg_binary,
     select_reel_slides,
@@ -154,6 +154,12 @@ def prepare_reel_render_assets(
                 property_data=property_data,
             )
 
+    background_audio_candidates = resolve_background_audio_paths(
+        workspace_dir,
+        settings,
+        shuffle_candidates=True,
+    )
+
     return PreparedReelAssets(
         working_dir=prepared_root,
         slides=tuple(prepared_slides),
@@ -161,11 +167,8 @@ def prepare_reel_render_assets(
         cover_logo_path=prepared_cover_logo_path,
         agent_image_path=prepared_agent_path,
         ber_icon_path=prepared_ber_icon_path,
-        background_audio_path=resolve_asset_path(
-            workspace_dir,
-            settings,
-            settings.background_audio_filename,
-        ),
+        background_audio_path=background_audio_candidates[0],
+        background_audio_candidates=background_audio_candidates,
     )
 
 

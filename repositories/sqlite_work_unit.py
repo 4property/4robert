@@ -6,6 +6,7 @@ from application.persistence import UnitOfWork
 from repositories.media_revision_repository import MediaRevisionRepository
 from repositories.outbox_event_repository import OutboxEventRepository
 from repositories.property_job_repository import PropertyJobRepository
+from repositories.scripted_video_artifact_repository import ScriptedVideoArtifactRepository
 from repositories.sqlite_connection import create_sqlite_connection
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
@@ -22,6 +23,7 @@ class SqliteWorkUnit:
         self.outbox_event_store = None
         self.webhook_event_store = None
         self.job_queue_store = None
+        self.scripted_video_store = None
 
     def begin_immediate(self) -> None:
         if self.connection is None:
@@ -52,15 +54,22 @@ class SqliteWorkUnit:
             self.database_path,
             connection=self.connection,
         )
+        self.scripted_video_store = ScriptedVideoArtifactRepository(
+            self.database_path,
+            connection=self.connection,
+        )
         self.property_repository.__enter__()
         self.media_revision_store.__enter__()
         self.outbox_event_store.__enter__()
         self.webhook_event_store.__enter__()
         self.job_queue_store.__enter__()
+        self.scripted_video_store.__enter__()
         self.connection.commit()
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self.scripted_video_store is not None:
+            self.scripted_video_store.__exit__(exc_type, exc, exc_tb)
         if self.job_queue_store is not None:
             self.job_queue_store.__exit__(exc_type, exc, exc_tb)
         if self.webhook_event_store is not None:

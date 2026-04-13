@@ -15,7 +15,6 @@ from config import (
     NOTIFICATIONS_ENABLED,
     PROPERTY_MEDIA_RAW_ROOT_DIRNAME,
     PROPERTY_MEDIA_ROOT_DIRNAME,
-    REEL_BACKGROUND_AUDIO_FILENAME,
     REEL_SUBTITLE_FONT_PATH,
     REVIEW_WORKFLOW_ENABLED,
 )
@@ -27,7 +26,11 @@ from repositories.property_job_repository import PropertyJobRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from services.reel_rendering.models import PropertyReelTemplate
-from services.reel_rendering.runtime import resolve_asset_path, resolve_ffmpeg_binary, resolve_font_path
+from services.reel_rendering.runtime import (
+    resolve_background_audio_paths,
+    resolve_ffmpeg_binary,
+    resolve_font_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,13 +166,13 @@ def build_readiness_report(
         failures.append(_build_failure_payload("reel_font_available", exc))
 
     try:
-        environment["background_audio_path"] = str(
-            resolve_asset_path(
-                workspace_dir,
-                reel_template,
-                REEL_BACKGROUND_AUDIO_FILENAME,
-            )
+        background_audio_paths = resolve_background_audio_paths(
+            workspace_dir,
+            reel_template,
+            shuffle_candidates=False,
         )
+        environment["background_audio_path"] = str(background_audio_paths[0])
+        environment["background_audio_track_count"] = len(background_audio_paths)
         checks["background_audio_available"] = True
     except ApplicationError as exc:
         errors.append(str(exc))

@@ -24,9 +24,9 @@ from services.reel_rendering.preparation import prepare_reel_render_assets
 from services.reel_rendering.runtime import (
     compute_segment_timing,
     prepare_cover_logo_image,
+    resolve_background_audio_paths,
     resolve_ber_icon_path,
     resolve_manifest_output_path,
-    resolve_asset_path,
     select_reel_slides,
 )
 
@@ -146,7 +146,20 @@ def build_property_reel_manifest_from_data(
                 else None
             ),
             "background_audio_path": str(prepared_assets.background_audio_path),
+            "background_audio_candidates": [
+                str(path) for path in prepared_assets.background_audio_candidates
+            ],
         }
+
+    background_audio_candidates = (
+        prepared_assets.background_audio_candidates
+        if prepared_assets is not None and prepared_assets.background_audio_candidates
+        else resolve_background_audio_paths(
+            workspace_dir,
+            settings,
+            shuffle_candidates=False,
+        )
+    )
 
     return {
         "site_id": property_data.site_id,
@@ -175,8 +188,11 @@ def build_property_reel_manifest_from_data(
             else None
         ),
         "background_audio_path": str(
-            resolve_asset_path(workspace_dir, settings, settings.background_audio_filename)
+            prepared_assets.background_audio_path
+            if prepared_assets is not None
+            else background_audio_candidates[0]
         ),
+        "background_audio_candidates": [str(path) for path in background_audio_candidates],
         "estimated_duration_seconds": actual_total_duration,
         "configured_total_duration_seconds": settings.total_duration_seconds,
         "actual_total_duration_seconds": actual_total_duration,

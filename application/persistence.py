@@ -6,6 +6,7 @@ from models.property import Property
 from repositories.media_revision_repository import MediaRevisionRecord
 from repositories.outbox_event_repository import OutboxEventRecord
 from repositories.property_job_repository import PropertyJobEnqueueRequest, QueuedPropertyJobRecord
+from repositories.scripted_video_artifact_repository import ScriptedVideoArtifactRecord
 from repositories.webhook_delivery_repository import WebhookDeliveryRecord
 from repositories.property_pipeline_repository import (
     DownloadedImage,
@@ -242,6 +243,22 @@ class JobQueueStore(Protocol):
         ...
 
 
+class ScriptedVideoArtifactStore(Protocol):
+    def save_artifact(self, record: ScriptedVideoArtifactRecord) -> None:
+        ...
+
+    def get_artifact(self, render_id: str) -> ScriptedVideoArtifactRecord | None:
+        ...
+
+    def list_artifacts_for_property(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+    ) -> tuple[ScriptedVideoArtifactRecord, ...]:
+        ...
+
+
 class UnitOfWork(Protocol):
     property_repository: PropertyRepository
     pipeline_state_repository: PropertyPipelineStateRepository
@@ -249,6 +266,7 @@ class UnitOfWork(Protocol):
     outbox_event_store: OutboxEventStore
     webhook_event_store: WebhookEventStore
     job_queue_store: JobQueueStore
+    scripted_video_store: ScriptedVideoArtifactStore
 
     def begin_immediate(self) -> None:
         ...
@@ -266,6 +284,7 @@ __all__ = [
     "OutboxEventStore",
     "PropertyPipelineStateRepository",
     "PropertyRepository",
+    "ScriptedVideoArtifactStore",
     "UnitOfWork",
     "WebhookEventStore",
 ]

@@ -41,6 +41,11 @@ from models.property import Property
 from repositories.media_revision_repository import MediaRevisionRepository
 from repositories.outbox_event_repository import OutboxEventRepository
 from repositories.property_job_repository import PropertyJobEnqueueRequest, PropertyJobRepository
+from repositories.scripted_video_artifact_repository import (
+    SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME,
+    ScriptedVideoArtifactRecord,
+    ScriptedVideoArtifactRepository,
+)
 from repositories.sqlite_work_unit import SqliteWorkUnit
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
@@ -48,7 +53,13 @@ from services.reel_rendering.formatting import escape_filter_path
 from services.reel_rendering.filters import build_filter_complex, build_overlay_filter
 from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.manifest import build_property_reel_manifest_from_data
-from services.reel_rendering.models import PropertyRenderData, PropertyReelSlide, PropertyReelTemplate
+from services.reel_rendering.models import (
+    PreparedReelAssets,
+    PreparedReelSlide,
+    PropertyRenderData,
+    PropertyReelSlide,
+    PropertyReelTemplate,
+)
 from services.reel_rendering.render import build_reel_template_for_render_profile
 from services.reel_rendering.runtime import prepare_cover_logo_image, resolve_ber_icon_path, resolve_font_path
 from services.webhook_transport.operations import build_readiness_report
@@ -217,6 +228,18 @@ class RepositorySchemaTests(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     )
                 }
+            with ScriptedVideoArtifactRepository(database_path) as scripted_video_repository:
+                scripted_video_tables = {
+                    str(row[0])
+                    for row in scripted_video_repository.connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+            with PropertyJobRepository(database_path) as job_repository:
+                job_columns = {
+                    str(row[1])
+                    for row in job_repository.connection.execute("PRAGMA table_info(job_queue)")
+                }
 
         self.assertIn("agent_photo_url", property_columns)
         self.assertIn("content_fingerprint", pipeline_columns)
@@ -228,8 +251,48 @@ class RepositorySchemaTests(unittest.TestCase):
         self.assertIn("last_published_location_id", pipeline_columns)
         self.assertIn("media_revisions", media_revision_tables)
         self.assertIn("outbox_events", outbox_tables)
+        self.assertIn(SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME, scripted_video_tables)
+        self.assertIn("gohighlevel_access_token", job_columns)
         self.assertFalse(any("access_token" in column for column in property_columns))
         self.assertFalse(any("access_token" in column for column in pipeline_columns))
+
+    def test_job_queue_initialise_adds_gohighlevel_token_column_to_legacy_table(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            database_path = workspace_dir / DATABASE_FILENAME
+            with PropertyJobRepository(database_path) as repository:
+                repository.connection.executescript(
+                    """
+                    DROP TABLE IF EXISTS job_queue;
+                    CREATE TABLE job_queue (
+                        job_id TEXT PRIMARY KEY,
+                        event_id TEXT NOT NULL,
+                        site_id TEXT NOT NULL,
+                        property_id INTEGER,
+                        received_at TEXT NOT NULL DEFAULT '',
+                        raw_payload_hash TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        publish_context_json TEXT NOT NULL DEFAULT '',
+                        attempt_count INTEGER NOT NULL DEFAULT 0,
+                        max_attempts INTEGER NOT NULL DEFAULT 1,
+                        available_at TEXT NOT NULL,
+                        lease_expires_at TEXT NOT NULL DEFAULT '',
+                        worker_id TEXT NOT NULL DEFAULT '',
+                        last_error TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        finished_at TEXT NOT NULL DEFAULT '',
+                        superseded_by_job_id TEXT NOT NULL DEFAULT ''
+                    );
+                    """
+                )
+                repository.initialise()
+                job_columns = {
+                    str(row[1])
+                    for row in repository.connection.execute("PRAGMA table_info(job_queue)")
+                }
+
+        self.assertIn("gohighlevel_access_token", job_columns)
 
     def test_job_queue_claim_serializes_work_for_same_property(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -245,6 +308,7 @@ class RepositorySchemaTests(unittest.TestCase):
                         raw_payload_hash="hash-1",
                         payload_json='{"id":101}',
                         publish_context_json="",
+                        gohighlevel_access_token="",
                         max_attempts=1,
                         available_at="2026-03-31T10:00:00+00:00",
                         created_at="2026-03-31T10:00:00+00:00",
@@ -260,6 +324,7 @@ class RepositorySchemaTests(unittest.TestCase):
                         raw_payload_hash="hash-2",
                         payload_json='{"id":101}',
                         publish_context_json="",
+                        gohighlevel_access_token="",
                         max_attempts=1,
                         available_at="2026-03-31T10:00:01+00:00",
                         created_at="2026-03-31T10:00:01+00:00",
@@ -275,6 +340,7 @@ class RepositorySchemaTests(unittest.TestCase):
                         raw_payload_hash="hash-3",
                         payload_json='{"id":202}',
                         publish_context_json="",
+                        gohighlevel_access_token="",
                         max_attempts=1,
                         available_at="2026-03-31T10:00:02+00:00",
                         created_at="2026-03-31T10:00:02+00:00",
@@ -595,18 +661,63 @@ class PropertyInfoServiceTests(unittest.TestCase):
         self.assertTrue(changed_context.requires_render)
         self.assertTrue(changed_context.requires_external_publish)
 
-    def test_raw_gohighlevel_token_is_not_persisted(self) -> None:
+    def test_raw_gohighlevel_token_is_persisted_only_in_job_queue_token_column(self) -> None:
         with workspace_temp_dir() as workspace_dir:
-            service = self._build_service(workspace_dir)
-            service.ingest_property(build_job(access_token="token-keep-out"))
+            acceptance_service = WebhookAcceptanceService(
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                job_max_attempts=2,
+            )
+            job = build_job(access_token="token-keep-out")
+            acceptance_service.accept_delivery(
+                site_id=job.site_id,
+                property_id=job.property_id,
+                raw_payload_hash=job.raw_payload_hash,
+                payload=job.payload,
+                publish_context=job.publish_context,
+            )
 
+            with PropertyJobRepository(workspace_dir / DATABASE_FILENAME) as repository:
+                jobs = repository.list_jobs_for_property(site_id="site-a", property_id=170800)
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].gohighlevel_access_token, "token-keep-out")
+        self.assertNotIn('"access_token"', jobs[0].publish_context_json)
+
+
+class ScriptedVideoArtifactRepositoryTests(unittest.TestCase):
+    def test_save_and_get_scripted_video_artifact(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
             database_path = workspace_dir / DATABASE_FILENAME
-            database_bytes = database_path.read_bytes()
-            wal_path = Path(f"{database_path}-wal")
-            wal_bytes = wal_path.read_bytes() if wal_path.exists() else b""
+            with ScriptedVideoArtifactRepository(database_path) as repository:
+                repository.save_artifact(
+                    ScriptedVideoArtifactRecord(
+                        render_id="render-1",
+                        site_id="site-a",
+                        source_property_id=170800,
+                        property_slug="sample-property",
+                        render_profile="for_sale_reel",
+                        status="rendered",
+                        request_manifest_json='{"title":"Sample"}',
+                        request_manifest_path="generated_media/site-a/scripted_videos/sample-property/render-1/request-manifest.json",
+                        resolved_manifest_path="generated_media/site-a/scripted_videos/sample-property/render-1/resolved-manifest.json",
+                        media_path="generated_media/site-a/scripted_videos/sample-property/render-1/video.mp4",
+                        error_message="",
+                        created_at="",
+                        updated_at="",
+                    )
+                )
 
-        self.assertNotIn(b"token-keep-out", database_bytes)
-        self.assertNotIn(b"token-keep-out", wal_bytes)
+                stored = repository.get_artifact("render-1")
+                by_property = repository.list_artifacts_for_property(
+                    site_id="site-a",
+                    source_property_id=170800,
+                )
+
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.status, "rendered")
+        self.assertEqual(stored.media_path, "generated_media/site-a/scripted_videos/sample-property/render-1/video.mp4")
+        self.assertEqual(len(by_property), 1)
 
 
 class WorkflowPersistenceTests(unittest.TestCase):
@@ -935,10 +1046,46 @@ class MediaPlanningTests(unittest.TestCase):
 
 
 class WebhookTransportTests(unittest.TestCase):
+    @staticmethod
+    def _save_property_for_scripted_render(
+        *,
+        workspace_dir: Path,
+        site_id: str = "site-a",
+        property_id: int = 170800,
+        slug: str = "sample-property",
+    ) -> None:
+        property_item = Property(
+            id=property_id,
+            slug=slug,
+            title="46 Example Street, Dublin 4",
+            property_status="For Sale",
+        )
+        with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+            repository.save_property_data(
+                property_item,
+                site_id=site_id,
+            )
+
+    @staticmethod
+    def _build_scripted_render_payload(slide_path: Path) -> dict[str, object]:
+        return {
+            "site_id": "site-a",
+            "source_property_id": 170800,
+            "title": "46 Example Street, Dublin 4",
+            "property_status": "For Sale",
+            "slides": [
+                {
+                    "image_path": str(slide_path),
+                    "caption": "Bright living room.",
+                }
+            ],
+        }
+
     def _build_client(
         self,
         dispatcher: RecordingDispatcher | None = None,
         *,
+        host: str = "127.0.0.1",
         allowed_hosts: tuple[str, ...] = ("testserver",),
         security_disabled: bool = False,
         site_secrets: dict[str, str] | None = None,
@@ -950,6 +1097,7 @@ class WebhookTransportTests(unittest.TestCase):
         application = WordPressWebhookApplication(
             workspace_dir=workspace_dir,
             dispatcher=active_dispatcher,
+            host=host,
             allowed_hosts=allowed_hosts,
             site_secrets=site_secrets or {"site-a": "secret-a"},
             security_disabled=security_disabled,
@@ -966,6 +1114,63 @@ class WebhookTransportTests(unittest.TestCase):
         self.addCleanup(startup_patch.stop)
         self.addCleanup(readiness_patch.stop)
         return TestClient(app), active_dispatcher
+
+    def test_docs_are_available_when_running_on_localhost(self) -> None:
+        client, _ = self._build_client(host="127.0.0.1")
+
+        with client:
+            docs_response = client.get("/docs")
+            openapi_response = client.get("/openapi.json")
+
+        self.assertEqual(docs_response.status_code, 200)
+        self.assertIn("Swagger UI", docs_response.text)
+        self.assertEqual(openapi_response.status_code, 200)
+        self.assertEqual(openapi_response.json()["info"]["title"], "CPIHED Webhook API")
+
+    def test_docs_are_disabled_when_not_running_on_localhost(self) -> None:
+        client, _ = self._build_client(host="0.0.0.0")
+
+        with client:
+            docs_response = client.get("/docs")
+            openapi_response = client.get("/openapi.json")
+
+        self.assertEqual(docs_response.status_code, 404)
+        self.assertEqual(openapi_response.status_code, 404)
+
+    def test_openapi_includes_webhook_examples_and_header_docs(self) -> None:
+        client, _ = self._build_client(host="127.0.0.1")
+
+        with client:
+            openapi_schema = client.get("/openapi.json").json()
+
+        operation = openapi_schema["paths"]["/webhooks/wordpress/property"]["post"]
+        parameters = {parameter["name"]: parameter for parameter in operation["parameters"]}
+        request_examples = operation["requestBody"]["content"]["application/json"]["examples"]
+        accepted_example = operation["responses"]["202"]["content"]["application/json"]["example"]
+
+        self.assertIn("postman_collection", request_examples)
+        self.assertEqual(request_examples["postman_collection"]["value"]["id"], 173637)
+        self.assertEqual(parameters["X-GoHighLevel-Location-ID"]["example"], "v8H1XNB3YCQmVHRhqDoM")
+        self.assertIn("X-GHL-Location-Id", parameters["X-GoHighLevel-Location-ID"]["description"])
+        self.assertEqual(accepted_example["status"], "accepted")
+        self.assertEqual(accepted_example["site_id"], "ckp.ie")
+
+    def test_openapi_includes_scripted_render_examples(self) -> None:
+        client, _ = self._build_client(host="127.0.0.1")
+
+        with client:
+            openapi_schema = client.get("/openapi.json").json()
+
+        operation = openapi_schema["paths"]["/videos/scripted/render"]["post"]
+        request_examples = operation["requestBody"]["content"]["application/json"]["examples"]
+        response_example = operation["responses"]["201"]["content"]["application/json"]["example"]
+
+        self.assertIn("image_path", request_examples)
+        self.assertIn("sources", request_examples)
+        self.assertEqual(request_examples["image_path"]["value"]["slides"][0]["image_path"], "uploads/slide-01.jpg")
+        self.assertEqual(request_examples["sources"]["value"]["slides"][0]["sources"][0]["path"], "uploads/slide-01.jpg")
+        self.assertEqual(response_example["status"], "rendered")
+        self.assertIn("generated_media/site-a/scripted_videos", response_example["video_path"])
 
     @staticmethod
     def _build_signed_headers(
@@ -1031,11 +1236,243 @@ class WebhookTransportTests(unittest.TestCase):
         self.assertEqual(job.status, "queued")
         self.assertEqual(event.status, "queued")
         self.assertIn('"location_id": "location-a"', job.publish_context_json)
-        self.assertIn('"access_token": "token-a"', job.publish_context_json)
+        self.assertNotIn('"access_token": "token-a"', job.publish_context_json)
+        self.assertEqual(job.gohighlevel_access_token, "token-a")
         self.assertEqual(
             json.loads(job.publish_context_json)["platforms"],
             list(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
         )
+
+    def test_scripted_render_endpoint_renders_and_persists_separate_artifact(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        runtime = client.app.state.runtime
+        workspace_dir = runtime.workspace_dir
+        self._save_property_for_scripted_render(workspace_dir=workspace_dir)
+        slide_path = workspace_dir / "uploads" / "slide-01.jpg"
+        slide_path.parent.mkdir(parents=True, exist_ok=True)
+        slide_path.write_bytes(b"image")
+
+        def fake_prepare_reel_render_assets(base_dir, property_data, *, template=None, working_dir):
+            prepared_dir = Path(working_dir).expanduser().resolve()
+            prepared_dir.mkdir(parents=True, exist_ok=True)
+            slide_working_path = prepared_dir / "slide_01.png"
+            slide_working_path.write_bytes(b"slide")
+            agent_path = prepared_dir / "agent.png"
+            agent_path.write_bytes(b"agent")
+            audio_path = prepared_dir / "audio.mp3"
+            audio_path.write_bytes(b"audio")
+            return PreparedReelAssets(
+                working_dir=prepared_dir,
+                slides=(
+                    PreparedReelSlide(
+                        original_path=property_data.selected_slides[0].image_path,
+                        working_path=slide_working_path,
+                        caption=property_data.selected_slides[0].caption,
+                    ),
+                ),
+                cover_background_path=slide_working_path,
+                cover_logo_path=None,
+                agent_image_path=agent_path,
+                ber_icon_path=None,
+                background_audio_path=audio_path,
+            )
+
+        def fake_write_property_reel_manifest_from_data(
+            base_dir,
+            property_data,
+            *,
+            output_path=None,
+            template=None,
+            prepared_assets=None,
+            working_dir=None,
+        ):
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "site_id": property_data.site_id,
+                        "property_id": property_data.property_id,
+                        "title": property_data.title,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return path
+
+        def fake_generate_property_reel_from_data(
+            base_dir,
+            property_data,
+            *,
+            output_path=None,
+            template=None,
+            prepared_assets=None,
+            working_dir=None,
+        ):
+            path = Path(output_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"video")
+            return path
+
+        with (
+            patch(
+                "application.scripted_video_service.prepare_reel_render_assets",
+                side_effect=fake_prepare_reel_render_assets,
+            ),
+            patch(
+                "application.scripted_video_service.write_property_reel_manifest_from_data",
+                side_effect=fake_write_property_reel_manifest_from_data,
+            ),
+            patch(
+                "application.scripted_video_service.generate_property_reel_from_data",
+                side_effect=fake_generate_property_reel_from_data,
+            ),
+            client,
+        ):
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(self._build_scripted_render_payload(slide_path)),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["status"], "rendered")
+        video_path = workspace_dir / payload["video_path"]
+        manifest_path = workspace_dir / payload["manifest_path"]
+        request_manifest_path = workspace_dir / payload["request_manifest_path"]
+        self.assertTrue(video_path.exists())
+        self.assertTrue(manifest_path.exists())
+        self.assertTrue(request_manifest_path.exists())
+        self.assertIn("scripted_videos", payload["video_path"])
+        self.assertNotIn("\\reels\\", payload["video_path"])
+
+        with ScriptedVideoArtifactRepository(workspace_dir / DATABASE_FILENAME) as repository:
+            record = repository.get_artifact(payload["render_id"])
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.status, "rendered")
+        self.assertEqual(record.media_path, payload["video_path"])
+        self.assertEqual(record.resolved_manifest_path, payload["manifest_path"])
+        self.assertEqual(record.request_manifest_path, payload["request_manifest_path"])
+
+        with PropertyPipelineRepository(workspace_dir / DATABASE_FILENAME, workspace_dir) as repository:
+            state = repository.get_property_pipeline_state(site_id="site-a", source_property_id=170800)
+        self.assertIsNone(state)
+
+    def test_scripted_render_endpoint_returns_404_when_property_is_missing(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        with client:
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(
+                    {
+                        "site_id": "site-a",
+                        "source_property_id": 170800,
+                        "title": "46 Example Street, Dublin 4",
+                        "property_status": "For Sale",
+                        "slides": [{"image_path": "uploads/slide-01.jpg"}],
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "PROPERTY_NOT_FOUND")
+
+    def test_scripted_render_endpoint_rejects_missing_slides(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        runtime = client.app.state.runtime
+        self._save_property_for_scripted_render(workspace_dir=runtime.workspace_dir)
+
+        with client:
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(
+                    {
+                        "site_id": "site-a",
+                        "source_property_id": 170800,
+                        "title": "46 Example Street, Dublin 4",
+                        "property_status": "For Sale",
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "SLIDES_REQUIRED")
+
+    def test_scripted_render_endpoint_rejects_multi_source_slides(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        runtime = client.app.state.runtime
+        workspace_dir = runtime.workspace_dir
+        self._save_property_for_scripted_render(workspace_dir=workspace_dir)
+        first_slide_path = workspace_dir / "uploads" / "slide-01.jpg"
+        second_slide_path = workspace_dir / "uploads" / "slide-02.jpg"
+        first_slide_path.parent.mkdir(parents=True, exist_ok=True)
+        first_slide_path.write_bytes(b"image")
+        second_slide_path.write_bytes(b"image")
+
+        with client:
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(
+                    {
+                        "site_id": "site-a",
+                        "source_property_id": 170800,
+                        "title": "46 Example Street, Dublin 4",
+                        "property_status": "For Sale",
+                        "slides": [
+                            {
+                                "sources": [
+                                    {"path": str(first_slide_path)},
+                                    {"path": str(second_slide_path)},
+                                ]
+                            }
+                        ],
+                    }
+                ),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "COMPOSITE_SLIDE_NOT_SUPPORTED")
+
+    def test_scripted_render_endpoint_rejects_slide_paths_outside_workspace(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        runtime = client.app.state.runtime
+        workspace_dir = runtime.workspace_dir
+        self._save_property_for_scripted_render(workspace_dir=workspace_dir)
+        outside_path = workspace_dir.parent / "outside-slide.jpg"
+        outside_path.write_bytes(b"image")
+        self.addCleanup(lambda: outside_path.unlink(missing_ok=True))
+
+        with client:
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(self._build_scripted_render_payload(outside_path)),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "INVALID_SLIDE_IMAGE_PATH")
+
+    def test_scripted_render_endpoint_rejects_missing_slide_paths(self) -> None:
+        client, _ = self._build_client(security_disabled=True)
+        runtime = client.app.state.runtime
+        workspace_dir = runtime.workspace_dir
+        self._save_property_for_scripted_render(workspace_dir=workspace_dir)
+        missing_path = workspace_dir / "uploads" / "missing-slide.jpg"
+
+        with client:
+            response = client.post(
+                "/videos/scripted/render",
+                content=json.dumps(self._build_scripted_render_payload(missing_path)),
+                headers={"Content-Type": "application/json"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "INVALID_SLIDE_IMAGE_PATH")
 
     def test_missing_gohighlevel_headers_is_rejected(self) -> None:
         payload = build_sample_payload()
@@ -1268,9 +1705,11 @@ class SqliteJobDispatcherTests(unittest.TestCase):
         self.assertEqual(jobs[0].status, "superseded")
         self.assertEqual(jobs[0].superseded_by_job_id, second_delivery.job_id)
         self.assertEqual(jobs[0].publish_context_json, "")
+        self.assertEqual(jobs[0].gohighlevel_access_token, "")
         self.assertEqual(jobs[1].job_id, second_delivery.job_id)
         self.assertEqual(jobs[1].status, "queued")
-        self.assertIn('"access_token": "token-second"', jobs[1].publish_context_json)
+        self.assertNotIn('"access_token": "token-second"', jobs[1].publish_context_json)
+        self.assertEqual(jobs[1].gohighlevel_access_token, "token-second")
         self.assertIsNotNone(first_event)
         self.assertIsNotNone(second_event)
         assert first_event is not None
@@ -1315,6 +1754,7 @@ class SqliteJobDispatcherTests(unittest.TestCase):
         assert event is not None
         self.assertEqual(job.status, "completed")
         self.assertEqual(job.publish_context_json, "")
+        self.assertEqual(job.gohighlevel_access_token, "")
         self.assertIsNone(job.last_error)
         self.assertEqual(event.status, "completed")
 
@@ -1398,8 +1838,10 @@ class SqliteJobDispatcherTests(unittest.TestCase):
         self.assertEqual(first_job.status, "failed")
         self.assertEqual(first_job.attempt_count, 2)
         self.assertEqual(first_job.publish_context_json, "")
+        self.assertEqual(first_job.gohighlevel_access_token, "")
         self.assertIn("temporary social outage", first_job.last_error or "")
         self.assertEqual(second_job.status, "completed")
+        self.assertEqual(second_job.gohighlevel_access_token, "")
         self.assertEqual(first_event.status, "failed")
         self.assertEqual(second_event.status, "completed")
 
@@ -1585,6 +2027,46 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertNotIn("enable='between(t,", filter_text)
         self.assertNotIn("color=black@0.40:t=fill:enable=", filter_text)
         self.assertLess(filter_text.index("FOR SALE"), filter_text.index("650\\,000"))
+
+    def test_overlay_filter_renders_property_size_below_address(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="285",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+
+        filter_text = build_overlay_filter(
+            property_data,
+            template,
+            cover_caption="Bright open-plan living area.",
+            slide_captions=("Bright open-plan living area.",),
+            slide_duration=template.seconds_per_slide,
+        )
+
+        self.assertIn("46 Example Street\\, Dublin 4", filter_text)
+        self.assertIn("285 sq m", filter_text)
+        self.assertLess(filter_text.index("46 Example Street\\, Dublin 4"), filter_text.index("285 sq m"))
 
     def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
@@ -1798,6 +2280,50 @@ class RenderOverlayTests(unittest.TestCase):
         address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
         self.assertTrue(address_block.clamped)
         self.assertTrue(any(warning.code == "TEXT_CLAMPED" for warning in overlay_layout.warnings))
+
+    def test_overlay_layout_keeps_property_size_visible_when_address_clamps(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title=" ".join(["Exceptional"] * 40),
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            agency_psra="PSRA-1234",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="285",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=True,
+            cover_caption=None,
+        )
+
+        address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
+        self.assertTrue(address_block.clamped)
+        self.assertEqual(address_block.lines[-1], "285 sq m")
+        self.assertLessEqual(len(address_block.lines), address_block.max_lines)
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:
         with workspace_temp_dir() as workspace_dir:

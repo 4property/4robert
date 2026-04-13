@@ -43,12 +43,14 @@ class WebhookAcceptanceService:
         job_id = str(uuid4())
         payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         publish_context_json = ""
+        gohighlevel_access_token = ""
         if publish_context is not None:
             publish_context_json = json.dumps(
-                publish_context.to_dict(include_access_token=True),
+                publish_context.to_dict(include_access_token=False),
                 ensure_ascii=False,
                 sort_keys=True,
             )
+            gohighlevel_access_token = publish_context.access_token
 
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
@@ -83,6 +85,7 @@ class WebhookAcceptanceService:
                     raw_payload_hash=raw_payload_hash,
                     payload_json=payload_json,
                     publish_context_json=publish_context_json,
+                    gohighlevel_access_token=gohighlevel_access_token,
                     max_attempts=self.job_max_attempts,
                     available_at=now,
                     created_at=now,

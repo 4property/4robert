@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from application.scripted_video_service import ScriptedVideoRenderService
 from application.bootstrap import build_default_job_dispatcher, build_default_unit_of_work_factory
 from application.interfaces import JobDispatcher
 from application.types import SocialPublishContext
@@ -37,9 +38,10 @@ from config import (
     WEBHOOK_TRUST_PROXY_HEADERS,
     WEBHOOK_WORKER_COUNT,
 )
-from core.errors import DependencyNotInstalledError
+from core.errors import ApplicationError, DependencyNotInstalledError, ResourceNotFoundError, ValidationError
 from core.logging import format_console_block, format_detail_line
 from services.webhook_transport.operations import build_readiness_report, run_startup_checks
+from services.webhook_transport.openapi_docs import OpenApiDocsConfig, install_openapi_examples
 from services.webhook_transport.uvicorn_protocols import VerboseAutoHTTPProtocol
 from services.webhook_transport.security import build_raw_payload_hash, is_signature_valid, is_timestamp_fresh
 
@@ -55,6 +57,7 @@ class WordPressWebhookApplication:
         workspace_dir: str | Path,
         *,
         dispatcher: JobDispatcher,
+        host: str = WEBHOOK_HOST,
         path: str = WEBHOOK_PATH,
         site_id_header: str = WEBHOOK_SITE_ID_HEADER,
         gohighlevel_location_id_header: str = WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER,
@@ -77,7 +80,12 @@ class WordPressWebhookApplication:
             unit_of_work_factory=self.unit_of_work_factory,
             job_max_attempts=job_max_attempts,
         )
+        self.scripted_video_service = ScriptedVideoRenderService(
+            self.workspace_dir,
+            unit_of_work_factory=self.unit_of_work_factory,
+        )
         self.path = path
+        self.host = host
         self.site_id_header = site_id_header
         self.gohighlevel_location_id_header = gohighlevel_location_id_header
         self.gohighlevel_access_token_header = gohighlevel_access_token_header
@@ -242,6 +250,13 @@ class WordPressWebhookApplication:
             publish_context=publish_context,
         )
 
+    def render_scripted_video(
+        self,
+        *,
+        payload: dict[str, Any],
+    ):
+        return self.scripted_video_service.render_from_manifest(payload)
+
 
 class WordPressWebhookServer:
     def __init__(
@@ -249,6 +264,7 @@ class WordPressWebhookServer:
         workspace_dir: str | Path,
         *,
         dispatcher: JobDispatcher | None = None,
+        host: str = WEBHOOK_HOST,
         path: str = WEBHOOK_PATH,
         site_id_header: str = WEBHOOK_SITE_ID_HEADER,
         gohighlevel_location_id_header: str = WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER,
@@ -270,6 +286,7 @@ class WordPressWebhookServer:
         self.runtime = WordPressWebhookApplication(
             workspace_dir,
             dispatcher=active_dispatcher,
+            host=host,
             path=path,
             site_id_header=site_id_header,
             gohighlevel_location_id_header=gohighlevel_location_id_header,
@@ -304,9 +321,9 @@ def create_fastapi_app(
 
     app = FastAPI(
         title="CPIHED Webhook API",
-        docs_url=None,
+        docs_url="/docs" if _should_enable_local_docs(application.host) else None,
         redoc_url=None,
-        openapi_url=None,
+        openapi_url="/openapi.json" if _should_enable_local_docs(application.host) else None,
         lifespan=lifespan,
     )
     allowed_hosts = _resolve_allowed_hosts(application)
@@ -316,6 +333,18 @@ def create_fastapi_app(
             allowed_hosts=list(allowed_hosts),
         )
     app.state.runtime = application
+    install_openapi_examples(
+        app,
+        config=OpenApiDocsConfig(
+            workspace_dir=application.workspace_dir,
+            webhook_path=application.path,
+            site_id_header=application.site_id_header,
+            gohighlevel_location_id_header=application.gohighlevel_location_id_header,
+            gohighlevel_access_token_header=application.gohighlevel_access_token_header,
+            timestamp_header=application.timestamp_header,
+            signature_header=application.signature_header,
+        ),
+    )
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
@@ -500,6 +529,109 @@ def create_fastapi_app(
             },
         )
 
+    @app.post("/videos/scripted/render")
+    async def render_scripted_video(request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        content_type = request.headers.get("Content-Type", "")
+        if not content_type.lower().startswith("application/json"):
+            return _json_error(
+                400,
+                "Content-Type must be application/json.",
+                code="INVALID_CONTENT_TYPE",
+                hint="Post the scripted render manifest as raw JSON with Content-Type: application/json.",
+                details={"received_content_type": content_type or "<empty>"},
+            )
+
+        content_length = _parse_content_length(request.headers.get("Content-Length"))
+        if content_length is None:
+            return _json_error(
+                400,
+                "Invalid Content-Length header.",
+                code="INVALID_CONTENT_LENGTH",
+                hint="Send a numeric Content-Length header or let the HTTP client populate it automatically.",
+            )
+        if content_length > runtime.max_payload_bytes:
+            return _json_error(
+                413,
+                "Request body is too large.",
+                code="PAYLOAD_TOO_LARGE",
+                hint="Reduce the payload size or increase WEBHOOK_MAX_PAYLOAD_BYTES on the API host.",
+                details={"max_payload_bytes": runtime.max_payload_bytes},
+            )
+
+        raw_body = await request.body()
+        if len(raw_body) > runtime.max_payload_bytes:
+            return _json_error(
+                413,
+                "Request body is too large.",
+                code="PAYLOAD_TOO_LARGE",
+                hint="Reduce the payload size or increase WEBHOOK_MAX_PAYLOAD_BYTES on the API host.",
+                details={"max_payload_bytes": runtime.max_payload_bytes},
+            )
+
+        payload, payload_error = _parse_json_object_payload(raw_body)
+        if payload_error is not None:
+            return _json_error(
+                400,
+                payload_error,
+                code="INVALID_SCRIPTED_RENDER_PAYLOAD",
+                hint="Send a single JSON object describing the scripted reel request.",
+            )
+
+        try:
+            result = runtime.render_scripted_video(payload=payload)
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ResourceNotFoundError as error:
+            status_code = 404 if error.code == "PROPERTY_NOT_FOUND" else 400
+            return _json_error(
+                status_code,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            logger.exception(
+                "Scripted video render failed for %s",
+                _format_client(request),
+            )
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "SCRIPTED_RENDER_ERROR"),
+                hint=error.hint,
+                details={"context": error.context} if getattr(error, "context", None) else None,
+            )
+
+        logger.info(
+            format_console_block(
+                "Scripted Video Rendered",
+                format_detail_line("Render ID", result.render_id),
+                format_detail_line("Site ID", result.site_id),
+                format_detail_line("Property ID", result.source_property_id),
+                format_detail_line("Video path", result.video_path),
+            )
+        )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "status": "rendered",
+                "render_id": result.render_id,
+                "site_id": result.site_id,
+                "source_property_id": result.source_property_id,
+                "video_path": result.video_path,
+                "manifest_path": result.manifest_path,
+                "request_manifest_path": result.request_manifest_path,
+            },
+        )
+
     return app
 
 
@@ -523,6 +655,7 @@ def run_wordpress_webhook_server(
     server = WordPressWebhookServer(
         workspace_dir,
         dispatcher=dispatcher,
+        host=host,
     )
     logger.info(
         format_console_block(
@@ -597,6 +730,18 @@ def _resolve_allowed_hosts(application: WordPressWebhookApplication) -> tuple[st
     return tuple(normalized)
 
 
+def _should_enable_local_docs(host: str) -> bool:
+    normalized_host = str(host or "").strip().lower()
+    if not normalized_host:
+        return False
+    if "://" in normalized_host:
+        parsed = urlparse(normalized_host)
+        normalized_host = parsed.hostname or parsed.path or ""
+    if normalized_host.startswith("[") and normalized_host.endswith("]"):
+        normalized_host = normalized_host[1:-1]
+    return normalized_host in {"127.0.0.1", "localhost", "::1"}
+
+
 def _normalise_allowed_host(value: str) -> str | None:
     raw_value = str(value or "").strip().lower()
     if not raw_value:
@@ -661,18 +806,26 @@ def _get_header_value(request: Request, *names: str) -> str | None:
 
 
 def _parse_webhook_payload(raw_body: bytes) -> tuple[dict[str, Any] | None, str | None]:
+    return _parse_json_object_payload(raw_body, allow_single_item_array=True)
+
+
+def _parse_json_object_payload(
+    raw_body: bytes,
+    *,
+    allow_single_item_array: bool = False,
+) -> tuple[dict[str, Any] | None, str | None]:
     try:
         parsed = json.loads(raw_body.decode("utf-8"))
     except json.JSONDecodeError as exc:
         return None, f"Request body must be valid JSON. {exc.msg} at line {exc.lineno}, column {exc.colno}."
 
-    if isinstance(parsed, list):
+    if allow_single_item_array and isinstance(parsed, list):
         if len(parsed) != 1:
             return None, "Webhook payload array must contain exactly one JSON object."
         parsed = parsed[0]
 
     if not isinstance(parsed, dict):
-        return None, "Webhook payload must be a JSON object."
+        return None, "Request body must be a JSON object."
 
     return parsed, None
 

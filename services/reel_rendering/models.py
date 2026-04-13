@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from settings.reels import (
@@ -81,6 +81,7 @@ class PreparedReelAssets:
     agent_image_path: Path
     ber_icon_path: Path | None
     background_audio_path: Path
+    background_audio_candidates: tuple[Path, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)
@@ -108,6 +109,7 @@ class PropertyRenderData:
     property_county_label: str | None
     eircode: str | None
     selected_slides: tuple[PropertyReelSlide, ...] = ()
+    property_size: str | None = None
     agency_psra: str | None = None
     agency_logo_url: str | None = None
     listing_lifecycle: str | None = None
