@@ -22,6 +22,7 @@ from services.reel_rendering.runtime import (
     resolve_ber_icon_path,
     resolve_ffmpeg_binary,
     select_reel_slides,
+    should_reserve_agency_logo_space,
 )
 
 _PNG_IMAGE_CODEC = "png"
@@ -133,17 +134,25 @@ def prepare_reel_render_assets(
 
     prepared_cover_logo_path: Path | None = None
     cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
-    if cover_logo_path is not None:
+    reserve_agency_logo_space = should_reserve_agency_logo_space(
+        property_data,
+        cover_logo_path=cover_logo_path,
+    )
+    if reserve_agency_logo_space:
         overlay_layout = build_overlay_layout(
             property_data,
             settings,
             slides=property_data.selected_slides,
             slide_duration=settings.seconds_per_slide,
             has_ber_badge=prepared_ber_icon_path is not None,
-            has_agency_logo=True,
+            has_agency_logo=reserve_agency_logo_space,
             cover_caption=None,
         )
-        if overlay_layout.agency_logo_box is not None and overlay_layout.agency_logo_box.visible:
+        if (
+            cover_logo_path is not None
+            and overlay_layout.agency_logo_box is not None
+            and overlay_layout.agency_logo_box.visible
+        ):
             prepared_cover_logo_path = overlays_dir / "agency_logo.png"
             _normalize_agency_logo(
                 ffmpeg_binary=ffmpeg_binary,
@@ -169,6 +178,7 @@ def prepare_reel_render_assets(
         ber_icon_path=prepared_ber_icon_path,
         background_audio_path=background_audio_candidates[0],
         background_audio_candidates=background_audio_candidates,
+        reserve_agency_logo_space=reserve_agency_logo_space,
     )
 
 

@@ -192,13 +192,50 @@ def download_primary_image(primary_image_url: str, destination: Path) -> Path:
     return download_remote_image(primary_image_url, destination)
 
 
+def _normalize_image_basename(image_reference: str | None) -> str | None:
+    normalized_reference = str(image_reference or "").strip()
+    if not normalized_reference:
+        return None
+
+    parsed_reference = urlparse(normalized_reference)
+    basename = Path(parsed_reference.path or normalized_reference).name.strip().lower()
+    return basename or None
+
+
+def _is_duplicate_agent_and_agency_image(property_data: PropertyRenderData) -> bool:
+    agent_photo_basename = _normalize_image_basename(property_data.agent_photo_url)
+    agency_logo_basename = _normalize_image_basename(property_data.agency_logo_url)
+    return bool(
+        agent_photo_basename
+        and agency_logo_basename
+        and agent_photo_basename == agency_logo_basename
+    )
+
+
+def should_reserve_agency_logo_space(
+    property_data: PropertyRenderData,
+    *,
+    cover_logo_path: Path | None = None,
+) -> bool:
+    return cover_logo_path is not None or _is_duplicate_agent_and_agency_image(property_data)
+
+
 def prepare_cover_logo_image(
     workspace_dir: Path,
     property_data: PropertyRenderData,
     settings: PropertyReelTemplate,
+    *,
+    suppress_if_duplicate: bool = True,
 ) -> Path | None:
     agency_logo_url = str(property_data.agency_logo_url or "").strip()
     if not agency_logo_url:
+        return None
+    if suppress_if_duplicate and _is_duplicate_agent_and_agency_image(property_data):
+        logger.info(
+            "Skipping agency logo for property %s (%s) because it matches the agent photo filename.",
+            property_data.property_id,
+            property_data.slug,
+        )
         return None
     if _has_explicit_unsupported_image_suffix(agency_logo_url):
         logger.warning(
@@ -243,13 +280,18 @@ def prepare_agent_image(
     temp_dir: Path,
 ) -> Path:
     if not property_data.agent_photo_url:
-        agency_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+        agency_logo_path = prepare_cover_logo_image(
+            workspace_dir,
+            property_data,
+            settings,
+            suppress_if_duplicate=False,
+        )
         if agency_logo_path is not None:
             return agency_logo_path
         return _write_transparent_placeholder(temp_dir / "agent_placeholder.png")
 
-    suffix = Path(property_data.agent_photo_url).suffix or ".jpg"
-    destination = temp_dir / f"agent_photo{suffix.lower()}"
+    suffix = _resolve_remote_image_suffix(property_data.agent_photo_url)
+    destination = temp_dir / f"agent_photo{suffix}"
     try:
         return download_remote_image(property_data.agent_photo_url, destination)
     except Exception as error:
@@ -260,7 +302,12 @@ def prepare_agent_image(
             property_data.slug,
             error,
         )
-        agency_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+        agency_logo_path = prepare_cover_logo_image(
+            workspace_dir,
+            property_data,
+            settings,
+            suppress_if_duplicate=False,
+        )
         if agency_logo_path is not None:
             return agency_logo_path
         return _write_transparent_placeholder(temp_dir / "agent_placeholder.png")
@@ -632,6 +679,7 @@ __all__ = [
     "resolve_reel_output_path",
     "select_reel_images",
     "select_reel_slides",
+    "should_reserve_agency_logo_space",
     "sorted_image_paths",
 ]
 

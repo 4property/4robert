@@ -2632,6 +2632,86 @@ class AgencyLogoRuntimeTests(unittest.TestCase):
 
         self.assertIsNone(cover_logo_path)
 
+    def test_prepare_cover_logo_image_skips_duplicate_agent_photo_filename(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url="https://cdn.example.com/team/agent-portrait.jpg",
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/branding/agent-portrait.jpg",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=AssertionError("duplicate agency logo should not be downloaded"),
+            ):
+                cover_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                )
+
+        self.assertIsNone(cover_logo_path)
+
+    def test_prepare_cover_logo_image_normalizes_case_and_query_when_matching_agent_photo(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url="https://cdn.example.com/team/AGENT-PORTRAIT.JPG?version=2",
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/branding/agent-portrait.jpg#logo",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=AssertionError("normalized duplicate agency logo should not be downloaded"),
+            ):
+                cover_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                )
+
+        self.assertIsNone(cover_logo_path)
+
 
 class ReelRuntimePathTests(unittest.TestCase):
     def test_resolve_font_path_supports_project_relative_paths(self) -> None:
@@ -2794,6 +2874,59 @@ class ReelManifestTests(unittest.TestCase):
                 )
 
         self.assertIsNone(manifest["cover_logo_path"])
+
+    def test_manifest_keeps_logo_box_when_duplicate_logo_is_suppressed(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            assets_dir = workspace_dir / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            music_dir = assets_dir / "music"
+            music_dir.mkdir(parents=True, exist_ok=True)
+            (music_dir / "ncs-music.mp3").write_bytes(b"audio")
+
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            primary_image = selected_dir / "primary_image.jpg"
+            primary_image.write_bytes(b"image")
+
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=selected_dir,
+                selected_image_paths=(primary_image,),
+                featured_image_url="https://example.com/property-primary.jpg",
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating=None,
+                agent_name="Jane Doe",
+                agent_photo_url="https://cdn.example.com/team/AGENT-PORTRAIT.JPG?version=2",
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url="https://example.com/branding/agent-portrait.jpg#logo",
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=AssertionError("duplicate agency logo should not be downloaded for manifest"),
+            ):
+                manifest = build_property_reel_manifest_from_data(
+                    workspace_dir,
+                    property_data,
+                )
+
+        self.assertIsNone(manifest["cover_logo_path"])
+        self.assertIsNotNone(manifest["overlay_layout"]["agency_logo_box"])
+        assert manifest["overlay_layout"]["agency_logo_box"] is not None
+        self.assertTrue(manifest["overlay_layout"]["agency_logo_box"]["visible"])
 
     def test_status_reel_manifest_does_not_include_cover_logo_and_uses_single_slide_duration(self) -> None:
         with workspace_temp_dir() as workspace_dir:

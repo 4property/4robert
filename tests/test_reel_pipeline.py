@@ -26,6 +26,7 @@ from services.reel_rendering.models import (
     PropertyReelTemplate,
 )
 from services.reel_rendering.poster import (
+    _build_poster_filter_script,
     _resolve_poster_photo_box,
     generate_property_poster_from_data,
 )
@@ -414,6 +415,72 @@ class ReelPreparationIntegrationTests(_FFmpegTestCase):
                 )
                 self.assertGreaterEqual(prepared_slide.working_width - template.width, slide_frames)
 
+    def test_prepare_reel_render_assets_reserves_logo_space_when_logo_matches_agent_photo(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            self._create_audio_asset(workspace_dir / "assets" / "music" / "test.mp3")
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            source_path = selected_dir / "primary_image.png"
+            remote_agent_path = workspace_dir / "remote-agent.png"
+            self._create_image(source_path, "800x600", "teal")
+            self._create_image(remote_agent_path, "256x256", "white")
+
+            property_data = self._build_property_data(
+                selected_dir=selected_dir,
+                selected_paths=(source_path,),
+            )
+            property_data.agent_photo_url = "https://cdn.example.com/team/AGENT-PORTRAIT.PNG?version=2"
+            property_data.agency_logo_url = "https://example.com/branding/agent-portrait.png"
+            template = PropertyReelTemplate(
+                width=320,
+                height=480,
+                fps=12,
+                max_slide_count=1,
+                include_intro=False,
+                intro_duration_seconds=0.0,
+                total_duration_seconds=0.5,
+                seconds_per_slide=0.5,
+                subtitle_font_size=28,
+                background_audio_filename="music/test.mp3",
+            )
+            download_calls: list[str] = []
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                download_calls.append(image_url)
+                shutil.copyfile(remote_agent_path, destination)
+                return destination
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=fake_download,
+            ):
+                prepared_assets = prepare_reel_render_assets(
+                    workspace_dir,
+                    property_data,
+                    template=template,
+                    working_dir=workspace_dir / "_prepared_duplicate_logo",
+                )
+
+            self.assertEqual(download_calls, [property_data.agent_photo_url])
+            self.assertIsNone(prepared_assets.cover_logo_path)
+            self.assertTrue(prepared_assets.reserve_agency_logo_space)
+            overlay_layout = build_overlay_layout(
+                property_data,
+                template,
+                slides=tuple(
+                    PropertyReelSlide(
+                        image_path=prepared_slide.original_path,
+                        caption=prepared_slide.caption,
+                    )
+                    for prepared_slide in prepared_assets.slides
+                ),
+                slide_duration=template.seconds_per_slide,
+                has_ber_badge=False,
+                has_agency_logo=prepared_assets.reserve_agency_logo_space,
+                cover_caption=None,
+            )
+            self.assertIsNotNone(overlay_layout.agency_logo_box)
+
     def test_background_audio_candidates_are_shuffled_from_assets_music(self) -> None:
         with _workspace_temp_dir() as workspace_dir:
             music_dir = workspace_dir / "assets" / "music"
@@ -570,6 +637,45 @@ class ReelRenderIntegrationTests(_FFmpegTestCase):
             )
 
             self.assertTrue(output_path.exists())
+
+    def test_slide_segment_filter_reserves_logo_space_without_logo_overlay(self) -> None:
+        slide = PreparedReelSlide(
+            original_path=Path("source.jpg"),
+            working_path=Path("slide.png"),
+            caption="Bright living room",
+            working_width=1340,
+            working_height=1786,
+            motion_mode="horizontal",
+        )
+        property_data = self._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(),
+        )
+        template = PropertyReelTemplate()
+
+        filter_text = _build_slide_segment_filter(
+            property_data=property_data,
+            settings=template,
+            slide=slide,
+            slide_frames=120,
+            slide_duration=5.0,
+            include_agency_logo=True,
+            include_ber_icon=False,
+            render_agency_logo=False,
+        )
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(PropertyReelSlide(image_path=slide.working_path, caption=slide.caption),),
+            slide_duration=5.0,
+            has_ber_badge=False,
+            has_agency_logo=True,
+            cover_caption=None,
+        )
+
+        self.assertIsNotNone(overlay_layout.agency_logo_box)
+        self.assertNotIn("[2:v]format=rgba[agency_logo]", filter_text)
+        self.assertNotIn("[video_with_agent_panel][agency_logo]overlay=", filter_text)
 
     def test_first_slide_segment_filter_omits_fade_in(self) -> None:
         slide = PreparedReelSlide(
@@ -756,6 +862,41 @@ class PosterRenderIntegrationTests(_FFmpegTestCase):
         self.assertEqual(photo_box.y, 0)
         self.assertEqual(photo_box.width, template.width)
         self.assertEqual(photo_box.height, template.height)
+
+    def test_poster_filter_reserves_logo_space_without_logo_overlay(self) -> None:
+        property_data = self._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(Path("selected_photos/primary_image.png"),),
+        )
+        template = PropertyReelTemplate(
+            width=360,
+            height=640,
+            max_slide_count=1,
+            include_intro=False,
+            intro_duration_seconds=0.0,
+        )
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(),
+            slide_duration=None,
+            has_ber_badge=False,
+            has_agency_logo=True,
+            cover_caption=None,
+        )
+        filter_text = _build_poster_filter_script(
+            property_data=property_data,
+            settings=template,
+            include_agency_logo=True,
+            include_ber_icon=False,
+            agent_input_index=1,
+            agency_logo_input_index=None,
+            ber_icon_input_index=None,
+        )
+
+        self.assertIsNotNone(overlay_layout.agency_logo_box)
+        self.assertNotIn("[agency_logo]", filter_text)
+        self.assertNotIn("video_with_agency_logo", filter_text)
 
     def test_generate_property_poster_from_data_uses_configured_output_resolution(self) -> None:
         with _workspace_temp_dir() as workspace_dir:

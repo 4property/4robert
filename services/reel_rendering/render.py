@@ -345,6 +345,10 @@ def _build_intro_segment_filter(
     settings: PropertyReelTemplate,
     prepared_assets: PreparedReelAssets,
 ) -> str:
+    reserve_agency_logo_space = (
+        prepared_assets.reserve_agency_logo_space
+        or prepared_assets.cover_logo_path is not None
+    )
     cover_caption = prepared_assets.slides[0].caption if prepared_assets.slides else None
     intro_layout = build_overlay_layout(
         property_data,
@@ -352,6 +356,7 @@ def _build_intro_segment_filter(
         slides=(),
         slide_duration=settings.intro_duration_seconds,
         has_ber_badge=prepared_assets.ber_icon_path is not None,
+        has_agency_logo=reserve_agency_logo_space,
         cover_caption=cover_caption,
     )
     filter_parts = [
@@ -437,8 +442,11 @@ def _build_slide_segment_filter(
     slide_duration: float,
     include_agency_logo: bool,
     include_ber_icon: bool,
+    render_agency_logo: bool | None = None,
     apply_fade_in: bool = True,
 ) -> str:
+    if render_agency_logo is None:
+        render_agency_logo = include_agency_logo
     segment_settings = replace(
         settings,
         include_intro=False,
@@ -484,7 +492,7 @@ def _build_slide_segment_filter(
         next_input_index += 1
     logo_image_label: str | None = None
     if (
-        include_agency_logo
+        render_agency_logo
         and segment_layout.agency_logo_box is not None
         and segment_layout.agency_logo_box.visible
     ):
@@ -638,13 +646,17 @@ def generate_property_reel_from_data(
             settings,
             len(prepared_assets.slides),
         )
+        reserve_agency_logo_space = (
+            prepared_assets.reserve_agency_logo_space
+            or prepared_assets.cover_logo_path is not None
+        )
         overlay_layout = build_overlay_layout(
             property_data,
             settings,
             slides=original_slides,
             slide_duration=slide_duration,
             has_ber_badge=prepared_assets.ber_icon_path is not None,
-            has_agency_logo=prepared_assets.cover_logo_path is not None,
+            has_agency_logo=reserve_agency_logo_space,
             cover_caption=None,
         )
         for warning in overlay_layout.warnings:
@@ -690,8 +702,9 @@ def generate_property_reel_from_data(
                         slide=slide,
                         slide_frames=segment_frame_count,
                         slide_duration=segment_duration,
-                        include_agency_logo=prepared_assets.cover_logo_path is not None,
+                        include_agency_logo=reserve_agency_logo_space,
                         include_ber_icon=prepared_assets.ber_icon_path is not None,
+                        render_agency_logo=prepared_assets.cover_logo_path is not None,
                         apply_fade_in=index != 1,
                     ),
                     output_path=segment_path,

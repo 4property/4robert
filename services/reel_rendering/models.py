@@ -82,6 +82,7 @@ class PreparedReelAssets:
     ber_icon_path: Path | None
     background_audio_path: Path
     background_audio_candidates: tuple[Path, ...] = field(default_factory=tuple)
+    reserve_agency_logo_space: bool = False
 
 
 @dataclass(slots=True)

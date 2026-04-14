@@ -29,6 +29,7 @@ def build_overlay_filter(
     video_input_label: str = "video_base",
     agent_image_label: str = "agent_panel_image",
     logo_image_label: str | None = None,
+    has_agency_logo: bool | None = None,
     ber_icon_label: str | None = None,
     output_label: str = "vout",
     layout: OverlayLayout | None = None,
@@ -42,7 +43,9 @@ def build_overlay_filter(
         ),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_label is not None,
-        has_agency_logo=logo_image_label is not None,
+        has_agency_logo=(
+            logo_image_label is not None if has_agency_logo is None else has_agency_logo
+        ),
         cover_caption=cover_caption,
     )
     font_path = escape_filter_path(resolve_font_path(settings.font_path))
@@ -183,6 +186,7 @@ def build_filter_complex(
     logo_input_index: int | None,
     agent_image_input_index: int,
     ber_icon_input_index: int | None = None,
+    include_agency_logo: bool | None = None,
     layout: OverlayLayout | None = None,
 ) -> str:
     slide_count = len(slides)
@@ -195,7 +199,11 @@ def build_filter_complex(
         slides=tuple(slides),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_input_index is not None,
-        has_agency_logo=logo_input_index is not None,
+        has_agency_logo=(
+            logo_input_index is not None
+            if include_agency_logo is None
+            else include_agency_logo
+        ),
         cover_caption=slides[0].caption if settings.include_intro and slides else None,
     )
 

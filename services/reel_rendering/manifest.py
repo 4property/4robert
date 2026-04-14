@@ -28,6 +28,7 @@ from services.reel_rendering.runtime import (
     resolve_ber_icon_path,
     resolve_manifest_output_path,
     select_reel_slides,
+    should_reserve_agency_logo_space,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,13 +103,21 @@ def build_property_reel_manifest_from_data(
             duration_delta,
         )
     cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
+    reserve_agency_logo_space = (
+        prepared_assets.reserve_agency_logo_space or prepared_assets.cover_logo_path is not None
+        if prepared_assets is not None
+        else should_reserve_agency_logo_space(
+            property_data,
+            cover_logo_path=cover_logo_path,
+        )
+    )
     overlay_layout = build_overlay_layout(
         property_data,
         settings,
         slides=tuple(slides),
         slide_duration=slide_duration,
         has_ber_badge=ber_icon_path is not None,
-        has_agency_logo=cover_logo_path is not None,
+        has_agency_logo=reserve_agency_logo_space,
         cover_caption=slides[0].caption if settings.include_intro and slides else None,
     )
     has_intro_segment = settings.include_intro and settings.intro_duration_seconds > 0.0

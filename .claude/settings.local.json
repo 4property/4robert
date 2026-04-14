@@ -3,7 +3,12 @@
     "allow": [
       "Bash(xargs wc:*)",
       "Bash(grep -n \"from.*render import\\\\|from.*runtime import\" /c/Users/4pm/Desktop/warp/CPIHED/services/reel_rendering/*.py)",
-      "Bash(grep \"except:$\")"
+      "Bash(grep \"except:$\")",
+      "Bash(dir \"c:\\\\Users\\\\4pm\\\\Desktop\\\\warp\\\\CPIHED\\\\property_media\" /b)",
+      "Bash(sqlite3 \"c:/Users/4pm/Desktop/warp/CPIHED/db.sqlite3\" \"SELECT id, site_id, property_id, slug FROM properties LIMIT 5;\")",
+      "Bash(sqlite3 \"c:/Users/4pm/Desktop/warp/CPIHED/db.sqlite3\" \".tables\")",
+      "Bash(sqlite3 \"c:/Users/4pm/Desktop/warp/CPIHED/db.sqlite3\" \"SELECT site_id, property_id, slug FROM properties LIMIT 5;\")",
+      "Bash(sqlite3 \"c:/Users/4pm/Desktop/warp/CPIHED/db.sqlite3\" \"PRAGMA table_info\\(properties\\);\")"
     ]
   }
 }

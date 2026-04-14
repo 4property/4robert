@@ -75,7 +75,10 @@ def generate_property_poster_from_data(
             _build_poster_filter_script(
                 property_data=property_data,
                 settings=settings,
-                include_agency_logo=prepared_assets.cover_logo_path is not None,
+                include_agency_logo=(
+                    prepared_assets.reserve_agency_logo_space
+                    or prepared_assets.cover_logo_path is not None
+                ),
                 include_ber_icon=prepared_assets.ber_icon_path is not None,
                 agent_input_index=1,
                 agency_logo_input_index=agency_logo_input_index,
