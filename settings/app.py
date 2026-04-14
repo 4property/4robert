@@ -338,6 +338,11 @@ class AppSettings(BaseSettings):
         validation_alias="POSTER_PHOTO_PANEL_GAP_MIN_PX",
         ge=0,
     )
+    poster_footer_bottom_offset_px: int = Field(
+        56,
+        validation_alias="POSTER_FOOTER_BOTTOM_OFFSET_PX",
+        ge=0,
+    )
     reel_subtitle_font_path: str = Field(
         "assets/fonts/Inter/static/Inter_28pt-Bold.ttf",
         validation_alias="REEL_SUBTITLE_FONT_PATH",

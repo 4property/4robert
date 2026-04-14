@@ -4,10 +4,12 @@ import json
 import os
 import shutil
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError
 
 from application.media_planning import build_media_delivery_plan
 from application.persistence import UnitOfWork
@@ -17,6 +19,7 @@ from repositories.scripted_video_artifact_repository import ScriptedVideoArtifac
 from services.reel_rendering import (
     PropertyRenderData,
     PropertyReelSlide,
+    PropertyReelTemplate,
     build_reel_template_for_render_profile,
     generate_property_reel_from_data,
     write_property_reel_manifest_from_data,
@@ -43,7 +46,43 @@ class _ResolvedScriptedVideoRequest:
     render_profile: str
     request_manifest_json: str
     property_data: PropertyRenderData
+    template: PropertyReelTemplate
     background_audio_path: Path | None
+
+
+class _ScriptedRenderSettingsPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    width: int | None = Field(default=None, ge=2)
+    height: int | None = Field(default=None, ge=2)
+    fps: int | None = Field(default=None, ge=1)
+    total_duration_seconds: float | None = Field(default=None, gt=0.0)
+    seconds_per_slide: float | None = Field(default=None, gt=0.0)
+    max_slide_count: int | None = Field(default=None, ge=1)
+    intro_duration_seconds: float | None = Field(default=None, ge=0.0)
+    assets_dirname: str | None = Field(default=None, min_length=1)
+    ber_icons_dirname: str | None = Field(default=None, min_length=1)
+    cover_logo_filename: str | None = Field(default=None, min_length=1)
+    background_audio_filename: str | None = Field(default=None, min_length=1)
+    audio_volume: float | None = Field(default=None, ge=0.0)
+    ffmpeg_filter_threads: int | None = Field(default=None, ge=0)
+    ffmpeg_encoder_threads: int | None = Field(default=None, ge=0)
+    font_path: str | None = Field(default=None, min_length=1)
+    bold_font_path: str | None = Field(default=None, min_length=1)
+    subtitle_font_path: str | None = Field(default=None, min_length=1)
+    subtitle_font_size: int | None = Field(default=None, ge=1)
+    ber_icon_scale: float | None = Field(default=None, gt=0.0)
+    agency_logo_scale: float | None = Field(default=None, gt=0.0)
+    include_intro: bool | None = None
+    footer_bottom_offset_px: int | None = Field(default=None, ge=0)
+
+    def to_template_overrides(self) -> dict[str, object]:
+        overrides = self.model_dump(exclude_none=True)
+        for field_name in ("font_path", "bold_font_path", "subtitle_font_path"):
+            raw_value = overrides.get(field_name)
+            if raw_value is not None:
+                overrides[field_name] = Path(str(raw_value)).expanduser()
+        return overrides
 
 
 class ScriptedVideoRenderService:
@@ -111,7 +150,7 @@ class ScriptedVideoRenderService:
                 encoding="utf-8",
             )
             render_working_dir = staging_dir / "_prepared"
-            template = build_reel_template_for_render_profile(render_profile)
+            template = resolved_request.template
             prepared_assets = prepare_reel_render_assets(
                 self.workspace_dir,
                 resolved_request.property_data,
@@ -127,6 +166,7 @@ class ScriptedVideoRenderService:
                 resolved_request.property_data,
                 output_path=resolved_manifest_path,
                 template=template,
+                render_profile=render_profile,
                 prepared_assets=prepared_assets,
                 working_dir=render_working_dir,
             )
@@ -248,6 +288,10 @@ class ScriptedVideoRenderService:
         delivery_plan = build_media_delivery_plan(defaults_property)
 
         render_profile = _optional_text(payload, "render_profile") or delivery_plan.render_profile
+        template = build_reel_template_for_render_profile(
+            render_profile,
+            template=_resolve_scripted_render_template(payload),
+        )
         listing_lifecycle = _optional_text(payload, "listing_lifecycle") or delivery_plan.listing_lifecycle
         banner_text = (
             _optional_text_allow_blank(payload, "banner_text")
@@ -307,8 +351,40 @@ class ScriptedVideoRenderService:
             render_profile=render_profile,
             request_manifest_json=request_manifest_json,
             property_data=property_data,
+            template=template,
             background_audio_path=background_audio_path,
         )
+
+
+def _resolve_scripted_render_template(payload: Mapping[str, object]) -> PropertyReelTemplate:
+    raw_render_settings = payload.get("render_settings")
+    if raw_render_settings is None:
+        return PropertyReelTemplate()
+    if not isinstance(raw_render_settings, Mapping):
+        raise ValidationError(
+            "render_settings must be a JSON object.",
+            code="INVALID_RENDER_SETTINGS",
+            context={"field": "render_settings"},
+            hint="Send render_settings as an object whose keys match the supported reel template fields.",
+        )
+    try:
+        requested_settings = _ScriptedRenderSettingsPayload.model_validate(dict(raw_render_settings))
+    except PydanticValidationError as exc:
+        issues: list[str] = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            message = str(error.get("msg") or "Invalid value")
+            issues.append(f"{location}: {message}" if location else message)
+        raise ValidationError(
+            "render_settings is invalid.",
+            code="INVALID_RENDER_SETTINGS",
+            context={"field": "render_settings", "issues": issues},
+            hint="Use only supported render_settings fields with valid value types and ranges.",
+            cause=exc,
+        ) from exc
+
+    overrides = requested_settings.to_template_overrides()
+    return replace(PropertyReelTemplate(), **overrides) if overrides else PropertyReelTemplate()
 
 
 def _resolve_slides(

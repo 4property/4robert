@@ -766,6 +766,7 @@ def _scripted_render_request_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": "Ruta local opcional dentro del workspace.",
             },
+            "render_settings": _scripted_render_settings_schema(),
             "slides": {
                 "type": "array",
                 "minItems": 1,
@@ -778,6 +779,54 @@ def _scripted_render_request_schema() -> dict[str, Any]:
             },
         },
         "additionalProperties": True,
+    }
+
+
+def _scripted_render_settings_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": (
+            "Overrides opcionales de la plantilla de render. El manifiesto resuelto persiste la "
+            "configuración efectiva final después de aplicar el `render_profile`."
+        ),
+        "properties": {
+            "width": {"type": "integer", "minimum": 2},
+            "height": {"type": "integer", "minimum": 2},
+            "fps": {"type": "integer", "minimum": 1},
+            "total_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+            "seconds_per_slide": {"type": "number", "exclusiveMinimum": 0},
+            "max_slide_count": {"type": "integer", "minimum": 1},
+            "intro_duration_seconds": {"type": "number", "minimum": 0},
+            "assets_dirname": {"type": "string"},
+            "ber_icons_dirname": {"type": "string"},
+            "cover_logo_filename": {"type": "string"},
+            "background_audio_filename": {"type": "string"},
+            "audio_volume": {"type": "number", "minimum": 0},
+            "ffmpeg_filter_threads": {"type": "integer", "minimum": 0},
+            "ffmpeg_encoder_threads": {"type": "integer", "minimum": 0},
+            "font_path": {
+                "type": "string",
+                "description": "Ruta de fuente base para drawtext.",
+            },
+            "bold_font_path": {
+                "type": "string",
+                "description": "Ruta de fuente bold para drawtext.",
+            },
+            "subtitle_font_path": {
+                "type": "string",
+                "description": "Ruta de fuente usada en subtítulos.",
+            },
+            "subtitle_font_size": {"type": "integer", "minimum": 1},
+            "ber_icon_scale": {"type": "number", "exclusiveMinimum": 0},
+            "agency_logo_scale": {"type": "number", "exclusiveMinimum": 0},
+            "include_intro": {"type": "boolean"},
+            "footer_bottom_offset_px": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Desplaza el footer hacia arriba respecto al borde inferior.",
+            },
+        },
+        "additionalProperties": False,
     }
 
 
@@ -880,6 +929,8 @@ def _scripted_render_request_example() -> dict[str, Any]:
         "source_property_id": 170800,
         "title": "46 Example Street, Dublin 4",
         "property_status": "For Sale",
+        "render_profile": "for_sale_reel",
+        "render_settings": _scripted_render_settings_example(),
         "price": "650000",
         "bedrooms": 3,
         "bathrooms": 2,
@@ -897,6 +948,33 @@ def _scripted_render_request_example() -> dict[str, Any]:
                 "caption": "Sunny rear garden.",
             },
         ],
+    }
+
+
+def _scripted_render_settings_example() -> dict[str, Any]:
+    return {
+        "width": 1080,
+        "height": 1440,
+        "fps": 24,
+        "total_duration_seconds": 35,
+        "seconds_per_slide": 5,
+        "max_slide_count": 7,
+        "intro_duration_seconds": 3,
+        "assets_dirname": "assets",
+        "ber_icons_dirname": "ber-icons",
+        "cover_logo_filename": "ckp-logo.png",
+        "background_audio_filename": "music/ncs-music.mp3",
+        "audio_volume": 0.45,
+        "ffmpeg_filter_threads": 1,
+        "ffmpeg_encoder_threads": 2,
+        "font_path": "assets/fonts/Inter/static/Inter_28pt-Regular.ttf",
+        "bold_font_path": "assets/fonts/Inter/static/Inter_28pt-Bold.ttf",
+        "subtitle_font_path": "assets/fonts/Inter/static/Inter_28pt-Bold.ttf",
+        "subtitle_font_size": 54,
+        "ber_icon_scale": 0.5,
+        "agency_logo_scale": 1.5,
+        "include_intro": False,
+        "footer_bottom_offset_px": 72,
     }
 
 

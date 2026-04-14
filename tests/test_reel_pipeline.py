@@ -250,6 +250,7 @@ class ReelConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.reel_fps, 24)
         self.assertEqual(settings.poster_width, 1080)
         self.assertEqual(settings.poster_height, 1920)
+        self.assertEqual(settings.poster_footer_bottom_offset_px, 56)
 
     def test_reel_and_poster_output_settings_allow_overrides(self) -> None:
         with patch.dict(
@@ -260,6 +261,7 @@ class ReelConfigurationTests(unittest.TestCase):
                 "REEL_FPS": "30",
                 "POSTER_WIDTH": "720",
                 "POSTER_HEIGHT": "1280",
+                "POSTER_FOOTER_BOTTOM_OFFSET_PX": "104",
             },
             clear=True,
         ):
@@ -270,6 +272,7 @@ class ReelConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.reel_fps, 30)
         self.assertEqual(settings.poster_width, 720)
         self.assertEqual(settings.poster_height, 1280)
+        self.assertEqual(settings.poster_footer_bottom_offset_px, 104)
 
     def test_full_seven_slide_reel_distributes_frames_to_match_configured_total(self) -> None:
         template = PropertyReelTemplate(
@@ -358,6 +361,52 @@ class OverlayLayoutTests(unittest.TestCase):
                 block.y + block.box_height,
                 overlay_layout.bottom_panel.y + overlay_layout.bottom_panel.height,
             )
+
+    def test_bottom_panel_moves_up_when_footer_offset_is_configured(self) -> None:
+        property_data = _FFmpegTestCase._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(Path("selected_photos/primary_image.png"),),
+        )
+        slide = PropertyReelSlide(
+            image_path=Path("selected_photos/primary_image.png"),
+            caption="Bright family home.",
+        )
+        default_template = PropertyReelTemplate(
+            width=360,
+            height=640,
+            subtitle_font_size=28,
+        )
+        shifted_template = PropertyReelTemplate(
+            width=360,
+            height=640,
+            subtitle_font_size=28,
+            footer_bottom_offset_px=48,
+        )
+
+        default_layout = build_overlay_layout(
+            property_data,
+            default_template,
+            slides=(slide,),
+            slide_duration=default_template.seconds_per_slide,
+            has_ber_badge=False,
+            has_agency_logo=True,
+            cover_caption=None,
+        )
+        shifted_layout = build_overlay_layout(
+            property_data,
+            shifted_template,
+            slides=(slide,),
+            slide_duration=shifted_template.seconds_per_slide,
+            has_ber_badge=False,
+            has_agency_logo=True,
+            cover_caption=None,
+        )
+
+        self.assertIsNotNone(default_layout.bottom_panel)
+        self.assertIsNotNone(shifted_layout.bottom_panel)
+        assert default_layout.bottom_panel is not None
+        assert shifted_layout.bottom_panel is not None
+        self.assertEqual(default_layout.bottom_panel.y - shifted_layout.bottom_panel.y, 48)
 
 
 class ReelPreparationIntegrationTests(_FFmpegTestCase):
@@ -1061,6 +1110,10 @@ class ReelManifestPreparedAssetTests(_FFmpegTestCase):
 
             self.assertEqual(manifest["slide_count"], 2)
             self.assertEqual(manifest["segment_count"], 2)
+            self.assertIn("render_settings", manifest)
+            self.assertEqual(manifest["render_settings"]["width"], 320)
+            self.assertEqual(manifest["render_settings"]["height"], 480)
+            self.assertEqual(manifest["render_settings"]["footer_bottom_offset_px"], 0)
             self.assertIsNotNone(manifest["prepared_assets"])
             prepared_manifest = manifest["prepared_assets"]
             assert prepared_manifest is not None

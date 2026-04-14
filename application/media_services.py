@@ -1259,6 +1259,7 @@ class DefaultMediaRenderer:
             property_render_data,
             output_path=manifest_path,
             template=template,
+            render_profile=context.delivery_plan.render_profile,
             prepared_assets=prepared_render_assets,
             working_dir=render_working_dir,
         )

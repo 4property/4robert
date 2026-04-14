@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,7 @@ from services.webhook_transport.site_storage import (
 from settings.posters import (
     POSTER_BACKGROUND_BLUR_POWER,
     POSTER_BACKGROUND_BLUR_RADIUS,
+    POSTER_FOOTER_BOTTOM_OFFSET_PX,
     POSTER_HEIGHT,
     POSTER_WIDTH,
 )
@@ -33,12 +35,23 @@ def generate_property_poster_from_data(
     template: PropertyReelTemplate | None = None,
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
-    settings = template or PropertyReelTemplate(
-        width=POSTER_WIDTH,
-        height=POSTER_HEIGHT,
+    base_settings = template or PropertyReelTemplate(
         max_slide_count=1,
         include_intro=False,
         intro_duration_seconds=0.0,
+    )
+    settings = replace(
+        base_settings,
+        width=base_settings.width if template is not None else POSTER_WIDTH,
+        height=base_settings.height if template is not None else POSTER_HEIGHT,
+        max_slide_count=1,
+        include_intro=False,
+        intro_duration_seconds=0.0,
+        footer_bottom_offset_px=(
+            base_settings.footer_bottom_offset_px
+            if base_settings.footer_bottom_offset_px > 0
+            else POSTER_FOOTER_BOTTOM_OFFSET_PX
+        ),
     )
     ffmpeg_binary = resolve_ffmpeg_binary()
     final_output_path = _resolve_poster_output_path(

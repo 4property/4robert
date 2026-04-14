@@ -1067,8 +1067,12 @@ class WebhookTransportTests(unittest.TestCase):
             )
 
     @staticmethod
-    def _build_scripted_render_payload(slide_path: Path) -> dict[str, object]:
-        return {
+    def _build_scripted_render_payload(
+        slide_path: Path,
+        *,
+        render_settings: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
             "site_id": "site-a",
             "source_property_id": 170800,
             "title": "46 Example Street, Dublin 4",
@@ -1080,6 +1084,9 @@ class WebhookTransportTests(unittest.TestCase):
                 }
             ],
         }
+        if render_settings is not None:
+            payload["render_settings"] = render_settings
+        return payload
 
     def _build_client(
         self,
@@ -1176,12 +1183,23 @@ class WebhookTransportTests(unittest.TestCase):
 
         operation = openapi_schema["paths"]["/videos/scripted/render"]["post"]
         request_examples = operation["requestBody"]["content"]["application/json"]["examples"]
+        request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
         response_example = operation["responses"]["201"]["content"]["application/json"]["example"]
 
         self.assertIn("image_path", request_examples)
         self.assertIn("sources", request_examples)
         self.assertEqual(request_examples["image_path"]["value"]["slides"][0]["image_path"], "uploads/slide-01.jpg")
         self.assertEqual(request_examples["sources"]["value"]["slides"][0]["sources"][0]["path"], "uploads/slide-01.jpg")
+        self.assertIn("render_settings", request_examples["image_path"]["value"])
+        self.assertEqual(
+            request_examples["image_path"]["value"]["render_settings"]["footer_bottom_offset_px"],
+            72,
+        )
+        self.assertIn("render_settings", request_schema["properties"])
+        self.assertIn(
+            "footer_bottom_offset_px",
+            request_schema["properties"]["render_settings"]["properties"],
+        )
         self.assertEqual(response_example["status"], "rendered")
         self.assertIn("generated_media/site-a/scripted_videos", response_example["video_path"])
 
@@ -1264,8 +1282,10 @@ class WebhookTransportTests(unittest.TestCase):
         slide_path = workspace_dir / "uploads" / "slide-01.jpg"
         slide_path.parent.mkdir(parents=True, exist_ok=True)
         slide_path.write_bytes(b"image")
+        captured_template: dict[str, object] = {}
 
         def fake_prepare_reel_render_assets(base_dir, property_data, *, template=None, working_dir):
+            captured_template["template"] = template
             prepared_dir = Path(working_dir).expanduser().resolve()
             prepared_dir.mkdir(parents=True, exist_ok=True)
             slide_working_path = prepared_dir / "slide_01.png"
@@ -1296,6 +1316,7 @@ class WebhookTransportTests(unittest.TestCase):
             *,
             output_path=None,
             template=None,
+            render_profile=None,
             prepared_assets=None,
             working_dir=None,
         ):
@@ -1307,6 +1328,13 @@ class WebhookTransportTests(unittest.TestCase):
                         "site_id": property_data.site_id,
                         "property_id": property_data.property_id,
                         "title": property_data.title,
+                        "render_profile": render_profile,
+                        "render_settings": {
+                            "subtitle_font_size": template.subtitle_font_size if template is not None else None,
+                            "footer_bottom_offset_px": (
+                                template.footer_bottom_offset_px if template is not None else None
+                            ),
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -1342,9 +1370,16 @@ class WebhookTransportTests(unittest.TestCase):
             ),
             client,
         ):
+            payload = self._build_scripted_render_payload(
+                slide_path,
+                render_settings={
+                    "subtitle_font_size": 62,
+                    "footer_bottom_offset_px": 88,
+                },
+            )
             response = client.post(
                 "/videos/scripted/render",
-                content=json.dumps(self._build_scripted_render_payload(slide_path)),
+                content=json.dumps(payload),
                 headers={"Content-Type": "application/json"},
             )
 
@@ -1359,6 +1394,15 @@ class WebhookTransportTests(unittest.TestCase):
         self.assertTrue(request_manifest_path.exists())
         self.assertIn("scripted_videos", payload["video_path"])
         self.assertNotIn("\\reels\\", payload["video_path"])
+        self.assertIn("template", captured_template)
+        assert isinstance(captured_template["template"], PropertyReelTemplate)
+        self.assertEqual(captured_template["template"].subtitle_font_size, 62)
+        self.assertEqual(captured_template["template"].footer_bottom_offset_px, 88)
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["render_profile"], "for_sale_reel")
+        self.assertEqual(manifest["render_settings"]["subtitle_font_size"], 62)
+        self.assertEqual(manifest["render_settings"]["footer_bottom_offset_px"], 88)
 
         with ScriptedVideoArtifactRepository(workspace_dir / DATABASE_FILENAME) as repository:
             record = repository.get_artifact(payload["render_id"])
@@ -2831,6 +2875,10 @@ class ReelManifestTests(unittest.TestCase):
         self.assertEqual(manifest["duration_delta_seconds"], 1.0)
         self.assertEqual(manifest["estimated_duration_seconds"], 11.0)
         self.assertEqual(manifest["slide_count"], 2)
+        self.assertIsNone(manifest["render_profile"])
+        self.assertEqual(manifest["render_settings"]["include_intro"], True)
+        self.assertEqual(manifest["render_settings"]["intro_duration_seconds"], 3.0)
+        self.assertEqual(manifest["render_settings"]["footer_bottom_offset_px"], 0)
         self.assertEqual(manifest["ber_icon_path"], str(ber_icons_dir / "B2.png"))
         self.assertEqual(
             manifest["agent_lines"],

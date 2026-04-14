@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
 from settings.reels import (
     ASSETS_DIRNAME,
@@ -52,6 +53,15 @@ class PropertyReelTemplate:
     ber_icon_scale: float = REEL_BER_ICON_SCALE
     agency_logo_scale: float = REEL_AGENCY_LOGO_SCALE
     include_intro: bool = False
+    footer_bottom_offset_px: int = 0
+
+
+def property_reel_template_to_dict(template: PropertyReelTemplate) -> dict[str, Any]:
+    serialized: dict[str, Any] = {}
+    for field_definition in fields(template):
+        value = getattr(template, field_definition.name)
+        serialized[field_definition.name] = str(value) if isinstance(value, Path) else value
+    return serialized
 
 
 @dataclass(slots=True)
@@ -131,4 +141,5 @@ __all__ = [
     "PropertyRenderData",
     "PropertyReelSlide",
     "PropertyReelTemplate",
+    "property_reel_template_to_dict",
 ]

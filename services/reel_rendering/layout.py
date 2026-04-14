@@ -175,6 +175,24 @@ def _resolve_bottom_panel_height_range(settings: PropertyReelTemplate) -> tuple[
     return max(208, round(settings.height * 0.145)), max(500, round(settings.height * 0.34))
 
 
+def _resolve_bottom_panel_y(
+    *,
+    frame_height: int,
+    outer_margin_y: int,
+    panel_height: int,
+    footer_bottom_offset_px: int,
+    top_panel: BoxLayout | None,
+    vertical_gap: int,
+) -> int:
+    minimum_y = outer_margin_y
+    if top_panel is not None:
+        minimum_y = top_panel.y + top_panel.height + vertical_gap
+    return max(
+        minimum_y,
+        frame_height - outer_margin_y - footer_bottom_offset_px - panel_height,
+    )
+
+
 def _candidate_font_sizes(max_size: int, min_size: int, *, step: int = 4) -> tuple[int, ...]:
     normalized_max = max(max_size, min_size)
     sizes: list[int] = []
@@ -585,7 +603,14 @@ def build_overlay_layout(
         bottom_panel = BoxLayout(
             visible=True,
             x=outer_margin_x,
-            y=height - outer_margin_y - bottom_panel_height,
+            y=_resolve_bottom_panel_y(
+                frame_height=height,
+                outer_margin_y=outer_margin_y,
+                panel_height=bottom_panel_height,
+                footer_bottom_offset_px=max(0, settings.footer_bottom_offset_px),
+                top_panel=top_panel,
+                vertical_gap=max(panel_padding_y, round(height * 0.02)),
+            ),
             width=panel_width,
             height=bottom_panel_height,
         )

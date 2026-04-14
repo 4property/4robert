@@ -19,6 +19,7 @@ from services.reel_rendering.models import (
     PropertyRenderData,
     PropertyReelSlide,
     PropertyReelTemplate,
+    property_reel_template_to_dict,
 )
 from services.reel_rendering.preparation import prepare_reel_render_assets
 from services.reel_rendering.runtime import (
@@ -39,6 +40,7 @@ def build_property_reel_manifest_from_data(
     property_data: PropertyRenderData,
     *,
     template: PropertyReelTemplate | None = None,
+    render_profile: str | None = None,
     prepared_assets: PreparedReelAssets | None = None,
     working_dir: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -173,6 +175,8 @@ def build_property_reel_manifest_from_data(
     return {
         "site_id": property_data.site_id,
         "property_id": property_data.property_id,
+        "render_profile": render_profile,
+        "render_settings": property_reel_template_to_dict(settings),
         "slug": property_data.slug,
         "title": property_data.title,
         "link": property_data.link,
@@ -228,6 +232,7 @@ def write_property_reel_manifest_from_data(
     *,
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
+    render_profile: str | None = None,
     prepared_assets: PreparedReelAssets | None = None,
     working_dir: str | Path | None = None,
 ) -> Path:
@@ -237,6 +242,7 @@ def write_property_reel_manifest_from_data(
         workspace_dir,
         property_data,
         template=settings,
+        render_profile=render_profile,
         prepared_assets=prepared_assets,
         working_dir=working_dir,
     )
@@ -258,6 +264,7 @@ def build_property_reel_manifest(
     property_id: int | None = None,
     slug: str | None = None,
     template: PropertyReelTemplate | None = None,
+    render_profile: str | None = None,
     working_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     workspace_dir = Path(base_dir).expanduser().resolve()
@@ -271,6 +278,7 @@ def build_property_reel_manifest(
         workspace_dir,
         property_data,
         template=template,
+        render_profile=render_profile,
         working_dir=working_dir,
     )
 
@@ -283,6 +291,7 @@ def write_property_reel_manifest(
     slug: str | None = None,
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
+    render_profile: str | None = None,
     working_dir: str | Path | None = None,
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
@@ -297,6 +306,7 @@ def write_property_reel_manifest(
         property_data,
         output_path=output_path,
         template=template,
+        render_profile=render_profile,
         working_dir=working_dir,
     )
 
