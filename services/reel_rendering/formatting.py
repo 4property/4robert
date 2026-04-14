@@ -27,6 +27,10 @@ OVERLAY_TEXT_COLORS: dict[str, str] = {
 }
 
 _PROPERTY_SIZE_NUMERIC_PATTERN = re.compile(r"^\d+(?:[.,]\d+)?$")
+_PROPERTY_SIZE_WITH_UNIT_PATTERN = re.compile(
+    r"^(?P<value>\d+(?:[.,]\d+)?)\s*(?:m²|mÂ²|m2|sqm|sq\.?\s*m)$",
+    re.IGNORECASE,
+)
 
 OVERLAY_FONT_SIZE_RULES: dict[str, tuple[float, int, float, int]] = {
     "status": (0.050, 68, 0.026, 34),
@@ -132,21 +136,25 @@ def format_property_size(value: str | None) -> str | None:
         return None
 
     compact = re.sub(r"\s+", " ", normalized)
-    normalized_lower = compact.lower()
-    if any(unit in normalized_lower for unit in ("m²", "m2", "sqm", "sq.m", "sq m")):
-        return compact
+    unit_match = _PROPERTY_SIZE_WITH_UNIT_PATTERN.fullmatch(compact)
+    if unit_match is not None:
+        return _format_square_meter_value(unit_match.group("value"))
 
     compact_numeric = compact.replace(",", ".")
     if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
-        try:
-            numeric_value = float(compact_numeric)
-        except ValueError:
-            return compact
-        if numeric_value.is_integer():
-            return f"{int(numeric_value)} sq m"
-        return f"{numeric_value:g} sq m"
+        return _format_square_meter_value(compact_numeric)
 
     return compact
+
+
+def _format_square_meter_value(value: str) -> str:
+    try:
+        numeric_value = float(value)
+    except ValueError:
+        return value
+    if numeric_value.is_integer():
+        return f"{int(numeric_value)} m²"
+    return f"{numeric_value:g} m²"
 
 
 @dataclass(frozen=True, slots=True)

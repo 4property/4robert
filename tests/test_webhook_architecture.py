@@ -49,7 +49,7 @@ from repositories.scripted_video_artifact_repository import (
 from repositories.sqlite_work_unit import SqliteWorkUnit
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
-from services.reel_rendering.formatting import escape_filter_path
+from services.reel_rendering.formatting import escape_filter_path, format_property_size
 from services.reel_rendering.filters import build_filter_complex, build_overlay_filter
 from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.manifest import build_property_reel_manifest_from_data
@@ -2065,8 +2065,13 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertIn("46 Example Street\\, Dublin 4", filter_text)
-        self.assertIn("285 sq m", filter_text)
-        self.assertLess(filter_text.index("46 Example Street\\, Dublin 4"), filter_text.index("285 sq m"))
+        self.assertIn("285 m²", filter_text)
+        self.assertLess(filter_text.index("46 Example Street\\, Dublin 4"), filter_text.index("285 m²"))
+
+    def test_format_property_size_normalizes_square_meter_units(self) -> None:
+        self.assertEqual(format_property_size("285"), "285 m²")
+        self.assertEqual(format_property_size("285 sqm"), "285 m²")
+        self.assertEqual(format_property_size("285 m2"), "285 m²")
 
     def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
@@ -2322,7 +2327,7 @@ class RenderOverlayTests(unittest.TestCase):
 
         address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
         self.assertTrue(address_block.clamped)
-        self.assertEqual(address_block.lines[-1], "285 sq m")
+        self.assertEqual(address_block.lines[-1], "285 m²")
         self.assertLessEqual(len(address_block.lines), address_block.max_lines)
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:
