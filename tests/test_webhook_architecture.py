@@ -1088,6 +1088,7 @@ class WebhookTransportTests(unittest.TestCase):
         host: str = "127.0.0.1",
         allowed_hosts: tuple[str, ...] = ("testserver",),
         security_disabled: bool = False,
+        enable_docs: bool = False,
         site_secrets: dict[str, str] | None = None,
     ) -> tuple[TestClient, RecordingDispatcher]:
         active_dispatcher = dispatcher or RecordingDispatcher()
@@ -1101,6 +1102,7 @@ class WebhookTransportTests(unittest.TestCase):
             allowed_hosts=allowed_hosts,
             site_secrets=site_secrets or {"site-a": "secret-a"},
             security_disabled=security_disabled,
+            enable_docs=enable_docs,
             worker_count=1,
         )
         app = create_fastapi_app(application=application)
@@ -1136,6 +1138,17 @@ class WebhookTransportTests(unittest.TestCase):
 
         self.assertEqual(docs_response.status_code, 404)
         self.assertEqual(openapi_response.status_code, 404)
+
+    def test_docs_can_be_enabled_explicitly_for_lan_hosts(self) -> None:
+        client, _ = self._build_client(host="0.0.0.0", enable_docs=True)
+
+        with client:
+            docs_response = client.get("/docs")
+            openapi_response = client.get("/openapi.json")
+
+        self.assertEqual(docs_response.status_code, 200)
+        self.assertIn("Swagger UI", docs_response.text)
+        self.assertEqual(openapi_response.status_code, 200)
 
     def test_openapi_includes_webhook_examples_and_header_docs(self) -> None:
         client, _ = self._build_client(host="127.0.0.1")

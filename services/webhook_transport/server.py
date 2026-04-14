@@ -20,6 +20,7 @@ from config import (
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
     WEBHOOK_ALLOWED_HOSTS,
     WEBHOOK_DISABLE_SECURITY,
+    WEBHOOK_ENABLE_DOCS,
     WEBHOOK_FORWARDED_ALLOW_IPS,
     WEBHOOK_GOHIGHLEVEL_ACCESS_TOKEN_HEADER,
     WEBHOOK_GOHIGHLEVEL_LOCATION_ID_HEADER,
@@ -67,6 +68,7 @@ class WordPressWebhookApplication:
         site_secrets: dict[str, str] | None = None,
         allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
+        enable_docs: bool = WEBHOOK_ENABLE_DOCS,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -94,6 +96,7 @@ class WordPressWebhookApplication:
         self.site_secrets = dict(site_secrets or WEBHOOK_SITE_SECRETS)
         self.allowed_hosts = tuple(allowed_hosts)
         self.security_disabled = security_disabled
+        self.enable_docs = bool(enable_docs)
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.timestamp_tolerance_seconds = timestamp_tolerance_seconds
         self.max_payload_bytes = max_payload_bytes
@@ -274,6 +277,7 @@ class WordPressWebhookServer:
         site_secrets: dict[str, str] | None = None,
         allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
+        enable_docs: bool = WEBHOOK_ENABLE_DOCS,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -296,6 +300,7 @@ class WordPressWebhookServer:
             site_secrets=site_secrets,
             allowed_hosts=allowed_hosts,
             security_disabled=security_disabled,
+            enable_docs=enable_docs,
             shutdown_timeout_seconds=shutdown_timeout_seconds,
             timestamp_tolerance_seconds=timestamp_tolerance_seconds,
             max_payload_bytes=max_payload_bytes,
@@ -319,11 +324,15 @@ def create_fastapi_app(
         finally:
             application.stop()
 
+    docs_enabled = _should_enable_docs(
+        host=application.host,
+        enable_docs=application.enable_docs,
+    )
     app = FastAPI(
         title="CPIHED Webhook API",
-        docs_url="/docs" if _should_enable_local_docs(application.host) else None,
+        docs_url="/docs" if docs_enabled else None,
         redoc_url=None,
-        openapi_url="/openapi.json" if _should_enable_local_docs(application.host) else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
     allowed_hosts = _resolve_allowed_hosts(application)
@@ -730,7 +739,13 @@ def _resolve_allowed_hosts(application: WordPressWebhookApplication) -> tuple[st
     return tuple(normalized)
 
 
-def _should_enable_local_docs(host: str) -> bool:
+def _should_enable_docs(*, host: str, enable_docs: bool) -> bool:
+    if enable_docs:
+        return True
+    return _is_local_docs_host(host)
+
+
+def _is_local_docs_host(host: str) -> bool:
     normalized_host = str(host or "").strip().lower()
     if not normalized_host:
         return False

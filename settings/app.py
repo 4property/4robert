@@ -128,6 +128,10 @@ class AppSettings(BaseSettings):
         False,
         validation_alias="WEBHOOK_DISABLE_SECURITY",
     )
+    webhook_enable_docs: bool = Field(
+        False,
+        validation_alias="WEBHOOK_ENABLE_DOCS",
+    )
     webhook_worker_count: int = Field(
         1,
         validation_alias="WEBHOOK_WORKER_COUNT",
