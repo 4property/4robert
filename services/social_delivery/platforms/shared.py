@@ -45,7 +45,7 @@ def build_google_business_profile_description(property_item, property_url: str) 
 
 
 def build_default_title(property_item) -> str | None:
-    return _clean_text(property_item.title) or _clean_text(property_item.slug)
+    return _clean_text(property_item.title)
 
 
 def build_default_upload_file_name(title: str | None) -> str | None:
@@ -84,8 +84,12 @@ def build_youtube_gohighlevel_payload(
     target_url: str | None,
     title: str | None,
 ) -> dict[str, object]:
-    del target_url, title
-    return {"youtubePostDetails": {"type": "video"}}
+    del target_url
+    youtube_post_details: dict[str, object] = {"type": "video"}
+    normalized_title = _clean_text(title)
+    if normalized_title is not None:
+        youtube_post_details["title"] = normalized_title
+    return {"youtubePostDetails": youtube_post_details}
 
 
 def _render_site_label(property_url: str | None) -> str | None:

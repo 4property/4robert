@@ -246,7 +246,7 @@ class PlatformRegistryTests(unittest.TestCase):
         )
         self.assertEqual(
             config.build_gohighlevel_payload(None, "46 Example Street, Dublin 4"),
-            {"youtubePostDetails": {"type": "video"}},
+            {"youtubePostDetails": {"type": "video", "title": "46 Example Street, Dublin 4"}},
         )
 
     def test_google_business_profile_config_stays_on_post_and_poster(self) -> None:
@@ -278,6 +278,15 @@ class PlatformRegistryTests(unittest.TestCase):
                 }
             },
         )
+
+    def test_default_platform_title_uses_property_address_not_slug(self) -> None:
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+        property_item.title = None
+        config = get_platform_config("youtube")
+
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertIsNone(config.build_title(property_item))
 
 
 class GoHighLevelPublisherRetryTests(unittest.TestCase):
@@ -1190,7 +1199,10 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
         self.assertEqual(created_posts[0]["type"], "post")
         self.assertEqual(created_posts[0]["accountIds"], ["yt-1"])
         self.assertNotIn("title", created_posts[0])
-        self.assertEqual(created_posts[0]["youtubePostDetails"], {"type": "video"})
+        self.assertEqual(
+            created_posts[0]["youtubePostDetails"],
+            {"type": "video", "title": "46 Example Street, Dublin 4"},
+        )
         self.assertEqual(len(upload_requests), 1)
         self.assertIn(b'filename="46 Example Street, Dublin 4.mp4"', upload_requests[0])
         self.assertIn(b'name="name"', upload_requests[0])
