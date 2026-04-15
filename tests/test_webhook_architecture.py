@@ -49,7 +49,12 @@ from repositories.scripted_video_artifact_repository import (
 from repositories.sqlite_work_unit import SqliteWorkUnit
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
-from services.reel_rendering.formatting import escape_filter_path, format_property_size
+from services.reel_rendering.formatting import (
+    build_property_header_details_line,
+    escape_filter_path,
+    format_property_size,
+    format_property_size_header,
+)
 from services.reel_rendering.filters import build_filter_complex, build_overlay_filter
 from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.manifest import build_property_reel_manifest_from_data
@@ -826,6 +831,40 @@ class WorkflowPersistenceTests(unittest.TestCase):
             staging_exists = staging_dir.exists()
 
         self.assertTrue(staging_exists)
+
+    def test_local_media_publish_requires_poster_for_reel_artifacts(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            service = DefaultPropertyInfoService(
+                workspace_dir,
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+                property_url_template="https://{site_id}/property/{slug}",
+                property_url_tracking_params={},
+                social_publishing_enabled=True,
+            )
+            context = service.ingest_property(build_job())
+            staging_dir = workspace_dir / "staging"
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            staged_manifest_path = staging_dir / "sample-property-reel.json"
+            staged_media_path = staging_dir / "sample-property-reel.mp4"
+            staged_manifest_path.write_text("{}", encoding="utf-8")
+            staged_media_path.write_bytes(b"video")
+
+            publisher = FileSystemMediaPublisher(
+                unit_of_work_factory=build_unit_of_work_factory(workspace_dir),
+            )
+
+            with self.assertRaises(ValidationError) as error_context:
+                publisher.publish_media(
+                    context,
+                    RenderedMediaArtifact(
+                        staging_dir=staging_dir,
+                        media_path=staged_media_path,
+                        metadata_path=staged_manifest_path,
+                        revision_id="revision-1",
+                    ),
+                )
+
+        self.assertEqual(error_context.exception.code, "POSTER_REQUIRED")
 
     def test_media_preparation_cleanup_removes_selected_dir_when_flag_is_enabled(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -2085,7 +2124,7 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertNotIn("color=black@0.40:t=fill:enable=", filter_text)
         self.assertLess(filter_text.index("FOR SALE"), filter_text.index("650\\,000"))
 
-    def test_overlay_filter_renders_property_size_below_address(self) -> None:
+    def test_overlay_filter_renders_header_details_below_address(self) -> None:
         property_data = PropertyRenderData(
             site_id="ckp.ie",
             property_id=170800,
@@ -2122,13 +2161,50 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertIn("46 Example Street\\, Dublin 4", filter_text)
-        self.assertIn("285 m²", filter_text)
-        self.assertLess(filter_text.index("46 Example Street\\, Dublin 4"), filter_text.index("285 m²"))
+        self.assertIn("285m2 | 3 bedrooms | 2 baths", filter_text)
+        self.assertLess(
+            filter_text.index("46 Example Street\\, Dublin 4"),
+            filter_text.index("285m2 | 3 bedrooms | 2 baths"),
+        )
 
     def test_format_property_size_normalizes_square_meter_units(self) -> None:
         self.assertEqual(format_property_size("285"), "285 m²")
         self.assertEqual(format_property_size("285 sqm"), "285 m²")
         self.assertEqual(format_property_size("285 m2"), "285 m²")
+
+    def test_format_property_size_header_compacts_square_meter_units(self) -> None:
+        self.assertEqual(format_property_size_header("285"), "285m2")
+        self.assertEqual(format_property_size_header("285 sqm"), "285m2")
+        self.assertEqual(format_property_size_header("285 m2"), "285m2")
+
+    def test_build_property_header_details_line_skips_zero_counts_and_uses_singular_bath(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=0,
+            bathrooms=1,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="122",
+        )
+
+        self.assertEqual(build_property_header_details_line(property_data), "122m2 | 1 bath")
 
     def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
@@ -2383,9 +2459,60 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
+        address_meta_block = next(
+            block for block in overlay_layout.text_blocks if block.block == "address_meta"
+        )
         self.assertTrue(address_block.clamped)
-        self.assertEqual(address_block.lines[-1], "285 m²")
+        self.assertEqual(address_meta_block.lines[0], "285m2 | 3 bedrooms | 2 baths")
+        self.assertEqual(address_block.font_size - address_meta_block.font_size, 2)
         self.assertLessEqual(len(address_block.lines), address_block.max_lines)
+
+    def test_overlay_layout_renders_header_details_two_points_smaller_than_title(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            agency_psra="PSRA-1234",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="285",
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=False,
+            cover_caption=None,
+        )
+
+        address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
+        address_meta_block = next(
+            block for block in overlay_layout.text_blocks if block.block == "address_meta"
+        )
+        self.assertEqual(address_meta_block.lines[0], "285m2 | 3 bedrooms | 2 baths")
+        self.assertEqual(address_block.font_size - address_meta_block.font_size, 2)
+        self.assertGreater(address_meta_block.y, address_block.y)
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:
         with workspace_temp_dir() as workspace_dir:

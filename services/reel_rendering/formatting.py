@@ -147,6 +147,23 @@ def format_property_size(value: str | None) -> str | None:
     return compact
 
 
+def format_property_size_header(value: str | None) -> str | None:
+    normalized = clean_text(value)
+    if not normalized:
+        return None
+
+    compact = re.sub(r"\s+", " ", normalized)
+    unit_match = _PROPERTY_SIZE_WITH_UNIT_PATTERN.fullmatch(compact)
+    if unit_match is not None:
+        return _format_square_meter_header_value(unit_match.group("value"))
+
+    compact_numeric = compact.replace(",", ".")
+    if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
+        return _format_square_meter_header_value(compact_numeric)
+
+    return compact.replace(" ", "")
+
+
 def _format_square_meter_value(value: str) -> str:
     try:
         numeric_value = float(value)
@@ -155,6 +172,16 @@ def _format_square_meter_value(value: str) -> str:
     if numeric_value.is_integer():
         return f"{int(numeric_value)} m²"
     return f"{numeric_value:g} m²"
+
+
+def _format_square_meter_header_value(value: str) -> str:
+    try:
+        numeric_value = float(value)
+    except ValueError:
+        return value
+    if numeric_value.is_integer():
+        return f"{int(numeric_value)}m2"
+    return f"{numeric_value:g}m2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +208,40 @@ def fit_wrapped_lines(value: str | None, *, width: int, max_lines: int) -> Wrapp
 
 def wrap_lines(value: str | None, *, width: int, max_lines: int) -> list[str]:
     return list(fit_wrapped_lines(value, width=width, max_lines=max_lines).lines)
+
+
+def _normalize_positive_count(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        numeric_value = int(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric_value <= 0:
+        return None
+    return numeric_value
+
+
+def build_property_header_details_line(property_data: PropertyRenderData) -> str | None:
+    facts: list[str] = []
+
+    property_size = format_property_size_header(property_data.property_size)
+    if property_size:
+        facts.append(property_size)
+
+    bedrooms = _normalize_positive_count(property_data.bedrooms)
+    if bedrooms is not None:
+        bedroom_label = "bedroom" if bedrooms == 1 else "bedrooms"
+        facts.append(f"{bedrooms} {bedroom_label}")
+
+    bathrooms = _normalize_positive_count(property_data.bathrooms)
+    if bathrooms is not None:
+        bathroom_label = "bath" if bathrooms == 1 else "baths"
+        facts.append(f"{bathrooms} {bathroom_label}")
+
+    if not facts:
+        return None
+    return " | ".join(facts)
 
 
 def build_property_facts_line(property_data: PropertyRenderData) -> str:
@@ -252,6 +313,7 @@ __all__ = [
     "WrappedTextResult",
     "build_agent_lines",
     "build_display_price",
+    "build_property_header_details_line",
     "build_property_facts_line",
     "build_property_overlay_facts_line",
     "build_status_ribbon_text",
@@ -260,6 +322,7 @@ __all__ = [
     "escape_filter_path",
     "fit_wrapped_lines",
     "format_price",
+    "format_property_size_header",
     "format_property_size",
     "resolve_agency_logo_box_size",
     "resolve_agent_image_size",

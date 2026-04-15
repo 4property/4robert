@@ -1480,6 +1480,21 @@ class FileSystemMediaPublisher:
     ) -> Path | None:
         poster_source_path = rendered_media.staging_dir / f"{context.property.slug}-poster.jpg"
         if not poster_source_path.exists() or poster_source_path.stat().st_size == 0:
+            if rendered_media.artifact_kind == "reel_video":
+                raise ValidationError(
+                    "A reel render must include a non-empty poster artifact.",
+                    code="POSTER_REQUIRED",
+                    context=build_log_context(
+                        site_id=context.site_id,
+                        property_id=context.property.id,
+                        artifact_kind=rendered_media.artifact_kind,
+                        poster_source_path=str(poster_source_path),
+                    ),
+                    hint=(
+                        "Verify poster rendering completed successfully before the local publish step "
+                        "and keep the staging poster alongside the reel output."
+                    ),
+                )
             return None
         poster_output_dir = cls._resolve_output_dir(context, "poster_image")
         poster_output_dir.mkdir(parents=True, exist_ok=True)

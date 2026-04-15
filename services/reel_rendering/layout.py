@@ -7,7 +7,7 @@ from services.ai_photo_selection.prompting import normalize_caption
 from services.reel_rendering.formatting import (
     build_agent_lines,
     build_display_price,
-    format_property_size,
+    build_property_header_details_line,
     build_status_ribbon_text,
     clean_text,
     fit_wrapped_lines,
@@ -269,100 +269,172 @@ def _measure_text_block(
     )
 
 
-def _measure_address_block(
+def _build_measured_address_blocks(
+    *,
+    address_text: str | None,
+    details_text: str | None,
+    address_lines: tuple[str, ...],
+    details_lines: tuple[str, ...],
+    address_font_size: int,
+    details_font_size: int,
+    usable_width: int,
+    max_lines: int,
+    clamped: bool,
+    warning: LayoutWarning | None,
+) -> tuple[_MeasuredTextBlock, ...]:
+    blocks: list[_MeasuredTextBlock] = []
+    warning_target = "address" if address_lines else "address_meta"
+
+    if address_lines:
+        address_line_gap = address_font_size + max(8, round(address_font_size * 0.2))
+        address_box_height = address_font_size + (
+            (len(address_lines) - 1) * address_line_gap if len(address_lines) > 1 else 0
+        )
+        blocks.append(
+            _MeasuredTextBlock(
+                block="address",
+                text=address_text or details_text or "",
+                lines=address_lines,
+                font_size=address_font_size,
+                line_gap=address_line_gap,
+                box_height=address_box_height,
+                max_width=usable_width,
+                max_lines=max_lines,
+                clamped=clamped,
+                warning=warning if warning is not None and warning_target == "address" else None,
+            )
+        )
+
+    if details_lines:
+        details_line_gap = details_font_size + max(8, round(details_font_size * 0.2))
+        details_box_height = details_font_size + (
+            (len(details_lines) - 1) * details_line_gap if len(details_lines) > 1 else 0
+        )
+        blocks.append(
+            _MeasuredTextBlock(
+                block="address_meta",
+                text=details_text or address_text or "",
+                lines=details_lines,
+                font_size=details_font_size,
+                line_gap=details_line_gap,
+                box_height=details_box_height,
+                max_width=usable_width,
+                max_lines=1,
+                clamped=clamped,
+                warning=warning if warning is not None and warning_target == "address_meta" else None,
+            )
+        )
+
+    return tuple(blocks)
+
+
+def _measure_address_blocks(
     *,
     address: str | None,
-    property_size: str | None,
+    details: str | None,
     usable_width: int,
     max_lines: int,
     max_font_size: int,
     min_font_size: int,
     min_chars: int,
-) -> _MeasuredTextBlock | None:
+) -> tuple[_MeasuredTextBlock, ...]:
     normalized_address = clean_text(address)
-    normalized_size = format_property_size(property_size)
-    if not normalized_address and not normalized_size:
-        return None
+    normalized_details = clean_text(details)
+    if not normalized_address and not normalized_details:
+        return ()
 
-    full_text = "\n".join(part for part in (normalized_address, normalized_size) if part)
+    full_text = "\n".join(part for part in (normalized_address, normalized_details) if part)
 
-    for font_size in _candidate_font_sizes(max_font_size, min_font_size):
-        width_chars = _wrap_width_from_pixels(
+    for address_font_size in _candidate_font_sizes(max_font_size, min_font_size):
+        address_width_chars = _wrap_width_from_pixels(
             usable_width=usable_width,
-            font_size=font_size,
+            font_size=address_font_size,
             min_chars=min_chars,
         )
-        size_lines: tuple[str, ...] = ()
-        size_clamped = False
-        reserved_size_lines = 0
-        if normalized_size:
-            wrapped_size = fit_wrapped_lines(normalized_size, width=width_chars, max_lines=1)
-            size_lines = wrapped_size.lines
-            size_clamped = wrapped_size.clamped
-            reserved_size_lines = len(size_lines) or 1
+        details_font_size = max(1, address_font_size - 2)
+        details_lines: tuple[str, ...] = ()
+        details_clamped = False
+        reserved_detail_lines = 0
+        if normalized_details:
+            detail_width_chars = _wrap_width_from_pixels(
+                usable_width=usable_width,
+                font_size=details_font_size,
+                min_chars=max(12, min_chars - 4),
+            )
+            wrapped_details = fit_wrapped_lines(normalized_details, width=detail_width_chars, max_lines=1)
+            details_lines = wrapped_details.lines
+            details_clamped = wrapped_details.clamped
+            reserved_detail_lines = len(details_lines) or 1
 
-        address_lines_allowed = max(1, max_lines - reserved_size_lines)
-        wrapped_address = fit_wrapped_lines(
-            normalized_address,
-            width=width_chars,
-            max_lines=address_lines_allowed,
-        ) if normalized_address else None
+        address_lines_allowed = max(1, max_lines - reserved_detail_lines)
+        wrapped_address = (
+            fit_wrapped_lines(
+                normalized_address,
+                width=address_width_chars,
+                max_lines=address_lines_allowed,
+            )
+            if normalized_address
+            else None
+        )
         address_lines = () if wrapped_address is None else wrapped_address.lines
-        clamped = size_clamped or (False if wrapped_address is None else wrapped_address.clamped)
-        combined_lines = address_lines + size_lines
-        line_gap = font_size + max(8, round(font_size * 0.2))
-        box_height = font_size + ((len(combined_lines) - 1) * line_gap if combined_lines else 0)
+        clamped = details_clamped or (False if wrapped_address is None else wrapped_address.clamped)
         if not clamped:
-            return _MeasuredTextBlock(
-                block="address",
-                text=full_text,
-                lines=combined_lines,
-                font_size=font_size,
-                line_gap=line_gap,
-                box_height=box_height,
-                max_width=usable_width,
+            return _build_measured_address_blocks(
+                address_text=normalized_address,
+                details_text=normalized_details,
+                address_lines=address_lines,
+                details_lines=details_lines,
+                address_font_size=address_font_size,
+                details_font_size=details_font_size,
+                usable_width=usable_width,
                 max_lines=max_lines,
                 clamped=False,
+                warning=None,
             )
 
     min_size = min(max_font_size, max_font_size if max_font_size <= min_font_size else min_font_size)
-    width_chars = _wrap_width_from_pixels(
+    details_font_size = max(1, min_size - 2)
+    address_width_chars = _wrap_width_from_pixels(
         usable_width=usable_width,
         font_size=min_size,
         min_chars=min_chars,
     )
-    size_lines = ()
-    size_clamped = False
-    reserved_size_lines = 0
-    if normalized_size:
-        wrapped_size = fit_wrapped_lines(normalized_size, width=width_chars, max_lines=1)
-        size_lines = wrapped_size.lines
-        size_clamped = wrapped_size.clamped
-        reserved_size_lines = len(size_lines) or 1
-    address_lines_allowed = max(1, max_lines - reserved_size_lines)
-    wrapped_address = fit_wrapped_lines(
-        normalized_address,
-        width=width_chars,
-        max_lines=address_lines_allowed,
-    ) if normalized_address else None
+    details_lines = ()
+    reserved_detail_lines = 0
+    if normalized_details:
+        detail_width_chars = _wrap_width_from_pixels(
+            usable_width=usable_width,
+            font_size=details_font_size,
+            min_chars=max(12, min_chars - 4),
+        )
+        wrapped_details = fit_wrapped_lines(normalized_details, width=detail_width_chars, max_lines=1)
+        details_lines = wrapped_details.lines
+        reserved_detail_lines = len(details_lines) or 1
+    address_lines_allowed = max(1, max_lines - reserved_detail_lines)
+    wrapped_address = (
+        fit_wrapped_lines(
+            normalized_address,
+            width=address_width_chars,
+            max_lines=address_lines_allowed,
+        )
+        if normalized_address
+        else None
+    )
     address_lines = () if wrapped_address is None else wrapped_address.lines
-    combined_lines = address_lines + size_lines
-    line_gap = min_size + max(8, round(min_size * 0.2))
-    box_height = min_size + ((len(combined_lines) - 1) * line_gap if combined_lines else 0)
     warning = LayoutWarning(
         code="TEXT_CLAMPED",
         block="address",
         message="address was clamped to fit within the reel overlay.",
         original_text=full_text,
     )
-    return _MeasuredTextBlock(
-        block="address",
-        text=full_text,
-        lines=combined_lines,
-        font_size=min_size,
-        line_gap=line_gap,
-        box_height=box_height,
-        max_width=usable_width,
+    return _build_measured_address_blocks(
+        address_text=normalized_address,
+        details_text=normalized_details,
+        address_lines=address_lines,
+        details_lines=details_lines,
+        address_font_size=min_size,
+        details_font_size=details_font_size,
+        usable_width=usable_width,
         max_lines=max_lines,
         clamped=True,
         warning=warning,
@@ -394,6 +466,12 @@ def build_overlay_layout(
     header_text_width = panel_width - (panel_padding_x * 2)
     if has_ber_badge:
         header_text_width = max(260, header_text_width - ber_icon_width - ber_icon_gap)
+
+    address_max_font_size, address_min_font_size = resolve_font_size_bounds(
+        "address",
+        frame_height=height,
+        subtitle_font_size=settings.subtitle_font_size,
+    )
 
     top_blocks: list[_MeasuredTextBlock] = []
     for measured_block in (
@@ -431,26 +509,22 @@ def build_overlay_layout(
             )[1],
             min_chars=8,
         ),
-        _measure_address_block(
-            address=property_data.title,
-            property_size=property_data.property_size,
-            usable_width=header_text_width,
-            max_lines=4,
-            max_font_size=resolve_font_size_bounds(
-                "address",
-                frame_height=height,
-                subtitle_font_size=settings.subtitle_font_size,
-            )[0],
-            min_font_size=resolve_font_size_bounds(
-                "address",
-                frame_height=height,
-                subtitle_font_size=settings.subtitle_font_size,
-            )[1],
-            min_chars=18,
-        ),
     ):
         if measured_block is None:
             continue
+        top_blocks.append(measured_block)
+        if measured_block.warning is not None:
+            warnings.append(measured_block.warning)
+
+    for measured_block in _measure_address_blocks(
+        address=property_data.title,
+        details=build_property_header_details_line(property_data),
+        usable_width=header_text_width,
+        max_lines=4,
+        max_font_size=address_max_font_size,
+        min_font_size=address_min_font_size,
+        min_chars=18,
+    ):
         top_blocks.append(measured_block)
         if measured_block.warning is not None:
             warnings.append(measured_block.warning)

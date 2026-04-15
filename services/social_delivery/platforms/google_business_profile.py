@@ -4,7 +4,7 @@ from services.social_delivery.platforms.models import SocialPlatformConfig
 from services.social_delivery.platforms.shared import (
     build_default_title,
     build_default_upload_file_name,
-    build_empty_gohighlevel_payload,
+    build_google_business_profile_gohighlevel_payload,
     build_google_business_profile_description,
 )
 
@@ -19,7 +19,7 @@ PLATFORM_CONFIG = SocialPlatformConfig(
     build_description=build_google_business_profile_description,
     build_title=build_default_title,
     build_upload_file_name=build_default_upload_file_name,
-    build_gohighlevel_payload=build_empty_gohighlevel_payload,
+    build_gohighlevel_payload=build_google_business_profile_gohighlevel_payload,
 )
 
 

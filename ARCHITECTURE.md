@@ -11,12 +11,12 @@ CPIHED is a multi-site property media workflow triggered by WordPress webhooks.
    1. ingestion and normalization
    2. campaign planning
    3. asset preparation
-   4. reel rendering
+   4. reel rendering and companion poster generation
    5. local publish and external social delivery
 5. Local publish persists a durable media revision and emits an outbox event.
 6. Social delivery publishes through GoHighLevel to the configured platforms, recording `published`, `partial`, `failed`, or `skipped` outcomes per property.
 
-The current media output is always a reel video. `for_sale` and `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, and `let` use a short status reel with a single moving primary image.
+The current primary media output is always a reel video with a companion poster image. `for_sale` and `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, and `let` use a short status reel with a single moving primary image.
 
 ## Workflow State
 
@@ -83,7 +83,7 @@ Responsibilities:
 - decide render profile and asset strategy
 - generate deterministic copy through the `ContentGenerator` boundary
 - prepare curated or primary-only assets
-- render the reel
+- render the reel and its companion poster
 - publish locally and externally
 
 The deterministic copy generator is the default implementation today. It is intentionally isolated so future AI-generated captions, narration scripts, or overlay copy can be added without rewriting the renderer or social publisher.
@@ -116,9 +116,16 @@ Responsibilities:
 - select one location user and one account per platform
 - publish sequentially across the configured platforms
 - apply per-platform validation policies
+- publish Google Business Profile posts as poster-image posts with GoHighLevel GBP post details
 - treat missing accounts or unsupported platforms as partial/skipped results rather than fatal pipeline errors
 
 The job succeeds if at least one platform publishes successfully. Only total failure across all requested platforms fails the job.
+
+Google Business Profile is intentionally treated as an operational prerequisite rather than an in-app OAuth flow today. The GBP must already be connected to the target HighLevel sub-account in Social Planner / GBP Optimization before webhook-driven publishing begins. For future automation, HighLevel documents the sequence as:
+
+- start Google OAuth
+- get Google business locations
+- set the Google business location for the sub-account
 
 ## Persistence Model
 
@@ -143,8 +150,9 @@ Current roots:
 - `property_media/<site>/`
 - `property_media_raw/<site>/`
 - `generated_media/<site>/reels/`
+- `generated_media/<site>/posters/`
 
-`generated_media/<site>/reels/` is the canonical output location.
+`generated_media/<site>/reels/` and `generated_media/<site>/posters/` are the canonical durable output locations for property media.
 
 ## Logging and Error Model
 

@@ -2,7 +2,7 @@
 
 Webhook-driven property media pipeline for multi-site real estate content.
 
-It ingests WordPress property payloads, prepares images, renders short-form reels, stores durable media revisions, and publishes through GoHighLevel to the configured social platforms.
+It ingests WordPress property payloads, prepares images, renders short-form reels with companion posters, stores durable media revisions, and publishes through GoHighLevel to the configured social platforms.
 
 ## Current capabilities
 
@@ -11,7 +11,9 @@ It ingests WordPress property payloads, prepares images, renders short-form reel
 - keyed worker serialization per property
 - full reels for `for_sale` and `to_let`
 - short status reels for `sale_agreed`, `sold`, `let_agreed`, and `let`
+- poster generation persisted alongside every successful reel render
 - multi-platform publishing through GoHighLevel
+- Google Business Profile publishing through GoHighLevel using poster images
 - durable outbox events for future notifications and review workflows
 - manifest-level overlay layout auditing with safe text wrapping and clamp warnings
 
@@ -71,4 +73,8 @@ Generated at runtime and ignored by Git:
 - The webhook runtime is ready when core storage, queue, and ffmpeg checks pass.
 - Optional capabilities such as AI copy, AI narration, notifications, and review can stay disabled without blocking the core webhook workflow.
 - Captions are generated through a dedicated content-generation boundary so deterministic copy can be replaced later by an AI-backed implementation.
+- Durable reel output is `reel + poster`; a reel is not treated as a complete local artifact unless its companion poster exists too.
+- Keep `google_business_profile` in `SOCIAL_PUBLISHING_DEFAULT_PLATFORMS` if GBP posting is required in deployment.
+- Google Business Profile publishing requires the GBP to be connected to the target HighLevel sub-account in Social Planner / GBP Optimization before webhooks are sent.
+- For future GBP automation research, HighLevel's documented connection sequence is: start Google OAuth, get Google business locations, then set the Google business location for the sub-account.
 - Deployment guidance for Rocky Linux, including `systemd`, lives in `deploy/rocky-linux/README.md`.

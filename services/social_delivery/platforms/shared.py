@@ -63,6 +63,23 @@ def build_empty_gohighlevel_payload(target_url: str | None, title: str | None) -
     return {}
 
 
+def build_google_business_profile_gohighlevel_payload(
+    target_url: str | None,
+    title: str | None,
+) -> dict[str, object]:
+    del title
+    cleaned_target_url = _clean_text(target_url)
+    if cleaned_target_url is None:
+        return {}
+    return {
+        "gmbPostDetails": {
+            "gmbEventType": "STANDARD",
+            "actionType": "BOOK",
+            "url": cleaned_target_url,
+        }
+    }
+
+
 def build_youtube_gohighlevel_payload(
     target_url: str | None,
     title: str | None,
@@ -109,6 +126,7 @@ __all__ = [
     "build_default_title",
     "build_default_upload_file_name",
     "build_empty_gohighlevel_payload",
+    "build_google_business_profile_gohighlevel_payload",
     "build_google_business_profile_description",
     "build_youtube_gohighlevel_payload",
     "build_youtube_upload_file_name",

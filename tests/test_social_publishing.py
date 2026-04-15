@@ -265,7 +265,19 @@ class PlatformRegistryTests(unittest.TestCase):
         )
         self.assertEqual(config.build_title(property_item), "46 Example Street, Dublin 4")
         self.assertIsNone(config.build_upload_file_name("46 Example Street, Dublin 4"))
-        self.assertEqual(config.build_gohighlevel_payload(None, "46 Example Street, Dublin 4"), {})
+        self.assertEqual(
+            config.build_gohighlevel_payload(
+                "https://ckp.ie/property/sample-property",
+                "46 Example Street, Dublin 4",
+            ),
+            {
+                "gmbPostDetails": {
+                    "gmbEventType": "STANDARD",
+                    "actionType": "BOOK",
+                    "url": "https://ckp.ie/property/sample-property",
+                }
+            },
+        )
 
 
 class GoHighLevelPublisherRetryTests(unittest.TestCase):
@@ -1003,6 +1015,7 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
                             platform="google_business_profile",
                             media_path=poster_path,
                             description="GBP description",
+                            target_url="https://ckp.ie/property/sample-property",
                             social_post_type="post",
                             artifact_kind="poster_image",
                         ),
@@ -1017,6 +1030,14 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
         self.assertEqual(created_posts[0]["type"], "reel")
         self.assertEqual(created_posts[1]["accountIds"], ["gbp-1"])
         self.assertEqual(created_posts[1]["type"], "post")
+        self.assertEqual(
+            created_posts[1]["gmbPostDetails"],
+            {
+                "gmbEventType": "STANDARD",
+                "actionType": "BOOK",
+                "url": "https://ckp.ie/property/sample-property",
+            },
+        )
         platform_results = result.to_dict()["platform_results"]
         self.assertEqual(platform_results["facebook"]["artifact_kind"], "reel_video")
         self.assertEqual(platform_results["google_business_profile"]["artifact_kind"], "poster_image")
