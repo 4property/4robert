@@ -123,6 +123,35 @@ class DescriptionBuilderTests(unittest.TestCase):
         self.assertEqual(
             description,
             (
+                "Similar required? ckp.ie\n\n"
+                "Jane Doe\n"
+                "+353 1 234 5678\n"
+                "jane@example.com\n\n"
+                "Agency PSRA: X123456"
+            ),
+        )
+
+    def test_build_tiktok_description_keeps_site_label_for_to_let(self) -> None:
+        description = build_tiktok_description(
+            site_id="ckp.ie",
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            price="3000",
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            property_status="To Let",
+            agent_name="Jane Doe",
+            agent_email="jane@example.com",
+            agent_number="+353 1 234 5678",
+            agency_psra="X123456",
+            property_link="https://ckp.ie/property/sample-property",
+            property_url_template="https://{site_id}/property/{slug}",
+        )
+
+        self.assertEqual(
+            description,
+            (
                 "More properties on ckp.ie\n\n"
                 "Jane Doe\n"
                 "+353 1 234 5678\n"
@@ -218,7 +247,7 @@ class DescriptionBuilderTests(unittest.TestCase):
         )
 
         expected_description = (
-            "Property: https://ckp.ie/property/sample-property\n\n"
+            "Property: ckp.ie/property/sample-property\n\n"
             "Jane Doe\n"
             "+353 1 234 5678\n"
             "jane@example.com\n\n"
@@ -226,6 +255,35 @@ class DescriptionBuilderTests(unittest.TestCase):
         )
         self.assertEqual(facebook_description, expected_description)
         self.assertEqual(linkedin_description, expected_description)
+
+    def test_closed_listing_captions_switch_to_similar_required_site_url(self) -> None:
+        expected_description = (
+            "Similar required? ckp.ie\n\n"
+            "Jane Doe\n"
+            "+353 1 234 5678\n"
+            "jane@example.com\n\n"
+            "Agency PSRA: X123456"
+        )
+        for property_status in ("Sale Agreed", "Let Agreed", "Sold", "Let"):
+            property_item = Property.from_api_payload(build_property_payload(property_status=property_status))
+            facebook_description = build_platform_description_for_property(
+                property_item,
+                platform="facebook",
+                property_url="https://ckp.ie/property/sample-property",
+            )
+            linkedin_description = build_platform_description_for_property(
+                property_item,
+                platform="linkedin",
+                property_url="https://ckp.ie/property/sample-property",
+            )
+            youtube_description = build_platform_description_for_property(
+                property_item,
+                platform="youtube",
+                property_url="https://ckp.ie/property/sample-property",
+            )
+            self.assertEqual(facebook_description, expected_description)
+            self.assertEqual(linkedin_description, expected_description)
+            self.assertEqual(youtube_description, expected_description)
 
 
 class PlatformRegistryTests(unittest.TestCase):
@@ -257,7 +315,7 @@ class PlatformRegistryTests(unittest.TestCase):
         self.assertEqual(
             config.build_description(property_item, "https://ckp.ie/property/sample-property"),
             (
-                "Property: https://ckp.ie/property/sample-property\n\n"
+                "More properties on ckp.ie\n\n"
                 "Jane Doe\n"
                 "+353 1 234 5678\n"
                 "jane@example.com\n\n"

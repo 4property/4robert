@@ -27,6 +27,8 @@ OVERLAY_TEXT_COLORS: dict[str, str] = {
 }
 
 _PROPERTY_SIZE_NUMERIC_PATTERN = re.compile(r"^\d+(?:[.,]\d+)?$")
+_NORMALIZED_STATUS_PATTERN = re.compile(r"[\s_-]+")
+_SIMILAR_REQUIRED_STATUSES = frozenset({"sale agreed", "let agreed", "sold", "let"})
 _PROPERTY_SIZE_WITH_UNIT_PATTERN = re.compile(
     r"^(?P<value>\d+(?:[.,]\d+)?)\s*(?:m²|mÂ²|m2|sqm|sq\.?\s*m)$",
     re.IGNORECASE,
@@ -299,10 +301,37 @@ def build_status_ribbon_text(property_data: PropertyRenderData) -> str | None:
     return status.upper()
 
 
+def build_similar_required_subtitle(property_data: PropertyRenderData) -> str | None:
+    normalized_status = _normalize_listing_status(property_data.property_status)
+    if normalized_status not in _SIMILAR_REQUIRED_STATUSES:
+        return None
+
+    site_url = _extract_site_display_url(property_data.link) or clean_text(property_data.site_id)
+    if not site_url:
+        return None
+    return f"Similar required? {site_url}"
+
+
 def build_display_price(property_data: PropertyRenderData) -> str | None:
     if property_data.price_display_text is not None:
         return clean_text(property_data.price_display_text)
     return format_price(property_data.price)
+
+
+def _normalize_listing_status(value: str | None) -> str:
+    cleaned_value = clean_text(value)
+    if not cleaned_value:
+        return ""
+    return _NORMALIZED_STATUS_PATTERN.sub(" ", cleaned_value.lower()).strip()
+
+
+def _extract_site_display_url(url: str | None) -> str | None:
+    cleaned_url = clean_text(url)
+    if not cleaned_url:
+        return None
+    text = cleaned_url.removeprefix("http://").removeprefix("https://")
+    host, _, _ = text.partition("/")
+    return host or text
 
 
 __all__ = [
@@ -316,6 +345,7 @@ __all__ = [
     "build_property_header_details_line",
     "build_property_facts_line",
     "build_property_overlay_facts_line",
+    "build_similar_required_subtitle",
     "build_status_ribbon_text",
     "clean_text",
     "escape_drawtext_text",

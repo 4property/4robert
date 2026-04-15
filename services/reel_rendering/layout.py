@@ -9,6 +9,7 @@ from services.reel_rendering.formatting import (
     build_display_price,
     build_property_header_details_line,
     build_status_ribbon_text,
+    build_similar_required_subtitle,
     clean_text,
     fit_wrapped_lines,
     resolve_agency_logo_box_size,
@@ -739,9 +740,13 @@ def build_overlay_layout(
             - subtitle_gap_y
         )
         raw_segments = []
+        forced_subtitle = build_similar_required_subtitle(property_data)
         intro_duration = settings.intro_duration_seconds if settings.include_intro else 0.0
         if settings.include_intro:
-            intro_caption = normalize_caption(cover_caption if cover_caption is not None else slides[0].caption if slides else None, "")
+            intro_caption = _resolve_subtitle_caption(
+                forced_subtitle,
+                cover_caption if cover_caption is not None else slides[0].caption if slides else None,
+            )
             raw_segments.append((0.0, intro_duration, intro_caption))
         slide_start_offset = intro_duration
         for index, slide in enumerate(slides):
@@ -749,7 +754,7 @@ def build_overlay_layout(
                 (
                     slide_start_offset + (index * slide_duration),
                     slide_start_offset + ((index + 1) * slide_duration),
-                    normalize_caption(slide.caption, ""),
+                    _resolve_subtitle_caption(forced_subtitle, slide.caption),
                 )
             )
 
@@ -807,6 +812,15 @@ def build_overlay_layout(
         subtitle_segments=tuple(subtitle_segments),
         warnings=tuple(warnings),
     )
+
+
+def _resolve_subtitle_caption(
+    forced_subtitle: str | None,
+    fallback_caption: str | None,
+) -> str:
+    if forced_subtitle is not None:
+        return clean_text(forced_subtitle) or ""
+    return normalize_caption(fallback_caption, "")
 
 
 __all__ = [

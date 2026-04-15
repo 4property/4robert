@@ -43,6 +43,7 @@ def build_base_social_description(
     agent_mobile: str | None = None,
     agent_number: str | None = None,
     agency_psra: str | None = None,
+    property_status: str | None = None,
     property_link: str | None,
     property_url_template: str,
     tracking_query_params: Mapping[str, str] | None = None,
@@ -58,6 +59,7 @@ def build_base_social_description(
     return build_common_description(
         _build_property_view(
             slug=slug,
+            property_status=property_status,
             agent_name=agent_name,
             agent_email=agent_email,
             agent_mobile=agent_mobile,
@@ -78,6 +80,7 @@ def build_platform_description(
     agent_mobile: str | None = None,
     agent_number: str | None = None,
     agency_psra: str | None = None,
+    property_status: str | None = None,
     property_link: str | None,
     property_url_template: str,
     tracking_query_params: Mapping[str, str] | None = None,
@@ -92,6 +95,7 @@ def build_platform_description(
     )
     property_view = _build_property_view(
         slug=slug,
+        property_status=property_status,
         agent_name=agent_name,
         agent_email=agent_email,
         agent_mobile=agent_mobile,
@@ -262,6 +266,7 @@ def build_tiktok_description_for_record(
             slug=record.slug,
             title=record.title,
             price=record.price,
+            property_status=record.property_status,
             agent_name=record.agent_name,
             agent_email=record.agent_email,
             agent_mobile=record.agent_mobile,
@@ -291,6 +296,7 @@ def _build_property_view(
     slug: str,
     title: str | None = None,
     price: str | None = None,
+    property_status: str | None = None,
     agent_name: str | None = None,
     agent_email: str | None = None,
     agent_mobile: str | None = None,
@@ -301,6 +307,7 @@ def _build_property_view(
         slug=slug,
         title=title,
         price=price,
+        property_status=property_status,
         agent_name=agent_name,
         agent_email=agent_email,
         agent_mobile=agent_mobile,

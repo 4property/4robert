@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from models.property import Property
 
@@ -107,10 +107,17 @@ def _render_property_url(context: PropertyCaptionContext) -> str | None:
 
 
 def _render_property_link(context: PropertyCaptionContext) -> str | None:
-    property_url = _clean_text(context.property_url)
+    property_url = _format_display_url(context.property_url)
     if property_url is None:
         return None
     return f"Property: {property_url}"
+
+
+def _render_similar_required(context: PropertyCaptionContext) -> str | None:
+    site_url = _extract_site_url(context.property_url)
+    if site_url is None:
+        return None
+    return f"Similar required? {site_url}"
 
 
 def _render_agent_name(context: PropertyCaptionContext) -> str | None:
@@ -156,6 +163,39 @@ def _extract_site_label(property_url: str | None) -> str | None:
     return fallback_host or cleaned_url
 
 
+def _extract_site_url(property_url: str | None) -> str | None:
+    cleaned_url = _clean_text(property_url)
+    if cleaned_url is None:
+        return None
+
+    parsed_url = urlsplit(cleaned_url)
+    if parsed_url.scheme and parsed_url.netloc:
+        return parsed_url.netloc
+
+    fallback_host = cleaned_url.split("/", 1)[0].strip()
+    return fallback_host or cleaned_url
+
+
+def _format_display_url(url: str | None) -> str | None:
+    cleaned_url = _clean_text(url)
+    if cleaned_url is None:
+        return None
+
+    parsed_url = urlsplit(cleaned_url)
+    if parsed_url.scheme and parsed_url.netloc:
+        return urlunsplit(
+            (
+                "",
+                parsed_url.netloc,
+                parsed_url.path,
+                parsed_url.query,
+                parsed_url.fragment,
+            )
+        ).lstrip("//")
+
+    return cleaned_url.removeprefix("http://").removeprefix("https://")
+
+
 DEFAULT_PROPERTY_CAPTION_LAYOUT: CaptionLayout = (
     ("property_url",),
     (),
@@ -167,6 +207,7 @@ DEFAULT_PROPERTY_CAPTION_LAYOUT: CaptionLayout = (
 _FIELD_RENDERERS: dict[str, Callable[[PropertyCaptionContext], str | None]] = {
     "property_url": _render_property_url,
     "property_link": _render_property_link,
+    "similar_required": _render_similar_required,
     "agent_name": _render_agent_name,
     "agent_phone": _render_agent_phone,
     "agent_email": _render_agent_email,

@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from urllib.parse import urlsplit
 
 from services.social_delivery.post_copy import build_property_caption
 
 TIKTOK_MAX_DESCRIPTION_LENGTH = 150
+_NORMALIZED_STATUS_PATTERN = re.compile(r"[\s_-]+")
+_SIMILAR_REQUIRED_STATUSES = frozenset({"sale agreed", "let agreed", "sold", "let"})
+_SIMILAR_REQUIRED_LAYOUT = (
+    ("similar_required",),
+    (),
+    ("agent_name", "agent_phone", "agent_email"),
+    (),
+    ("agency_psra",),
+)
+_PROPERTY_LINK_LAYOUT = (
+    ("property_link",),
+    (),
+    ("agent_name", "agent_phone", "agent_email"),
+    (),
+    ("agency_psra",),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +30,7 @@ class SocialPlatformPropertyView:
     slug: str
     title: str | None = None
     price: str | None = None
+    property_status: str | None = None
     agent_name: str | None = None
     agent_email: str | None = None
     agent_mobile: str | None = None
@@ -27,6 +45,7 @@ def build_common_description(property_item, property_url: str) -> str:
         agent_phone=property_item.agent_mobile or property_item.agent_number,
         agent_email=property_item.agent_email,
         agency_psra=property_item.agency_psra,
+        layout=_resolve_caption_layout(property_item),
     )
 
 
@@ -37,13 +56,7 @@ def build_property_link_description(property_item, property_url: str) -> str:
         agent_phone=property_item.agent_mobile or property_item.agent_number,
         agent_email=property_item.agent_email,
         agency_psra=property_item.agency_psra,
-        layout=(
-            ("property_link",),
-            (),
-            ("agent_name", "agent_phone", "agent_email"),
-            (),
-            ("agency_psra",),
-        ),
+        layout=_resolve_caption_layout(property_item, default_layout=_PROPERTY_LINK_LAYOUT),
     )
 
 
@@ -107,6 +120,26 @@ def _render_site_label(property_url: str | None) -> str | None:
     if site_label is None:
         return None
     return f"More properties on {site_label}"
+
+
+def _resolve_caption_layout(property_item, *, default_layout=None):
+    if _uses_similar_required_intro(getattr(property_item, "property_status", None)):
+        return _SIMILAR_REQUIRED_LAYOUT
+    return default_layout
+
+
+def _uses_similar_required_intro(property_status: str | None) -> bool:
+    normalized_status = _normalize_status(property_status)
+    if not normalized_status:
+        return False
+    return normalized_status in _SIMILAR_REQUIRED_STATUSES
+
+
+def _normalize_status(property_status: str | None) -> str:
+    cleaned_status = _clean_text(property_status)
+    if cleaned_status is None:
+        return ""
+    return _NORMALIZED_STATUS_PATTERN.sub(" ", cleaned_status.lower()).strip()
 
 
 def _clean_text(value: str | None) -> str | None:

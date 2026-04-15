@@ -2624,6 +2624,54 @@ class StatusReelRenderTests(unittest.TestCase):
         self.assertIn("SALE AGREED", filter_text)
         self.assertNotIn("650\\,000", filter_text)
 
+    def test_status_reel_filter_uses_similar_required_as_subtitle(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="Let Agreed",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label=None,
+            property_area_label=None,
+            property_county_label=None,
+            eircode=None,
+            banner_text="LET AGREED",
+            price_display_text="",
+        )
+        template = build_reel_template_for_render_profile("let_agreed_status_reel")
+        slide = PropertyReelSlide(
+            image_path=Path("primary_image.jpg"),
+            caption="Bright open-plan living area.",
+        )
+
+        filter_text = build_filter_complex(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_frames=120,
+            slide_duration=template.seconds_per_slide,
+            logo_input_index=None,
+            agent_image_input_index=1,
+            ber_icon_input_index=2,
+        )
+
+        self.assertIn("Similar required? ckp.ie", filter_text)
+        self.assertNotIn("Similar required? ckp.ie.", filter_text)
+        self.assertNotIn("Bright open-plan living area.", filter_text)
+
     def test_full_reel_filter_supports_intro_without_cover_logo_input(self) -> None:
         property_data = PropertyRenderData(
             site_id="ckp.ie",
