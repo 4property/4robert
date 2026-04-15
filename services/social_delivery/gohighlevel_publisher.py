@@ -245,6 +245,7 @@ class GoHighLevelPublisher:
 
             eligible_accounts = accounts_by_platform.get(platform, ())
             if not eligible_accounts:
+                available_platforms = tuple(sorted(accounts_by_platform))
                 outcomes.append(
                     PlatformPublishOutcome(
                         platform=platform,
@@ -254,13 +255,24 @@ class GoHighLevelPublisher:
                         warnings=platform_warnings,
                         user_id=selected_user.id,
                         user_display_name=selected_user.display_name,
-                        message=f"No connected {platform} account was found for this GoHighLevel location.",
+                        message=(
+                            f"No connected {platform} account was found for this GoHighLevel location."
+                            if not available_platforms
+                            else (
+                                f"No connected {platform} account was found for this GoHighLevel location. "
+                                f"Available connected platforms: {', '.join(available_platforms)}."
+                            )
+                        ),
                     )
                 )
                 logger.warning(
-                    "Skipping GoHighLevel publish for platform %s at location %s because no active account was found.",
+                    (
+                        "Skipping GoHighLevel publish for platform %s at location %s because no active account "
+                        "was found. Available connected platforms: %s."
+                    ),
                     platform,
                     request.location_id,
+                    ", ".join(available_platforms) if available_platforms else "<none>",
                 )
                 continue
 

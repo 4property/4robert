@@ -10,7 +10,17 @@ from services.social_delivery.platforms.shared import (
 
 PLATFORM_CONFIG = SocialPlatformConfig(
     platform="google_business_profile",
-    aliases=("gmb", "gbp"),
+    aliases=(
+        "gmb",
+        "gbp",
+        "google",
+        "google-business-profile",
+        "google_business_profile",
+        "googlebusinessprofile",
+        "google-my-business",
+        "google_my_business",
+        "googlemybusiness",
+    ),
     default_artifact_kind="poster_image",
     default_social_post_type="post",
     allowed_artifact_kinds=("poster_image",),

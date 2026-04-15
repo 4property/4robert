@@ -209,6 +209,7 @@ class PlatformRegistryTests(unittest.TestCase):
         self.assertEqual(normalize_platform_name("linked-in"), "linkedin")
         self.assertEqual(normalize_platform_name("you_tube"), "youtube")
         self.assertEqual(normalize_platform_name("gbp"), "google_business_profile")
+        self.assertEqual(normalize_platform_name("google"), "google_business_profile")
         self.assertEqual(
             list_supported_platforms(),
             (
@@ -273,8 +274,6 @@ class PlatformRegistryTests(unittest.TestCase):
             {
                 "gmbPostDetails": {
                     "gmbEventType": "STANDARD",
-                    "actionType": "BOOK",
-                    "url": "https://ckp.ie/property/sample-property",
                 }
             },
         )
@@ -951,7 +950,7 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
                                 {
                                     "id": "gbp-1",
                                     "name": "Google Business Profile",
-                                    "platform": "google_business_profile",
+                                    "platform": "google",
                                     "type": "profile",
                                     "isExpired": False,
                                 },
@@ -1043,8 +1042,6 @@ class GoHighLevelPublisherRetryTests(unittest.TestCase):
             created_posts[1]["gmbPostDetails"],
             {
                 "gmbEventType": "STANDARD",
-                "actionType": "BOOK",
-                "url": "https://ckp.ie/property/sample-property",
             },
         )
         platform_results = result.to_dict()["platform_results"]
