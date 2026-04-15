@@ -180,8 +180,8 @@ def _format_square_meter_header_value(value: str) -> str:
     except ValueError:
         return value
     if numeric_value.is_integer():
-        return f"{int(numeric_value)}m2"
-    return f"{numeric_value:g}m2"
+        return f"{int(numeric_value)}m²"
+    return f"{numeric_value:g}m²"
 
 
 @dataclass(frozen=True, slots=True)

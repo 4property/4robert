@@ -2161,10 +2161,10 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertIn("46 Example Street\\, Dublin 4", filter_text)
-        self.assertIn("285m2 | 3 bedrooms | 2 baths", filter_text)
+        self.assertIn("285m² | 3 bedrooms | 2 baths", filter_text)
         self.assertLess(
             filter_text.index("46 Example Street\\, Dublin 4"),
-            filter_text.index("285m2 | 3 bedrooms | 2 baths"),
+            filter_text.index("285m² | 3 bedrooms | 2 baths"),
         )
 
     def test_format_property_size_normalizes_square_meter_units(self) -> None:
@@ -2173,9 +2173,9 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertEqual(format_property_size("285 m2"), "285 m²")
 
     def test_format_property_size_header_compacts_square_meter_units(self) -> None:
-        self.assertEqual(format_property_size_header("285"), "285m2")
-        self.assertEqual(format_property_size_header("285 sqm"), "285m2")
-        self.assertEqual(format_property_size_header("285 m2"), "285m2")
+        self.assertEqual(format_property_size_header("285"), "285m²")
+        self.assertEqual(format_property_size_header("285 sqm"), "285m²")
+        self.assertEqual(format_property_size_header("285 m2"), "285m²")
 
     def test_build_property_header_details_line_skips_zero_counts_and_uses_singular_bath(self) -> None:
         property_data = PropertyRenderData(
@@ -2204,7 +2204,7 @@ class RenderOverlayTests(unittest.TestCase):
             property_size="122",
         )
 
-        self.assertEqual(build_property_header_details_line(property_data), "122m2 | 1 bath")
+        self.assertEqual(build_property_header_details_line(property_data), "122m² | 1 bath")
 
     def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
@@ -2463,8 +2463,8 @@ class RenderOverlayTests(unittest.TestCase):
             block for block in overlay_layout.text_blocks if block.block == "address_meta"
         )
         self.assertTrue(address_block.clamped)
-        self.assertEqual(address_meta_block.lines[0], "285m2 | 3 bedrooms | 2 baths")
-        self.assertEqual(address_block.font_size - address_meta_block.font_size, 2)
+        self.assertEqual(address_meta_block.lines[0], "285m² | 3 bedrooms | 2 baths")
+        self.assertEqual(address_block.font_size, address_meta_block.font_size)
         self.assertLessEqual(len(address_block.lines), address_block.max_lines)
 
     def test_overlay_layout_renders_header_details_two_points_smaller_than_title(self) -> None:
@@ -2510,8 +2510,8 @@ class RenderOverlayTests(unittest.TestCase):
         address_meta_block = next(
             block for block in overlay_layout.text_blocks if block.block == "address_meta"
         )
-        self.assertEqual(address_meta_block.lines[0], "285m2 | 3 bedrooms | 2 baths")
-        self.assertEqual(address_block.font_size - address_meta_block.font_size, 2)
+        self.assertEqual(address_meta_block.lines[0], "285m² | 3 bedrooms | 2 baths")
+        self.assertEqual(address_block.font_size, address_meta_block.font_size)
         self.assertGreater(address_meta_block.y, address_block.y)
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:

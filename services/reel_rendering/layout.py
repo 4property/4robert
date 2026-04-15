@@ -351,7 +351,7 @@ def _measure_address_blocks(
             font_size=address_font_size,
             min_chars=min_chars,
         )
-        details_font_size = max(1, address_font_size - 2)
+        details_font_size = address_font_size
         details_lines: tuple[str, ...] = ()
         details_clamped = False
         reserved_detail_lines = 0
@@ -393,7 +393,7 @@ def _measure_address_blocks(
             )
 
     min_size = min(max_font_size, max_font_size if max_font_size <= min_font_size else min_font_size)
-    details_font_size = max(1, min_size - 2)
+    details_font_size = min_size
     address_width_chars = _wrap_width_from_pixels(
         usable_width=usable_width,
         font_size=min_size,
