@@ -203,6 +203,30 @@ class DescriptionBuilderTests(unittest.TestCase):
             "46 Example Street, Dublin 4\n650000\nMore properties on ckp.ie\nJane Doe",
         )
 
+    def test_facebook_and_linkedin_description_use_property_link_label(self) -> None:
+        property_item = Property.from_api_payload(build_property_payload(property_status="For Sale"))
+
+        facebook_description = build_platform_description_for_property(
+            property_item,
+            platform="facebook",
+            property_url="https://ckp.ie/property/sample-property",
+        )
+        linkedin_description = build_platform_description_for_property(
+            property_item,
+            platform="linkedin",
+            property_url="https://ckp.ie/property/sample-property",
+        )
+
+        expected_description = (
+            "Property: https://ckp.ie/property/sample-property\n\n"
+            "Jane Doe\n"
+            "+353 1 234 5678\n"
+            "jane@example.com\n\n"
+            "Agency PSRA: X123456"
+        )
+        self.assertEqual(facebook_description, expected_description)
+        self.assertEqual(linkedin_description, expected_description)
+
 
 class PlatformRegistryTests(unittest.TestCase):
     def test_platform_registry_normalizes_aliases_and_lists_supported_platforms(self) -> None:
@@ -233,7 +257,7 @@ class PlatformRegistryTests(unittest.TestCase):
         self.assertEqual(
             config.build_description(property_item, "https://ckp.ie/property/sample-property"),
             (
-                "More properties on ckp.ie\n\n"
+                "Property: https://ckp.ie/property/sample-property\n\n"
                 "Jane Doe\n"
                 "+353 1 234 5678\n"
                 "jane@example.com\n\n"

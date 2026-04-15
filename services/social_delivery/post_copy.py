@@ -106,6 +106,13 @@ def _render_property_url(context: PropertyCaptionContext) -> str | None:
     return f"More properties on {site_label}"
 
 
+def _render_property_link(context: PropertyCaptionContext) -> str | None:
+    property_url = _clean_text(context.property_url)
+    if property_url is None:
+        return None
+    return f"Property: {property_url}"
+
+
 def _render_agent_name(context: PropertyCaptionContext) -> str | None:
     return _clean_text(context.agent_name)
 
@@ -159,6 +166,7 @@ DEFAULT_PROPERTY_CAPTION_LAYOUT: CaptionLayout = (
 
 _FIELD_RENDERERS: dict[str, Callable[[PropertyCaptionContext], str | None]] = {
     "property_url": _render_property_url,
+    "property_link": _render_property_link,
     "agent_name": _render_agent_name,
     "agent_phone": _render_agent_phone,
     "agent_email": _render_agent_email,

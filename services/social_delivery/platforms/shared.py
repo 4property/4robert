@@ -30,6 +30,23 @@ def build_common_description(property_item, property_url: str) -> str:
     )
 
 
+def build_property_link_description(property_item, property_url: str) -> str:
+    return build_property_caption(
+        property_url=property_url,
+        agent_name=property_item.agent_name,
+        agent_phone=property_item.agent_mobile or property_item.agent_number,
+        agent_email=property_item.agent_email,
+        agency_psra=property_item.agency_psra,
+        layout=(
+            ("property_link",),
+            (),
+            ("agent_name", "agent_phone", "agent_email"),
+            (),
+            ("agency_psra",),
+        ),
+    )
+
+
 def build_google_business_profile_description(property_item, property_url: str) -> str:
     rendered_lines = [
         value
@@ -125,6 +142,7 @@ __all__ = [
     "build_empty_gohighlevel_payload",
     "build_google_business_profile_gohighlevel_payload",
     "build_google_business_profile_description",
+    "build_property_link_description",
     "build_youtube_gohighlevel_payload",
     "build_youtube_upload_file_name",
 ]
