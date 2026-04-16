@@ -50,6 +50,7 @@ htmlcov/
 /artifacts/
 
 # Local logs and runtime leftovers
+/logs/
 *.log
 *.tmp
 *.bak

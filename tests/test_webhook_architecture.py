@@ -34,6 +34,7 @@ from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
     DATABASE_FILENAME,
     GEMINI_SELECTION_AUDIT_FILENAME,
+    PERSISTENT_LOG_DIRECTORY,
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
 )
 from core.errors import TransientSocialPublishingError
@@ -1343,6 +1344,66 @@ class WebhookTransportTests(unittest.TestCase):
             json.loads(job.publish_context_json)["platforms"],
             list(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
         )
+
+    def test_valid_signed_request_persists_application_and_audit_logs(self) -> None:
+        payload = build_sample_payload()
+        client, _ = self._build_client()
+        request_body = json.dumps(payload)
+
+        with client:
+            response = client.post(
+                "/webhooks/wordpress/property",
+                content=request_body,
+                headers=self._build_signed_headers(payload),
+            )
+
+        self.assertEqual(response.status_code, 202)
+        runtime = client.app.state.runtime
+        log_dir = runtime.workspace_dir / PERSISTENT_LOG_DIRECTORY
+        application_log = log_dir / "application.log"
+        audit_log = log_dir / "audit.jsonl"
+
+        self.assertTrue(application_log.exists())
+        self.assertTrue(audit_log.exists())
+
+        application_log_text = application_log.read_text(encoding="utf-8")
+        self.assertIn("WEBHOOK ACCEPTED", application_log_text)
+
+        audit_entries = [
+            json.loads(line)
+            for line in audit_log.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        request_entry = next(
+            entry
+            for entry in audit_entries
+            if entry.get("event_type") == "http.request"
+            and entry.get("path") == "/webhooks/wordpress/property"
+        )
+        response_entry = next(
+            entry
+            for entry in audit_entries
+            if entry.get("event_type") == "http.response"
+            and entry.get("path") == "/webhooks/wordpress/property"
+            and entry.get("status_code") == 202
+        )
+        accepted_entry = next(
+            entry
+            for entry in audit_entries
+            if entry.get("event_type") == "webhook.accepted"
+        )
+        request_headers = {
+            str(key).lower(): value
+            for key, value in request_entry["headers"].items()
+        }
+
+        self.assertEqual(
+            request_headers["x-gohighlevel-access-token"],
+            "<redacted>",
+        )
+        self.assertIn("46 Example Street, Dublin 4", request_entry["body"])
+        self.assertEqual(response_entry["status_code"], 202)
+        self.assertEqual(accepted_entry["site_id"], "site-a")
 
     def test_scripted_render_endpoint_renders_and_persists_separate_artifact(self) -> None:
         client, _ = self._build_client(security_disabled=True)

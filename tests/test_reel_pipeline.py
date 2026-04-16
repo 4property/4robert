@@ -274,6 +274,33 @@ class ReelConfigurationTests(unittest.TestCase):
         self.assertEqual(settings.poster_height, 1280)
         self.assertEqual(settings.poster_footer_bottom_offset_px, 104)
 
+    def test_persistent_logging_settings_default_to_workspace_logs(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            settings = AppSettings(_env_file=None)
+
+        self.assertTrue(settings.persistent_logging_enabled)
+        self.assertEqual(settings.persistent_log_directory, "logs")
+        self.assertEqual(settings.persistent_log_backup_count, 20)
+        self.assertEqual(settings.persistent_log_max_bytes, 25_000_000)
+
+    def test_persistent_logging_settings_allow_overrides(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "PERSISTENT_LOGGING_ENABLED": "false",
+                "PERSISTENT_LOG_DIRECTORY": "runtime-logs",
+                "PERSISTENT_LOG_MAX_BYTES": "5000000",
+                "PERSISTENT_LOG_BACKUP_COUNT": "7",
+            },
+            clear=True,
+        ):
+            settings = AppSettings(_env_file=None)
+
+        self.assertFalse(settings.persistent_logging_enabled)
+        self.assertEqual(settings.persistent_log_directory, "runtime-logs")
+        self.assertEqual(settings.persistent_log_max_bytes, 5_000_000)
+        self.assertEqual(settings.persistent_log_backup_count, 7)
+
     def test_full_seven_slide_reel_distributes_frames_to_match_configured_total(self) -> None:
         template = PropertyReelTemplate(
             fps=24,

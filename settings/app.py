@@ -406,6 +406,24 @@ class AppSettings(BaseSettings):
         False,
         validation_alias="AI_NARRATION_ENABLED",
     )
+    persistent_logging_enabled: bool = Field(
+        True,
+        validation_alias="PERSISTENT_LOGGING_ENABLED",
+    )
+    persistent_log_directory: str = Field(
+        "logs",
+        validation_alias="PERSISTENT_LOG_DIRECTORY",
+    )
+    persistent_log_max_bytes: int = Field(
+        25_000_000,
+        validation_alias="PERSISTENT_LOG_MAX_BYTES",
+        ge=1_024,
+    )
+    persistent_log_backup_count: int = Field(
+        20,
+        validation_alias="PERSISTENT_LOG_BACKUP_COUNT",
+        ge=1,
+    )
     log_level: str = Field(
         "INFO",
         validation_alias="LOG_LEVEL",
@@ -457,6 +475,14 @@ class AppSettings(BaseSettings):
             return "INFO"
         return normalized_value
 
+    @field_validator("persistent_log_directory")
+    @classmethod
+    def _validate_persistent_log_directory(cls, value: str) -> str:
+        normalized_value = value.strip().strip("/\\")
+        if not normalized_value:
+            return "logs"
+        return normalized_value
+
     @field_validator("webhook_forwarded_allow_ips")
     @classmethod
     def _validate_forwarded_allow_ips(cls, value: str) -> str:
@@ -472,6 +498,9 @@ class AppSettings(BaseSettings):
 
         if not self.log_level:
             self.log_level = "INFO"
+
+        if not self.persistent_log_directory:
+            self.persistent_log_directory = "logs"
 
         if self.social_publishing_property_url_tracking_params is None:
             self.social_publishing_property_url_tracking_params = {}

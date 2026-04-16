@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
+from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from collections.abc import Mapping
@@ -49,6 +54,8 @@ _TITLE_COLORS: Final[dict[str, str]] = {
     "failure": "bold bright_red",
     "info": "bold white",
 }
+_AUDIT_LOGGER_NAME: Final[str] = "cpihed.audit"
+_RICH_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r"\[/?[^\[\]]+\]")
 
 
 @dataclass(slots=True)
@@ -71,6 +78,14 @@ class NullProgress:
 
     def advance(self, task_id: int, advance: float = 1.0) -> None:
         del task_id, advance
+
+
+class PlainTextFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        sanitized_record = logging.makeLogRecord(record.__dict__.copy())
+        sanitized_record.msg = _strip_rich_markup(record.getMessage())
+        sanitized_record.args = ()
+        return super().format(sanitized_record)
 
 
 def get_rich_console() -> Console | None:
@@ -107,10 +122,27 @@ def create_progress(*, transient: bool = False) -> Progress | NullProgress:
         yield progress
 
 
-def configure_logging(level: str) -> None:
+def resolve_log_directory(
+    workspace_dir: str | Path,
+    *,
+    persistent_log_directory: str = "logs",
+) -> Path:
+    return Path(workspace_dir).expanduser().resolve() / persistent_log_directory
+
+
+def configure_logging(
+    level: str,
+    *,
+    workspace_dir: str | Path | None = None,
+    persistent_logging_enabled: bool = True,
+    persistent_log_directory: str = "logs",
+    persistent_log_max_bytes: int = 25_000_000,
+    persistent_log_backup_count: int = 20,
+) -> None:
     level_value = getattr(logging, level.upper(), logging.INFO)
     logging.captureWarnings(True)
 
+    handlers: list[logging.Handler] = []
     if RICH_AVAILABLE and RichHandler is not None:
         handler = RichHandler(
             show_time=True,
@@ -130,11 +162,56 @@ def configure_logging(level: str) -> None:
                 "%H:%M:%S",
             )
         )
+    handler.setLevel(level_value)
+    handlers.append(handler)
+
+    log_dir: Path | None = None
+    if persistent_logging_enabled and workspace_dir is not None:
+        log_dir = resolve_log_directory(
+            workspace_dir,
+            persistent_log_directory=persistent_log_directory,
+        )
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        application_handler = RotatingFileHandler(
+            log_dir / "application.log",
+            maxBytes=persistent_log_max_bytes,
+            backupCount=persistent_log_backup_count,
+            encoding="utf-8",
+        )
+        application_handler.setLevel(logging.DEBUG)
+        application_handler.setFormatter(
+            PlainTextFormatter(
+                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+                "%Y-%m-%d %H:%M:%S",
+            )
+        )
+        handlers.append(application_handler)
+
+        error_handler = RotatingFileHandler(
+            log_dir / "errors.log",
+            maxBytes=persistent_log_max_bytes,
+            backupCount=persistent_log_backup_count,
+            encoding="utf-8",
+        )
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(
+            PlainTextFormatter(
+                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+                "%Y-%m-%d %H:%M:%S",
+            )
+        )
+        handlers.append(error_handler)
 
     logging.basicConfig(
-        level=level_value,
-        handlers=[handler],
+        level=logging.DEBUG if log_dir is not None else level_value,
+        handlers=handlers,
         force=True,
+    )
+    _configure_audit_logger(
+        log_dir,
+        persistent_log_max_bytes=persistent_log_max_bytes,
+        persistent_log_backup_count=persistent_log_backup_count,
     )
 
     for logger_name in (
@@ -144,6 +221,63 @@ def configure_logging(level: str) -> None:
         "uvicorn.error",
     ):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+def log_persistent_event(event_type: str, **fields: object) -> None:
+    logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+    if not logger.handlers:
+        return
+
+    payload: dict[str, object] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event_type": event_type,
+    }
+    payload.update(fields)
+    logger.info(json.dumps(_json_safe_value(payload), ensure_ascii=False, sort_keys=True))
+
+
+def _configure_audit_logger(
+    log_dir: Path | None,
+    *,
+    persistent_log_max_bytes: int,
+    persistent_log_backup_count: int,
+) -> None:
+    audit_logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+    _clear_logger_handlers(audit_logger)
+    audit_logger.propagate = False
+    audit_logger.setLevel(logging.INFO)
+    if log_dir is None:
+        return
+
+    audit_handler = RotatingFileHandler(
+        log_dir / "audit.jsonl",
+        maxBytes=persistent_log_max_bytes,
+        backupCount=persistent_log_backup_count,
+        encoding="utf-8",
+    )
+    audit_handler.setLevel(logging.INFO)
+    audit_handler.setFormatter(logging.Formatter("%(message)s"))
+    audit_logger.addHandler(audit_handler)
+
+
+def _clear_logger_handlers(target_logger: logging.Logger) -> None:
+    for handler in list(target_logger.handlers):
+        target_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            continue
+
+
+def _json_safe_value(value: object) -> object:
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except TypeError:
+        return str(value)
+
+
+def _strip_rich_markup(value: str) -> str:
+    return _RICH_TAG_PATTERN.sub("", value)
 
 
 def format_duration(seconds: float) -> str:
@@ -356,6 +490,7 @@ __all__ = [
     "LoggedProcess",
     "create_progress",
     "configure_logging",
+    "log_persistent_event",
     "format_console_block",
     "build_log_context",
     "format_context_line",
@@ -363,4 +498,5 @@ __all__ = [
     "format_duration",
     "format_message_line",
     "get_rich_console",
+    "resolve_log_directory",
 ]

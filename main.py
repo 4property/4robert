@@ -25,14 +25,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    configure_logging("INFO")
-    logger = logging.getLogger(__name__)
     base_dir = Path(__file__).resolve().parent
+    configure_logging("INFO", persistent_logging_enabled=False)
+    logger = logging.getLogger(__name__)
 
     try:
         from application.bootstrap import build_default_job_dispatcher
         from config import (
             LOG_LEVEL,
+            PERSISTENT_LOG_BACKUP_COUNT,
+            PERSISTENT_LOG_DIRECTORY,
+            PERSISTENT_LOG_MAX_BYTES,
+            PERSISTENT_LOGGING_ENABLED,
             WEBHOOK_DISABLE_SECURITY,
             WEBHOOK_HOST,
             WEBHOOK_PORT,
@@ -42,7 +46,14 @@ def main() -> None:
         from services.webhook_transport.operations import build_readiness_report
         from services.webhook_transport.server import run_wordpress_webhook_server
 
-        configure_logging(LOG_LEVEL)
+        configure_logging(
+            LOG_LEVEL,
+            workspace_dir=base_dir,
+            persistent_logging_enabled=PERSISTENT_LOGGING_ENABLED,
+            persistent_log_directory=PERSISTENT_LOG_DIRECTORY,
+            persistent_log_max_bytes=PERSISTENT_LOG_MAX_BYTES,
+            persistent_log_backup_count=PERSISTENT_LOG_BACKUP_COUNT,
+        )
         host = args.host or WEBHOOK_HOST
         port = args.port or WEBHOOK_PORT
 

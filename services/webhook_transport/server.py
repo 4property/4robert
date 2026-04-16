@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,11 @@ from application.interfaces import JobDispatcher
 from application.types import SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
+    LOG_LEVEL,
+    PERSISTENT_LOG_BACKUP_COUNT,
+    PERSISTENT_LOG_DIRECTORY,
+    PERSISTENT_LOG_MAX_BYTES,
+    PERSISTENT_LOGGING_ENABLED,
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
     WEBHOOK_ALLOWED_HOSTS,
     WEBHOOK_DISABLE_SECURITY,
@@ -40,7 +46,7 @@ from config import (
     WEBHOOK_WORKER_COUNT,
 )
 from core.errors import ApplicationError, DependencyNotInstalledError, ResourceNotFoundError, ValidationError
-from core.logging import format_console_block, format_detail_line
+from core.logging import configure_logging, format_console_block, format_detail_line, log_persistent_event, resolve_log_directory
 from services.webhook_transport.operations import build_readiness_report, run_startup_checks
 from services.webhook_transport.openapi_docs import OpenApiDocsConfig, install_openapi_examples
 from services.webhook_transport.uvicorn_protocols import VerboseAutoHTTPProtocol
@@ -50,6 +56,17 @@ logger = logging.getLogger(__name__)
 
 _ALTERNATE_GOHIGHLEVEL_LOCATION_ID_HEADERS = ("X-GHL-Location-Id",)
 _ALTERNATE_GOHIGHLEVEL_ACCESS_TOKEN_HEADERS = ("X-GHL-Token",)
+_SENSITIVE_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "cookie",
+        "proxy-authorization",
+        "set-cookie",
+        "x-ghl-token",
+        "x-gohighlevel-access-token",
+        "x-wordpress-signature",
+    }
+)
 
 
 class WordPressWebhookApplication:
@@ -103,6 +120,14 @@ class WordPressWebhookApplication:
         self.worker_count = worker_count
 
     def start(self) -> None:
+        configure_logging(
+            LOG_LEVEL,
+            workspace_dir=self.workspace_dir,
+            persistent_logging_enabled=PERSISTENT_LOGGING_ENABLED,
+            persistent_log_directory=PERSISTENT_LOG_DIRECTORY,
+            persistent_log_max_bytes=PERSISTENT_LOG_MAX_BYTES,
+            persistent_log_backup_count=PERSISTENT_LOG_BACKUP_COUNT,
+        )
         readiness = run_startup_checks(
             self.workspace_dir,
             site_secrets=self.site_secrets,
@@ -110,6 +135,10 @@ class WordPressWebhookApplication:
             security_disabled=self.security_disabled,
         )
         effective_allowed_hosts = _resolve_allowed_hosts(self)
+        log_dir = resolve_log_directory(
+            self.workspace_dir,
+            persistent_log_directory=PERSISTENT_LOG_DIRECTORY,
+        )
         self.dispatcher.start()
         logger.info(
             format_console_block(
@@ -131,7 +160,17 @@ class WordPressWebhookApplication:
                     "Allowed hosts",
                     ", ".join(effective_allowed_hosts) if effective_allowed_hosts else "Disabled",
                 ),
+                format_detail_line("Log directory", log_dir),
             )
+        )
+        log_persistent_event(
+            "runtime.started",
+            workspace_dir=str(self.workspace_dir),
+            webhook_path=self.path,
+            worker_count=self.worker_count,
+            security_disabled=self.security_disabled,
+            allowed_hosts=list(effective_allowed_hosts),
+            log_directory=str(log_dir),
         )
         if self.security_disabled:
             logger.warning(
@@ -149,6 +188,11 @@ class WordPressWebhookApplication:
                 "Webhook Runtime Stopped",
                 "The webhook application shut down cleanly.",
             )
+        )
+        log_persistent_event(
+            "runtime.stopped",
+            workspace_dir=str(self.workspace_dir),
+            shutdown_timeout_seconds=self.shutdown_timeout_seconds,
         )
 
     def wait_for_idle(self, timeout: float = 5.0) -> bool:
@@ -355,6 +399,58 @@ def create_fastapi_app(
         ),
     )
 
+    @app.middleware("http")
+    async def persist_http_traffic(request: Request, call_next):
+        started_at = time.perf_counter()
+        request_id = str(time.time_ns())
+        raw_body = b""
+        if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            raw_body = await request.body()
+            request = _rebuild_request_with_body(request, raw_body)
+
+        log_persistent_event(
+            "http.request",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            query=request.url.query,
+            client=_format_client(request),
+            headers=_sanitize_headers_for_logging(request.headers),
+            body=_decode_body_for_logging(raw_body),
+            body_size_bytes=len(raw_body),
+        )
+
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            log_persistent_event(
+                "http.exception",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                query=request.url.query,
+                client=_format_client(request),
+                duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise
+
+        response_body = _extract_response_body(response)
+        log_persistent_event(
+            "http.response",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            query=request.url.query,
+            status_code=response.status_code,
+            duration_ms=round((time.perf_counter() - started_at) * 1000, 3),
+            headers=_sanitize_headers_for_logging(response.headers),
+            body=_decode_body_for_logging(response_body),
+            body_size_bytes=(len(response_body) if response_body is not None else None),
+        )
+        return response
+
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
         return {"status": "ok"}
@@ -485,6 +581,13 @@ def create_fastapi_app(
                     format_detail_line("Hint", auth_hint),
                 )
             )
+            log_persistent_event(
+                "webhook.authentication_failed",
+                site_id=site_id,
+                location_id=location_id,
+                client=_format_client(request),
+                reason=auth_message or "Invalid webhook credentials.",
+            )
             return _json_error(
                 401,
                 "Invalid webhook credentials.",
@@ -526,6 +629,14 @@ def create_fastapi_app(
                 format_detail_line("Property ID", property_id),
                 "The payload was queued for background processing.",
             )
+        )
+        log_persistent_event(
+            "webhook.accepted",
+            event_id=accepted_delivery.event_id,
+            job_id=accepted_delivery.job_id,
+            site_id=site_id,
+            property_id=property_id,
+            raw_payload_hash=raw_payload_hash,
         )
         return JSONResponse(
             status_code=202,
@@ -628,6 +739,14 @@ def create_fastapi_app(
                 format_detail_line("Video path", result.video_path),
             )
         )
+        log_persistent_event(
+            "scripted_video.rendered",
+            render_id=result.render_id,
+            site_id=result.site_id,
+            property_id=result.source_property_id,
+            video_path=result.video_path,
+            manifest_path=result.manifest_path,
+        )
         return JSONResponse(
             status_code=201,
             content={
@@ -691,6 +810,43 @@ def run_wordpress_webhook_server(
 
 def _get_runtime(request: Request) -> WordPressWebhookApplication:
     return request.app.state.runtime  # type: ignore[return-value]
+
+
+def _sanitize_headers_for_logging(headers: dict[str, str] | Any) -> dict[str, str]:
+    normalized_headers: dict[str, str] = {}
+    for key, value in headers.items():
+        normalized_key = str(key)
+        lowered_key = normalized_key.lower()
+        normalized_headers[normalized_key] = (
+            "<redacted>" if lowered_key in _SENSITIVE_HEADER_NAMES else str(value)
+        )
+    return normalized_headers
+
+
+def _decode_body_for_logging(raw_body: bytes | None) -> str | None:
+    if not raw_body:
+        return None
+    return raw_body.decode("utf-8", errors="replace")
+
+
+def _extract_response_body(response: object) -> bytes | None:
+    body = getattr(response, "body", None)
+    if body is None:
+        return None
+    if isinstance(body, bytes):
+        return body
+    if isinstance(body, bytearray):
+        return bytes(body)
+    if isinstance(body, str):
+        return body.encode("utf-8", errors="replace")
+    return str(body).encode("utf-8", errors="replace")
+
+
+def _rebuild_request_with_body(request: Request, raw_body: bytes) -> Request:
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": raw_body, "more_body": False}
+
+    return Request(request.scope, receive)
 
 
 def _json_error(
