@@ -126,6 +126,7 @@ class PropertyRenderData:
     listing_lifecycle: str | None = None
     banner_text: str | None = None
     price_display_text: str | None = None
+    viewing_times: tuple[str, ...] = ()
 
 
 PropertyReelData = PropertyRenderData

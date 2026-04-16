@@ -183,6 +183,7 @@ def build_property_reel_manifest_from_data(
         "property_status": property_data.property_status,
         "listing_lifecycle": property_data.listing_lifecycle,
         "banner_text": property_data.banner_text,
+        "viewing_times": list(property_data.viewing_times),
         "featured_image_url": property_data.featured_image_url,
         "agent_photo_url": property_data.agent_photo_url,
         "ber_rating": property_data.ber_rating,

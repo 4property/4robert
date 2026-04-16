@@ -41,6 +41,7 @@ PROPERTY_REEL_SELECT_FIELDS = (
     "properties.property_county_label AS property_county_label",
     "properties.property_size AS property_size",
     "properties.eircode AS eircode",
+    "properties.viewing_times AS viewing_times",
     "pps.selected_image_folder AS selected_image_folder",
     "pps.artifact_kind AS artifact_kind",
     "pps.local_artifact_path AS local_artifact_path",
@@ -114,10 +115,40 @@ class PropertyReelRecord:
     property_county_label: str | None
     property_size: str | None
     eircode: str | None
+    viewing_times: tuple[str, ...]
     artifact_kind: str
     local_artifact_path: str
     local_metadata_path: str
     render_profile: str
+
+
+def _deserialize_text_tuple(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if parsed is not None:
+                return _deserialize_text_tuple(parsed)
+        return (text,)
+
+    if isinstance(value, (list, tuple, set)):
+        items: list[str] = []
+        for item in value:
+            normalized = _deserialize_text_tuple(item)
+            if normalized:
+                items.extend(normalized)
+        return tuple(items)
+
+    text = str(value).strip()
+    return (text,) if text else ()
 
 
 def _relative_to_base(path: Path, base_dir: Path) -> str:
@@ -533,6 +564,7 @@ class PropertyPipelineRepository:
             property_county_label=None if row["property_county_label"] is None else str(row["property_county_label"]),
             property_size=None if row["property_size"] is None else str(row["property_size"]),
             eircode=None if row["eircode"] is None else str(row["eircode"]),
+            viewing_times=_deserialize_text_tuple(row["viewing_times"]),
             artifact_kind="" if row["artifact_kind"] is None else str(row["artifact_kind"]),
             local_artifact_path="" if row["local_artifact_path"] is None else str(row["local_artifact_path"]),
             local_metadata_path="" if row["local_metadata_path"] is None else str(row["local_metadata_path"]),

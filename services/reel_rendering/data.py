@@ -51,6 +51,7 @@ def record_to_property_reel_data(base_dir: Path, record: PropertyReelRecord) -> 
         property_county_label=clean_text(record.property_county_label),
         eircode=clean_text(record.eircode),
         property_size=clean_text(record.property_size),
+        viewing_times=record.viewing_times,
         selected_slides=selected_slides,
     )
 

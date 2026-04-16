@@ -8,6 +8,7 @@ from services.reel_rendering.formatting import (
     build_agent_lines,
     build_display_price,
     build_property_header_details_line,
+    build_property_header_viewing_times_line,
     build_status_ribbon_text,
     build_similar_required_subtitle,
     clean_text,
@@ -273,18 +274,25 @@ def _measure_text_block(
 def _build_measured_address_blocks(
     *,
     address_text: str | None,
+    viewing_times_text: str | None,
     details_text: str | None,
     address_lines: tuple[str, ...],
+    viewing_times_lines: tuple[str, ...],
     details_lines: tuple[str, ...],
     address_font_size: int,
-    details_font_size: int,
+    metadata_font_size: int,
     usable_width: int,
     max_lines: int,
     clamped: bool,
     warning: LayoutWarning | None,
 ) -> tuple[_MeasuredTextBlock, ...]:
     blocks: list[_MeasuredTextBlock] = []
-    warning_target = "address" if address_lines else "address_meta"
+    if address_lines:
+        warning_target = "address"
+    elif viewing_times_lines:
+        warning_target = "viewing_times"
+    else:
+        warning_target = "address_meta"
 
     if address_lines:
         address_line_gap = address_font_size + max(8, round(address_font_size * 0.2))
@@ -306,9 +314,29 @@ def _build_measured_address_blocks(
             )
         )
 
+    if viewing_times_lines:
+        viewing_times_line_gap = metadata_font_size + max(8, round(metadata_font_size * 0.2))
+        viewing_times_box_height = metadata_font_size + (
+            (len(viewing_times_lines) - 1) * viewing_times_line_gap if len(viewing_times_lines) > 1 else 0
+        )
+        blocks.append(
+            _MeasuredTextBlock(
+                block="viewing_times",
+                text=viewing_times_text or address_text or "",
+                lines=viewing_times_lines,
+                font_size=metadata_font_size,
+                line_gap=viewing_times_line_gap,
+                box_height=viewing_times_box_height,
+                max_width=usable_width,
+                max_lines=1,
+                clamped=clamped,
+                warning=warning if warning is not None and warning_target == "viewing_times" else None,
+            )
+        )
+
     if details_lines:
-        details_line_gap = details_font_size + max(8, round(details_font_size * 0.2))
-        details_box_height = details_font_size + (
+        details_line_gap = metadata_font_size + max(8, round(metadata_font_size * 0.2))
+        details_box_height = metadata_font_size + (
             (len(details_lines) - 1) * details_line_gap if len(details_lines) > 1 else 0
         )
         blocks.append(
@@ -316,7 +344,7 @@ def _build_measured_address_blocks(
                 block="address_meta",
                 text=details_text or address_text or "",
                 lines=details_lines,
-                font_size=details_font_size,
+                font_size=metadata_font_size,
                 line_gap=details_line_gap,
                 box_height=details_box_height,
                 max_width=usable_width,
@@ -332,6 +360,7 @@ def _build_measured_address_blocks(
 def _measure_address_blocks(
     *,
     address: str | None,
+    viewing_times: str | None,
     details: str | None,
     usable_width: int,
     max_lines: int,
@@ -340,11 +369,16 @@ def _measure_address_blocks(
     min_chars: int,
 ) -> tuple[_MeasuredTextBlock, ...]:
     normalized_address = clean_text(address)
+    normalized_viewing_times = clean_text(viewing_times)
     normalized_details = clean_text(details)
-    if not normalized_address and not normalized_details:
+    if not normalized_address and not normalized_viewing_times and not normalized_details:
         return ()
 
-    full_text = "\n".join(part for part in (normalized_address, normalized_details) if part)
+    full_text = "\n".join(
+        part
+        for part in (normalized_address, normalized_viewing_times, normalized_details)
+        if part
+    )
 
     for address_font_size in _candidate_font_sizes(max_font_size, min_font_size):
         address_width_chars = _wrap_width_from_pixels(
@@ -352,41 +386,58 @@ def _measure_address_blocks(
             font_size=address_font_size,
             min_chars=min_chars,
         )
-        details_font_size = address_font_size
+        metadata_font_size = address_font_size
+        viewing_times_lines: tuple[str, ...] = ()
         details_lines: tuple[str, ...] = ()
-        details_clamped = False
-        reserved_detail_lines = 0
-        if normalized_details:
-            detail_width_chars = _wrap_width_from_pixels(
-                usable_width=usable_width,
-                font_size=details_font_size,
-                min_chars=max(12, min_chars - 4),
+        metadata_clamped = False
+        reserved_metadata_lines = 0
+        metadata_width_chars = _wrap_width_from_pixels(
+            usable_width=usable_width,
+            font_size=metadata_font_size,
+            min_chars=max(12, min_chars - 4),
+        )
+        if normalized_viewing_times:
+            wrapped_viewing_times = fit_wrapped_lines(
+                normalized_viewing_times,
+                width=metadata_width_chars,
+                max_lines=1,
             )
-            wrapped_details = fit_wrapped_lines(normalized_details, width=detail_width_chars, max_lines=1)
+            viewing_times_lines = wrapped_viewing_times.lines
+            metadata_clamped = wrapped_viewing_times.clamped
+            reserved_metadata_lines += len(viewing_times_lines) or 1
+        if normalized_details:
+            wrapped_details = fit_wrapped_lines(
+                normalized_details,
+                width=metadata_width_chars,
+                max_lines=1,
+            )
             details_lines = wrapped_details.lines
-            details_clamped = wrapped_details.clamped
-            reserved_detail_lines = len(details_lines) or 1
+            metadata_clamped = metadata_clamped or wrapped_details.clamped
+            reserved_metadata_lines += len(details_lines) or 1
 
-        address_lines_allowed = max(1, max_lines - reserved_detail_lines)
+        address_lines_allowed = max(1, max_lines - reserved_metadata_lines)
         wrapped_address = (
             fit_wrapped_lines(
                 normalized_address,
                 width=address_width_chars,
                 max_lines=address_lines_allowed,
+                rebalance_last_line=True,
             )
             if normalized_address
             else None
         )
         address_lines = () if wrapped_address is None else wrapped_address.lines
-        clamped = details_clamped or (False if wrapped_address is None else wrapped_address.clamped)
+        clamped = metadata_clamped or (False if wrapped_address is None else wrapped_address.clamped)
         if not clamped:
             return _build_measured_address_blocks(
                 address_text=normalized_address,
+                viewing_times_text=normalized_viewing_times,
                 details_text=normalized_details,
                 address_lines=address_lines,
+                viewing_times_lines=viewing_times_lines,
                 details_lines=details_lines,
                 address_font_size=address_font_size,
-                details_font_size=details_font_size,
+                metadata_font_size=metadata_font_size,
                 usable_width=usable_width,
                 max_lines=max_lines,
                 clamped=False,
@@ -394,29 +445,43 @@ def _measure_address_blocks(
             )
 
     min_size = min(max_font_size, max_font_size if max_font_size <= min_font_size else min_font_size)
-    details_font_size = min_size
+    metadata_font_size = min_size
     address_width_chars = _wrap_width_from_pixels(
         usable_width=usable_width,
         font_size=min_size,
         min_chars=min_chars,
     )
+    metadata_width_chars = _wrap_width_from_pixels(
+        usable_width=usable_width,
+        font_size=metadata_font_size,
+        min_chars=max(12, min_chars - 4),
+    )
+    viewing_times_lines = ()
     details_lines = ()
-    reserved_detail_lines = 0
-    if normalized_details:
-        detail_width_chars = _wrap_width_from_pixels(
-            usable_width=usable_width,
-            font_size=details_font_size,
-            min_chars=max(12, min_chars - 4),
+    reserved_metadata_lines = 0
+    if normalized_viewing_times:
+        wrapped_viewing_times = fit_wrapped_lines(
+            normalized_viewing_times,
+            width=metadata_width_chars,
+            max_lines=1,
         )
-        wrapped_details = fit_wrapped_lines(normalized_details, width=detail_width_chars, max_lines=1)
+        viewing_times_lines = wrapped_viewing_times.lines
+        reserved_metadata_lines += len(viewing_times_lines) or 1
+    if normalized_details:
+        wrapped_details = fit_wrapped_lines(
+            normalized_details,
+            width=metadata_width_chars,
+            max_lines=1,
+        )
         details_lines = wrapped_details.lines
-        reserved_detail_lines = len(details_lines) or 1
-    address_lines_allowed = max(1, max_lines - reserved_detail_lines)
+        reserved_metadata_lines += len(details_lines) or 1
+    address_lines_allowed = max(1, max_lines - reserved_metadata_lines)
     wrapped_address = (
         fit_wrapped_lines(
             normalized_address,
             width=address_width_chars,
             max_lines=address_lines_allowed,
+            rebalance_last_line=True,
         )
         if normalized_address
         else None
@@ -430,11 +495,13 @@ def _measure_address_blocks(
     )
     return _build_measured_address_blocks(
         address_text=normalized_address,
+        viewing_times_text=normalized_viewing_times,
         details_text=normalized_details,
         address_lines=address_lines,
+        viewing_times_lines=viewing_times_lines,
         details_lines=details_lines,
         address_font_size=min_size,
-        details_font_size=details_font_size,
+        metadata_font_size=metadata_font_size,
         usable_width=usable_width,
         max_lines=max_lines,
         clamped=True,
@@ -519,6 +586,7 @@ def build_overlay_layout(
 
     for measured_block in _measure_address_blocks(
         address=property_data.title,
+        viewing_times=build_property_header_viewing_times_line(property_data),
         details=build_property_header_details_line(property_data),
         usable_width=header_text_width,
         max_lines=4,

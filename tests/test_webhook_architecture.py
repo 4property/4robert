@@ -52,6 +52,7 @@ from repositories.property_pipeline_repository import PropertyPipelineRepository
 from services.reel_rendering.formatting import (
     build_property_header_details_line,
     escape_filter_path,
+    fit_wrapped_lines,
     format_property_size,
     format_property_size_header,
 )
@@ -106,8 +107,9 @@ def build_sample_payload(
     property_status: str = "For Sale",
     modified_gmt: str = "2026-03-24T10:43:19",
     property_features: list[str] | None = None,
+    viewing_times: list[str] | None = None,
 ) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "id": property_id,
         "slug": "sample-property",
         "title": {"rendered": "46 Example Street, Dublin 4"},
@@ -130,6 +132,9 @@ def build_sample_payload(
         ],
         "property_features": property_features or ["Private patio", "Open-plan kitchen"],
     }
+    if viewing_times is not None:
+        payload["wppd_property_viewing_times"] = viewing_times
+    return payload
 
 
 def build_job(
@@ -260,6 +265,32 @@ class RepositorySchemaTests(unittest.TestCase):
         self.assertIn("gohighlevel_access_token", job_columns)
         self.assertFalse(any("access_token" in column for column in property_columns))
         self.assertFalse(any("access_token" in column for column in pipeline_columns))
+
+    def test_repository_persists_viewing_times_from_payload(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            database_path = workspace_dir / DATABASE_FILENAME
+            property_item = Property.from_api_payload(
+                build_sample_payload(
+                    viewing_times=["Saturday 20 April 12:00pm - 12:30pm"],
+                )
+            )
+
+            with PropertyPipelineRepository(database_path, workspace_dir) as repository:
+                repository.save_property_data(property_item, site_id="site-a")
+                row = repository.connection.execute(
+                    (
+                        "SELECT viewing_times FROM properties "
+                        "WHERE site_id = ? AND source_property_id = ?"
+                    ),
+                    ("site-a", property_item.id),
+                ).fetchone()
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(
+            json.loads(str(row["viewing_times"])),
+            ["Saturday 20 April 12:00pm - 12:30pm"],
+        )
 
     def test_job_queue_initialise_adds_gohighlevel_token_column_to_legacy_table(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -2161,10 +2192,59 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertIn("46 Example Street\\, Dublin 4", filter_text)
-        self.assertIn("285m² | 3 bedrooms | 2 baths", filter_text)
+        self.assertIn("285m² | 3 beds | 2 baths", filter_text)
         self.assertLess(
             filter_text.index("46 Example Street\\, Dublin 4"),
-            filter_text.index("285m² | 3 bedrooms | 2 baths"),
+            filter_text.index("285m² | 3 beds | 2 baths"),
+        )
+
+    def test_overlay_filter_renders_viewing_times_between_address_and_features(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="285",
+            viewing_times=("Saturday 20 April 12:00pm - 12:30pm",),
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+
+        filter_text = build_overlay_filter(
+            property_data,
+            template,
+            cover_caption="Bright open-plan living area.",
+            slide_captions=("Bright open-plan living area.",),
+            slide_duration=template.seconds_per_slide,
+        )
+
+        self.assertIn("46 Example Street\\, Dublin 4", filter_text)
+        self.assertIn("Saturday 20 April 12\\:00pm - 12\\:30pm", filter_text)
+        self.assertIn("285m² | 3 beds | 2 baths", filter_text)
+        self.assertLess(
+            filter_text.index("46 Example Street\\, Dublin 4"),
+            filter_text.index("Saturday 20 April 12\\:00pm - 12\\:30pm"),
+        )
+        self.assertLess(
+            filter_text.index("Saturday 20 April 12\\:00pm - 12\\:30pm"),
+            filter_text.index("285m² | 3 beds | 2 baths"),
         )
 
     def test_format_property_size_normalizes_square_meter_units(self) -> None:
@@ -2205,6 +2285,20 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertEqual(build_property_header_details_line(property_data), "122m² | 1 bath")
+
+    def test_fit_wrapped_lines_rebalances_orphaned_last_address_word(self) -> None:
+        wrapped = fit_wrapped_lines(
+            "Apartment 12, Willow Court, Blackrock, County Dublin",
+            width=24,
+            max_lines=3,
+            rebalance_last_line=True,
+        )
+
+        self.assertEqual(
+            wrapped.lines,
+            ("Apartment 12, Willow", "Court, Blackrock,", "County Dublin"),
+        )
+        self.assertFalse(wrapped.clamped)
 
     def test_overlay_filter_allows_up_to_three_subtitle_lines_before_clamping(self) -> None:
         property_data = PropertyRenderData(
@@ -2463,7 +2557,7 @@ class RenderOverlayTests(unittest.TestCase):
             block for block in overlay_layout.text_blocks if block.block == "address_meta"
         )
         self.assertTrue(address_block.clamped)
-        self.assertEqual(address_meta_block.lines[0], "285m² | 3 bedrooms | 2 baths")
+        self.assertEqual(address_meta_block.lines[0], "285m² | 3 beds | 2 baths")
         self.assertEqual(address_block.font_size, address_meta_block.font_size)
         self.assertLessEqual(len(address_block.lines), address_block.max_lines)
 
@@ -2510,9 +2604,63 @@ class RenderOverlayTests(unittest.TestCase):
         address_meta_block = next(
             block for block in overlay_layout.text_blocks if block.block == "address_meta"
         )
-        self.assertEqual(address_meta_block.lines[0], "285m² | 3 bedrooms | 2 baths")
+        self.assertEqual(address_meta_block.lines[0], "285m² | 3 beds | 2 baths")
         self.assertEqual(address_block.font_size, address_meta_block.font_size)
         self.assertGreater(address_meta_block.y, address_block.y)
+
+    def test_overlay_layout_inserts_viewing_times_between_address_and_features(self) -> None:
+        property_data = PropertyRenderData(
+            site_id="ckp.ie",
+            property_id=170800,
+            slug="sample-property",
+            title="46 Example Street, Dublin 4",
+            link="https://ckp.ie/property/sample-property",
+            property_status="For Sale",
+            selected_image_dir=Path("images"),
+            selected_image_paths=(),
+            featured_image_url=None,
+            bedrooms=3,
+            bathrooms=2,
+            ber_rating="B2",
+            agent_name="Jane Doe",
+            agent_photo_url=None,
+            agent_email="jane@example.com",
+            agent_mobile=None,
+            agent_number="+353 1 234 5678",
+            agency_psra="PSRA-1234",
+            price="650000",
+            property_type_label="Apartment",
+            property_area_label="Dublin 4",
+            property_county_label="Dublin",
+            eircode="D04 TEST",
+            property_size="285",
+            viewing_times=("Saturday 20 April 12:00pm - 12:30pm",),
+        )
+        template = PropertyReelTemplate(subtitle_font_size=36)
+        slide = PropertyReelSlide(image_path=Path("primary_image.jpg"), caption=None)
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=False,
+            cover_caption=None,
+        )
+
+        address_block = next(block for block in overlay_layout.text_blocks if block.block == "address")
+        viewing_times_block = next(
+            block for block in overlay_layout.text_blocks if block.block == "viewing_times"
+        )
+        address_meta_block = next(
+            block for block in overlay_layout.text_blocks if block.block == "address_meta"
+        )
+        self.assertEqual(viewing_times_block.lines[0], "Saturday 20 April 12:00pm - 12:30pm")
+        self.assertEqual(address_meta_block.lines[0], "285m² | 3 beds | 2 baths")
+        self.assertEqual(address_block.font_size, viewing_times_block.font_size)
+        self.assertEqual(viewing_times_block.font_size, address_meta_block.font_size)
+        self.assertGreater(viewing_times_block.y, address_block.y)
+        self.assertGreater(address_meta_block.y, viewing_times_block.y)
 
     def test_overlay_filter_uses_configured_subtitle_font_and_size(self) -> None:
         with workspace_temp_dir() as workspace_dir:

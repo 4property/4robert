@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,8 @@ OVERLAY_TEXT_COLORS: dict[str, str] = {
 _PROPERTY_SIZE_NUMERIC_PATTERN = re.compile(r"^\d+(?:[.,]\d+)?$")
 _NORMALIZED_STATUS_PATTERN = re.compile(r"[\s_-]+")
 _SIMILAR_REQUIRED_STATUSES = frozenset({"sale agreed", "let agreed", "sold", "let"})
+_HTML_BREAK_PATTERN = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 _PROPERTY_SIZE_WITH_UNIT_PATTERN = re.compile(
     r"^(?P<value>\d+(?:[.,]\d+)?)\s*(?:m²|mÂ²|m2|sqm|sq\.?\s*m)$",
     re.IGNORECASE,
@@ -192,7 +195,53 @@ class WrappedTextResult:
     clamped: bool
 
 
-def fit_wrapped_lines(value: str | None, *, width: int, max_lines: int) -> WrappedTextResult:
+def _rebalance_wrapped_lines(lines: list[str], *, width: int) -> tuple[str, ...]:
+    if len(lines) < 2:
+        return tuple(lines)
+
+    last_words = lines[-1].split()
+    if len(last_words) != 1:
+        return tuple(lines)
+
+    previous_words = lines[-2].split()
+    if len(previous_words) <= 1:
+        return tuple(lines)
+
+    best_previous = lines[-2]
+    best_last = lines[-1]
+    best_difference = abs(len(best_previous) - len(best_last))
+    moved_words = list(last_words)
+    remaining_words = previous_words[:]
+
+    while len(remaining_words) > 1:
+        moved_words.insert(0, remaining_words.pop())
+        candidate_last = " ".join(moved_words)
+        if len(candidate_last) > width:
+            break
+
+        candidate_previous = " ".join(remaining_words)
+        candidate_difference = abs(len(candidate_previous) - len(candidate_last))
+        if candidate_difference <= best_difference:
+            best_previous = candidate_previous
+            best_last = candidate_last
+            best_difference = candidate_difference
+
+    if best_previous == lines[-2]:
+        return tuple(lines)
+
+    rebalanced_lines = list(lines)
+    rebalanced_lines[-2] = best_previous
+    rebalanced_lines[-1] = best_last
+    return tuple(rebalanced_lines)
+
+
+def fit_wrapped_lines(
+    value: str | None,
+    *,
+    width: int,
+    max_lines: int,
+    rebalance_last_line: bool = False,
+) -> WrappedTextResult:
     if not value:
         return WrappedTextResult(lines=(), clamped=False)
 
@@ -200,7 +249,12 @@ def fit_wrapped_lines(value: str | None, *, width: int, max_lines: int) -> Wrapp
     if not wrapped:
         return WrappedTextResult(lines=(), clamped=False)
     if len(wrapped) <= max_lines:
-        return WrappedTextResult(lines=tuple(wrapped), clamped=False)
+        lines = (
+            _rebalance_wrapped_lines(wrapped, width=width)
+            if rebalance_last_line
+            else tuple(wrapped)
+        )
+        return WrappedTextResult(lines=lines, clamped=False)
 
     lines = wrapped[: max_lines - 1]
     remaining = " ".join(wrapped[max_lines - 1 :])
@@ -208,8 +262,21 @@ def fit_wrapped_lines(value: str | None, *, width: int, max_lines: int) -> Wrapp
     return WrappedTextResult(lines=tuple(lines), clamped=True)
 
 
-def wrap_lines(value: str | None, *, width: int, max_lines: int) -> list[str]:
-    return list(fit_wrapped_lines(value, width=width, max_lines=max_lines).lines)
+def wrap_lines(
+    value: str | None,
+    *,
+    width: int,
+    max_lines: int,
+    rebalance_last_line: bool = False,
+) -> list[str]:
+    return list(
+        fit_wrapped_lines(
+            value,
+            width=width,
+            max_lines=max_lines,
+            rebalance_last_line=rebalance_last_line,
+        ).lines
+    )
 
 
 def _normalize_positive_count(value: Any) -> int | None:
@@ -233,7 +300,7 @@ def build_property_header_details_line(property_data: PropertyRenderData) -> str
 
     bedrooms = _normalize_positive_count(property_data.bedrooms)
     if bedrooms is not None:
-        bedroom_label = "bedroom" if bedrooms == 1 else "bedrooms"
+        bedroom_label = "bed" if bedrooms == 1 else "beds"
         facts.append(f"{bedrooms} {bedroom_label}")
 
     bathrooms = _normalize_positive_count(property_data.bathrooms)
@@ -244,6 +311,39 @@ def build_property_header_details_line(property_data: PropertyRenderData) -> str
     if not facts:
         return None
     return " | ".join(facts)
+
+
+def format_viewing_times(values: tuple[str, ...] | list[str] | None) -> str | None:
+    if not values:
+        return None
+
+    normalized_items: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        normalized_value = clean_text(raw_value)
+        if not normalized_value:
+            continue
+
+        text = _HTML_BREAK_PATTERN.sub(" | ", normalized_value)
+        text = _HTML_TAG_PATTERN.sub(" ", text)
+        text = html.unescape(text)
+        for part in text.split("|"):
+            cleaned_part = re.sub(r"\s+", " ", part).strip(" ,;")
+            if not cleaned_part:
+                continue
+            lowered = cleaned_part.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized_items.append(cleaned_part)
+
+    if not normalized_items:
+        return None
+    return " | ".join(normalized_items)
+
+
+def build_property_header_viewing_times_line(property_data: PropertyRenderData) -> str | None:
+    return format_viewing_times(property_data.viewing_times)
 
 
 def build_property_facts_line(property_data: PropertyRenderData) -> str:
@@ -343,6 +443,7 @@ __all__ = [
     "build_agent_lines",
     "build_display_price",
     "build_property_header_details_line",
+    "build_property_header_viewing_times_line",
     "build_property_facts_line",
     "build_property_overlay_facts_line",
     "build_similar_required_subtitle",
@@ -354,6 +455,7 @@ __all__ = [
     "format_price",
     "format_property_size_header",
     "format_property_size",
+    "format_viewing_times",
     "resolve_agency_logo_box_size",
     "resolve_agent_image_size",
     "resolve_ber_icon_size",
