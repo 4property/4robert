@@ -8,6 +8,7 @@ import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -33,11 +34,13 @@ from application.types import (
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
     DATABASE_FILENAME,
+    DATABASE_URL,
     GEMINI_SELECTION_AUDIT_FILENAME,
     PERSISTENT_LOG_DIRECTORY,
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
 )
-from core.errors import TransientSocialPublishingError
+from core.logging import _console_supports_rich_progress
+from core.errors import TransientSocialPublishingError, ValidationError
 from models.property import Property
 from repositories.media_revision_repository import MediaRevisionRepository
 from repositories.outbox_event_repository import OutboxEventRepository
@@ -59,6 +62,7 @@ from services.reel_rendering.formatting import (
 )
 from services.reel_rendering.filters import build_filter_complex, build_overlay_filter
 from services.reel_rendering.layout import build_overlay_layout
+from services.reel_rendering.data import load_property_reel_data
 from services.reel_rendering.manifest import build_property_reel_manifest_from_data
 from services.reel_rendering.models import (
     PreparedReelAssets,
@@ -263,7 +267,7 @@ class RepositorySchemaTests(unittest.TestCase):
         self.assertIn("media_revisions", media_revision_tables)
         self.assertIn("outbox_events", outbox_tables)
         self.assertIn(SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME, scripted_video_tables)
-        self.assertIn("gohighlevel_access_token", job_columns)
+        self.assertIn("gohighlevel_access_token_encrypted", job_columns)
         self.assertFalse(any("access_token" in column for column in property_columns))
         self.assertFalse(any("access_token" in column for column in pipeline_columns))
 
@@ -329,7 +333,7 @@ class RepositorySchemaTests(unittest.TestCase):
                     for row in repository.connection.execute("PRAGMA table_info(job_queue)")
                 }
 
-        self.assertIn("gohighlevel_access_token", job_columns)
+        self.assertIn("gohighlevel_access_token_encrypted", job_columns)
 
     def test_job_queue_claim_serializes_work_for_same_property(self) -> None:
         with workspace_temp_dir() as workspace_dir:
@@ -1706,9 +1710,12 @@ class WebhookTransportTests(unittest.TestCase):
         client, _ = self._build_client()
 
         with client:
+            health_response = client.get("/health")
             live_response = client.get("/health/live")
             ready_response = client.get("/health/ready")
 
+        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual(health_response.json(), {"status": "ready"})
         self.assertEqual(live_response.status_code, 200)
         self.assertEqual(live_response.json(), {"status": "ok"})
         self.assertEqual(ready_response.status_code, 200)
@@ -2208,7 +2215,7 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertIn("Bright open-plan living", filter_text)
         self.assertIn("area.", filter_text)
         self.assertNotIn("Key features", filter_text)
-        self.assertNotIn("3 bed", filter_text)
+        self.assertIn("3 beds | 2 baths", filter_text)
         self.assertNotIn("Listed by", filter_text)
         self.assertIn("fontcolor=0xF4D03F", filter_text)
         self.assertIn("enable='between(t\\,", filter_text)
@@ -2445,8 +2452,9 @@ class RenderOverlayTests(unittest.TestCase):
         )
 
         self.assertIn("Extremely Long Residential", filter_text)
-        self.assertIn("Development Name\\, Sandymount\\, Dublin 4\\,", filter_text)
-        self.assertIn("Ireland", filter_text)
+        self.assertIn("Development Name\\,", filter_text)
+        self.assertIn("Sandymount\\, Dublin 4\\, Ireland", filter_text)
+        self.assertNotIn("text='Ireland'", filter_text)
 
     def test_overlay_filter_renders_phone_and_email_on_separate_lines(self) -> None:
         property_data = PropertyRenderData(
@@ -3160,6 +3168,16 @@ class AgencyLogoRuntimeTests(unittest.TestCase):
 
 
 class ReelRuntimePathTests(unittest.TestCase):
+    def test_rich_progress_is_disabled_for_cp1252_console(self) -> None:
+        console = SimpleNamespace(file=SimpleNamespace(encoding="cp1252"))
+
+        self.assertFalse(_console_supports_rich_progress(console))
+
+    def test_rich_progress_is_allowed_for_utf8_console(self) -> None:
+        console = SimpleNamespace(file=SimpleNamespace(encoding="utf-8"))
+
+        self.assertTrue(_console_supports_rich_progress(console))
+
     def test_resolve_font_path_supports_project_relative_paths(self) -> None:
         original_cwd = Path.cwd()
         with workspace_temp_dir() as workspace_dir:
@@ -3171,6 +3189,88 @@ class ReelRuntimePathTests(unittest.TestCase):
 
         self.assertTrue(resolved_path.exists())
         self.assertEqual(resolved_path.name, "Inter_28pt-Bold.ttf")
+
+    def test_load_property_reel_data_uses_runtime_database_locator(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            site_id = f"runtime-{uuid4().hex[:8]}.example"
+            property_id = 990000 + int(uuid4().hex[:6], 16) % 1000
+            property_item = Property(
+                id=property_id,
+                slug=f"migration-check-{uuid4().hex[:8]}",
+                title="Migration Check",
+                property_status="For Sale",
+                featured_image_url="https://example.com/property-primary.jpg",
+            )
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            selected_image_path = selected_dir / "primary.jpg"
+            selected_image_path.write_bytes(b"image")
+
+            try:
+                with PropertyPipelineRepository(DATABASE_URL, workspace_dir) as repository:
+                    repository.save_property_images(
+                        property_item,
+                        selected_dir,
+                        [
+                            (
+                                1,
+                                property_item.featured_image_url or "https://example.com/property-primary.jpg",
+                                selected_image_path,
+                            )
+                        ],
+                        site_id=site_id,
+                    )
+
+                property_data = load_property_reel_data(
+                    workspace_dir,
+                    site_id=site_id,
+                    property_id=property_id,
+                )
+            finally:
+                with PropertyPipelineRepository(DATABASE_URL, workspace_dir) as repository:
+                    repository.connection.execute(
+                        """
+                        DELETE FROM property_pipeline_state
+                        WHERE site_id = :site_id
+                        AND source_property_id = :property_id
+                        """,
+                        {"site_id": site_id, "property_id": property_id},
+                    )
+                    row = repository.connection.execute(
+                        """
+                        SELECT record_id
+                        FROM properties
+                        WHERE site_id = :site_id
+                        AND source_property_id = :property_id
+                        """,
+                        {"site_id": site_id, "property_id": property_id},
+                    ).fetchone()
+                    if row is not None:
+                        repository.connection.execute(
+                            "DELETE FROM property_images WHERE record_id = :record_id",
+                            {"record_id": int(row["record_id"])},
+                        )
+                    repository.connection.execute(
+                        """
+                        DELETE FROM properties
+                        WHERE site_id = :site_id
+                        AND source_property_id = :property_id
+                        """,
+                        {"site_id": site_id, "property_id": property_id},
+                    )
+                    repository.connection.execute(
+                        "DELETE FROM wordpress_sources WHERE site_id = :site_id",
+                        {"site_id": site_id},
+                    )
+                    repository.connection.execute(
+                        "DELETE FROM agencies WHERE slug = :site_id",
+                        {"site_id": site_id},
+                    )
+
+        self.assertEqual(property_data.site_id, site_id)
+        self.assertEqual(property_data.property_id, property_id)
+        self.assertEqual(property_data.slug, property_item.slug)
+        self.assertEqual(property_data.selected_image_paths, (selected_image_path,))
 
 
 class ReelManifestTests(unittest.TestCase):

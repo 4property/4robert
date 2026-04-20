@@ -61,7 +61,7 @@ class SqliteJobDispatcher:
             format_console_block(
                 "Job Dispatcher Started",
                 format_detail_line("Worker count", self.worker_count),
-                format_detail_line("Queue backend", "SQLite durable queue"),
+                format_detail_line("Queue backend", "PostgreSQL durable queue"),
                 format_detail_line("Lease seconds", self.lease_seconds),
                 format_detail_line("Poll interval (seconds)", f"{self.poll_interval_seconds:.2f}"),
                 format_detail_line("Recovered stale jobs", recovered_jobs),

@@ -13,11 +13,16 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from application.scripted_video_service import ScriptedVideoRenderService
-from application.bootstrap import build_default_job_dispatcher, build_default_unit_of_work_factory
+from application.bootstrap import (
+    build_default_job_dispatcher,
+    build_runtime_unit_of_work_factory,
+)
 from application.interfaces import JobDispatcher
 from application.types import SocialPublishContext
 from application.webhook_acceptance import WebhookAcceptanceService
 from config import (
+    DATABASE_FILENAME,
+    DATABASE_URL,
     LOG_LEVEL,
     PERSISTENT_LOG_BACKUP_COUNT,
     PERSISTENT_LOG_DIRECTORY,
@@ -75,6 +80,7 @@ class WordPressWebhookApplication:
         workspace_dir: str | Path,
         *,
         dispatcher: JobDispatcher,
+        database_locator: str | Path | None = None,
         host: str = WEBHOOK_HOST,
         path: str = WEBHOOK_PATH,
         site_id_header: str = WEBHOOK_SITE_ID_HEADER,
@@ -93,8 +99,16 @@ class WordPressWebhookApplication:
         job_max_attempts: int = WEBHOOK_JOB_MAX_ATTEMPTS,
     ) -> None:
         self.workspace_dir = Path(workspace_dir).expanduser().resolve()
+        self.database_locator = (
+            self.workspace_dir / DATABASE_FILENAME
+            if database_locator is None
+            else database_locator
+        )
         self.dispatcher = dispatcher
-        self.unit_of_work_factory = build_default_unit_of_work_factory(self.workspace_dir)
+        self.unit_of_work_factory = build_runtime_unit_of_work_factory(
+            self.workspace_dir,
+            database_locator=self.database_locator,
+        )
         self.acceptance_service = WebhookAcceptanceService(
             unit_of_work_factory=self.unit_of_work_factory,
             job_max_attempts=job_max_attempts,
@@ -130,6 +144,7 @@ class WordPressWebhookApplication:
         )
         readiness = run_startup_checks(
             self.workspace_dir,
+            database_locator=self.database_locator,
             site_secrets=self.site_secrets,
             worker_count=self.worker_count,
             security_disabled=self.security_disabled,
@@ -145,11 +160,15 @@ class WordPressWebhookApplication:
                 "Webhook Runtime Started",
                 format_detail_line("Webhook path", self.path),
                 format_detail_line("Worker count", self.worker_count),
-                format_detail_line("Queue backend", "SQLite durable queue"),
+                format_detail_line("Queue backend", "PostgreSQL durable queue"),
                 format_detail_line("Workspace", self.workspace_dir),
                 format_detail_line(
                     "Database",
-                    readiness.get("environment", {}).get("database_path"),
+                    readiness.get("environment", {}).get("database_url"),
+                ),
+                format_detail_line(
+                    "Database schema",
+                    readiness.get("environment", {}).get("database_schema"),
                 ),
                 format_detail_line(
                     "FFmpeg",
@@ -201,6 +220,7 @@ class WordPressWebhookApplication:
     def build_readiness_report(self) -> dict[str, object]:
         readiness = build_readiness_report(
             self.workspace_dir,
+            database_locator=self.database_locator,
             site_secrets=self.site_secrets,
             worker_count=self.worker_count,
             security_disabled=self.security_disabled,
@@ -311,6 +331,7 @@ class WordPressWebhookServer:
         workspace_dir: str | Path,
         *,
         dispatcher: JobDispatcher | None = None,
+        database_locator: str | Path | None = DATABASE_URL,
         host: str = WEBHOOK_HOST,
         path: str = WEBHOOK_PATH,
         site_id_header: str = WEBHOOK_SITE_ID_HEADER,
@@ -329,11 +350,13 @@ class WordPressWebhookServer:
     ) -> None:
         active_dispatcher = dispatcher or build_default_job_dispatcher(
             workspace_dir,
+            database_locator=database_locator,
             worker_count=worker_count,
         )
         self.runtime = WordPressWebhookApplication(
             workspace_dir,
             dispatcher=active_dispatcher,
+            database_locator=database_locator,
             host=host,
             path=path,
             site_id_header=site_id_header,
@@ -455,8 +478,7 @@ def create_fastapi_app(
     async def health_live() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/health/ready")
-    async def health_ready(request: Request) -> JSONResponse:
+    async def _health_ready_response(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
         readiness = runtime.build_readiness_report()
         status_code = 200 if readiness["ready"] else 503
@@ -464,6 +486,14 @@ def create_fastapi_app(
             status_code=status_code,
             content=_build_minimal_readiness_payload(readiness),
         )
+
+    @app.get("/health")
+    async def health(request: Request) -> JSONResponse:
+        return await _health_ready_response(request)
+
+    @app.get("/health/ready")
+    async def health_ready(request: Request) -> JSONResponse:
+        return await _health_ready_response(request)
 
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
@@ -767,6 +797,7 @@ def run_wordpress_webhook_server(
     workspace_dir: str | Path,
     *,
     dispatcher: JobDispatcher | None = None,
+    database_locator: str | Path | None = DATABASE_URL,
     host: str = WEBHOOK_HOST,
     port: int = WEBHOOK_PORT,
 ) -> None:
@@ -783,6 +814,7 @@ def run_wordpress_webhook_server(
     server = WordPressWebhookServer(
         workspace_dir,
         dispatcher=dispatcher,
+        database_locator=database_locator,
         host=host,
     )
     logger.info(

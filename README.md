@@ -7,7 +7,7 @@ It ingests WordPress property payloads, prepares images, renders short-form reel
 ## Current capabilities
 
 - multi-site webhook ingestion
-- durable SQLite job queue
+- durable PostgreSQL job queue
 - keyed worker serialization per property
 - full reels for `for_sale` and `to_let`
 - short status reels for `sale_agreed`, `sold`, `let_agreed`, and `let`
@@ -21,7 +21,7 @@ It ingests WordPress property payloads, prepares images, renders short-form reel
 
 - `application/`: workflow orchestration, dispatching, planning, and content generation
 - `services/`: webhook transport, rendering, media prep, AI adapters, and social delivery
-- `repositories/`: SQLite persistence
+- `repositories/`: PostgreSQL persistence and compatibility shims
 - `settings/`: environment-driven configuration
 - `tests/`: regression and architecture coverage
 

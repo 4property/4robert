@@ -65,7 +65,7 @@ sudo -u cpihed bash -lc 'cd /opt/cpihed && set -a && source /etc/cpihed/cpihed.e
 
 This validates:
 
-- SQLite initialization and write access
+- PostgreSQL connectivity, required tables, and write access
 - runtime directories and temp writes
 - `ffmpeg`
 - subtitle font presence
@@ -122,6 +122,6 @@ If the public webhook hostname differs from the dotted `site_id` values you use 
 ## Operational notes
 
 - Keep `/opt/cpihed/generated_media`, `/opt/cpihed/property_media`, and `/opt/cpihed/property_media_raw` writable by the service user.
-- SQLite uses WAL mode, so the database directory must allow creation of sidecar files.
+- Ensure `DATABASE_URL` points to a reachable PostgreSQL instance with the Alembic schema applied.
 - If `ffmpeg` fails with `Cannot allocate memory`, reduce `REEL_FFMPEG_FILTER_THREADS` and `REEL_FFMPEG_ENCODER_THREADS`.
 - If webhook authentication fails, compare the incoming headers against the configured `WEBHOOK_*_HEADER` values and confirm the secret for the source `site_id`.

@@ -10,6 +10,7 @@ from config import (
     AI_COPY_ENABLED,
     AI_NARRATION_ENABLED,
     DATABASE_FILENAME,
+    DATABASE_URL,
     GEMINI_API_KEY,
     GEMINI_MODEL,
     NOTIFICATIONS_ENABLED,
@@ -22,6 +23,11 @@ from core.errors import ApplicationError
 from core.logging import format_console_block, format_detail_line
 from repositories.media_revision_repository import MediaRevisionRepository
 from repositories.outbox_event_repository import OutboxEventRepository
+from repositories.postgres.engine import (
+    describe_database_binding,
+    resolve_database_binding,
+    verify_required_tables,
+)
 from repositories.property_job_repository import PropertyJobRepository
 from repositories.property_pipeline_repository import PropertyPipelineRepository
 from repositories.webhook_delivery_repository import WebhookDeliveryRepository
@@ -33,6 +39,20 @@ from services.reel_rendering.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REQUIRED_POSTGRES_TABLES = (
+    "agencies",
+    "wordpress_sources",
+    "properties",
+    "property_images",
+    "property_pipeline_state",
+    "webhook_events",
+    "job_queue",
+    "media_revisions",
+    "outbox_events",
+    "scripted_video_artifacts",
+    "alembic_version",
+)
 
 
 _PLACEHOLDER_SECRET_TOKENS = frozenset(
@@ -81,12 +101,18 @@ def ensure_runtime_is_supported(*, worker_count: int) -> None:
 def build_readiness_report(
     base_dir: str | Path,
     *,
+    database_locator: str | Path | None = None,
     site_secrets: dict[str, str],
     worker_count: int,
     security_disabled: bool,
 ) -> dict[str, object]:
     workspace_dir = Path(base_dir).expanduser().resolve()
-    database_path = workspace_dir / DATABASE_FILENAME
+    resolved_database_locator = (
+        workspace_dir / DATABASE_FILENAME
+        if database_locator is None
+        else database_locator
+    )
+    database_binding = describe_database_binding(resolved_database_locator)
     reel_template = PropertyReelTemplate()
     effective_site_secrets = _has_effective_site_secrets(site_secrets)
     gemini_configured = _has_effective_gemini_credentials(
@@ -126,7 +152,8 @@ def build_readiness_report(
     failures: list[dict[str, object]] = []
     environment: dict[str, object] = {
         "workspace_dir": str(workspace_dir),
-        "database_path": str(database_path),
+        "database_url": database_binding["database_url"],
+        "database_schema": database_binding["database_schema"],
         "python_executable": sys.executable,
         "python_version": sys.version.split()[0],
         "platform": sys.platform,
@@ -138,7 +165,10 @@ def build_readiness_report(
     }
 
     try:
-        _ensure_database_writable(database_path, workspace_dir)
+        _ensure_database_writable(
+            workspace_dir,
+            database_locator=resolved_database_locator,
+        )
         checks["database_writable"] = True
     except ApplicationError as exc:
         errors.append(str(exc))
@@ -266,6 +296,7 @@ def build_readiness_report(
 def run_startup_checks(
     base_dir: str | Path,
     *,
+    database_locator: str | Path | None = None,
     site_secrets: dict[str, str],
     worker_count: int,
     security_disabled: bool,
@@ -273,6 +304,7 @@ def run_startup_checks(
     ensure_runtime_is_supported(worker_count=worker_count)
     readiness = build_readiness_report(
         base_dir,
+        database_locator=database_locator,
         site_secrets=site_secrets,
         worker_count=worker_count,
         security_disabled=security_disabled,
@@ -332,28 +364,59 @@ def _looks_like_placeholder_secret(value: str) -> bool:
     }
 
 
-def _ensure_database_writable(database_path: Path, workspace_dir: Path) -> None:
+def _ensure_database_writable(
+    workspace_dir: Path,
+    *,
+    database_locator: str | Path | None,
+) -> None:
     try:
-        with PropertyPipelineRepository(database_path, workspace_dir):
+        binding = resolve_database_binding(database_locator)
+        required_tables = _REQUIRED_POSTGRES_TABLES
+        if binding.auto_create_schema:
+            required_tables = tuple(
+                table_name
+                for table_name in _REQUIRED_POSTGRES_TABLES
+                if table_name != "alembic_version"
+            )
+        missing_tables = verify_required_tables(
+            database_locator,
+            required_tables=required_tables,
+        )
+        if missing_tables:
+            raise ApplicationError(
+                "PostgreSQL is reachable but the schema is incomplete.",
+                context={
+                    "database_url": describe_database_binding(database_locator)["database_url"],
+                    "missing_tables": ", ".join(missing_tables),
+                },
+                hint=(
+                    "Run `.\\.venv\\Scripts\\python.exe -m alembic upgrade head` against this DATABASE_URL "
+                    "before starting the service."
+                ),
+            )
+
+        with PropertyPipelineRepository(database_locator, workspace_dir):
             pass
-        with MediaRevisionRepository(database_path):
+        with MediaRevisionRepository(database_locator):
             pass
-        with OutboxEventRepository(database_path):
+        with OutboxEventRepository(database_locator):
             pass
-        with WebhookDeliveryRepository(database_path):
+        with WebhookDeliveryRepository(database_locator):
             pass
-        with PropertyJobRepository(database_path):
+        with PropertyJobRepository(database_locator):
             pass
+    except ApplicationError:
+        raise
     except Exception as exc:
         raise ApplicationError(
-            "Failed to open or initialize the SQLite repositories.",
+            "Failed to open or initialize the PostgreSQL repositories.",
             context={
-                "database_path": str(database_path),
+                "database_url": describe_database_binding(database_locator)["database_url"],
                 "workspace_dir": str(workspace_dir),
             },
             hint=(
-                "Ensure the service user can write to the workspace, the database path is persistent, "
-                "and no filesystem policy is blocking SQLite WAL files."
+                "Ensure DATABASE_URL points to a reachable PostgreSQL instance, run the Alembic migrations, "
+                "and confirm the service user can still write the workspace storage directories."
             ),
             cause=exc,
         ) from exc
