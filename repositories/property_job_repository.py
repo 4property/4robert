@@ -1,11 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-import sqlite3
 
-from repositories.sqlite_connection import create_sqlite_connection
+from repositories.postgres.repository import PostgresRepositoryBase, ensure_site_context, now_iso
+from repositories.postgres.security import decrypt_text, encrypt_text
 
 PROPERTY_JOB_TABLE_NAME = "job_queue"
 
@@ -50,93 +49,49 @@ class QueuedPropertyJobRecord:
     superseded_by_job_id: str
 
 
-def _build_job_queue_table_sql() -> str:
-    return f"""
-        CREATE TABLE IF NOT EXISTS {PROPERTY_JOB_TABLE_NAME} (
-            job_id TEXT PRIMARY KEY,
-            event_id TEXT NOT NULL,
-            site_id TEXT NOT NULL,
-            property_id INTEGER,
-            received_at TEXT NOT NULL DEFAULT '',
-            raw_payload_hash TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            publish_context_json TEXT NOT NULL DEFAULT '',
-            gohighlevel_access_token TEXT NOT NULL DEFAULT '',
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            max_attempts INTEGER NOT NULL DEFAULT 1,
-            available_at TEXT NOT NULL,
-            lease_expires_at TEXT NOT NULL DEFAULT '',
-            worker_id TEXT NOT NULL DEFAULT '',
-            last_error TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            finished_at TEXT NOT NULL DEFAULT '',
-            superseded_by_job_id TEXT NOT NULL DEFAULT ''
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_job_queue_status_available_at
-        ON {PROPERTY_JOB_TABLE_NAME} (status, available_at, created_at);
-
-        CREATE INDEX IF NOT EXISTS idx_job_queue_site_property_status
-        ON {PROPERTY_JOB_TABLE_NAME} (site_id, property_id, status, created_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_job_queue_processing_lease
-        ON {PROPERTY_JOB_TABLE_NAME} (status, lease_expires_at);
-    """
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-class PropertyJobRepository:
+class PropertyJobRepository(PostgresRepositoryBase):
     def __init__(
         self,
-        database_path: str | Path,
+        database_path: str | Path | None,
         *,
-        connection: sqlite3.Connection | None = None,
+        connection=None,
     ) -> None:
-        self.database_path = Path(database_path).expanduser().resolve()
-        self._owns_connection = connection is None
-        self.connection = connection or create_sqlite_connection(self.database_path)
-
-    def __enter__(self) -> "PropertyJobRepository":
-        self.initialise()
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if not self._owns_connection:
-            return
-        if exc_type is None:
-            self.connection.commit()
-        else:
-            self.connection.rollback()
-        self.connection.close()
+        super().__init__(database_path, connection=connection)
 
     def initialise(self) -> None:
-        self.connection.executescript(_build_job_queue_table_sql())
-        self._ensure_job_queue_columns()
-
-    def _get_table_columns(self) -> set[str]:
-        return {
+        existing_columns = {
             str(row[1])
             for row in self.connection.execute(f"PRAGMA table_info({PROPERTY_JOB_TABLE_NAME})")
         }
-
-    def _ensure_job_queue_columns(self) -> None:
-        existing_columns = self._get_table_columns()
-        required_columns = {
-            "gohighlevel_access_token": "TEXT NOT NULL DEFAULT ''",
-        }
-        for column, definition in required_columns.items():
-            if column in existing_columns:
-                continue
+        if not existing_columns:
+            return
+        if "gohighlevel_access_token_encrypted" not in existing_columns:
             self.connection.execute(
-                f"ALTER TABLE {PROPERTY_JOB_TABLE_NAME} ADD COLUMN {column} {definition}"
+                f"ALTER TABLE {PROPERTY_JOB_TABLE_NAME} ADD COLUMN gohighlevel_access_token_encrypted BYTEA"
             )
+        if "gohighlevel_access_token" in existing_columns:
+            legacy_rows = self.connection.execute(
+                f"""
+                SELECT job_id, gohighlevel_access_token
+                FROM {PROPERTY_JOB_TABLE_NAME}
+                WHERE COALESCE(gohighlevel_access_token, '') != ''
+                """
+            ).fetchall()
+            for row in legacy_rows:
+                self.connection.execute(
+                    f"""
+                    UPDATE {PROPERTY_JOB_TABLE_NAME}
+                    SET gohighlevel_access_token_encrypted = :encrypted
+                    WHERE job_id = :job_id
+                    """,
+                    {
+                        "encrypted": encrypt_text(str(row["gohighlevel_access_token"] or "")),
+                        "job_id": str(row["job_id"]),
+                    },
+                )
 
     def enqueue_job(self, request: PropertyJobEnqueueRequest) -> None:
+        ensure_site_context(self.connection, request.site_id)
         self.connection.execute(
             f"""
             INSERT INTO {PROPERTY_JOB_TABLE_NAME} (
@@ -149,7 +104,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
-                gohighlevel_access_token,
+                gohighlevel_access_token_encrypted,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -161,23 +116,44 @@ class PropertyJobRepository:
                 finished_at,
                 superseded_by_job_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?, '', '', NULL, ?, ?, '', '')
+            VALUES (
+                :job_id,
+                :event_id,
+                :site_id,
+                :property_id,
+                :received_at,
+                :raw_payload_hash,
+                'queued',
+                :payload_json,
+                :publish_context_json,
+                :gohighlevel_access_token_encrypted,
+                0,
+                :max_attempts,
+                :available_at,
+                '',
+                '',
+                NULL,
+                :created_at,
+                :updated_at,
+                '',
+                ''
+            )
             """,
-            (
-                request.job_id,
-                request.event_id,
-                request.site_id,
-                request.property_id,
-                request.received_at,
-                request.raw_payload_hash,
-                request.payload_json,
-                request.publish_context_json,
-                request.gohighlevel_access_token,
-                max(1, request.max_attempts),
-                request.available_at,
-                request.created_at,
-                request.created_at,
-            ),
+            {
+                "job_id": request.job_id,
+                "event_id": request.event_id,
+                "site_id": request.site_id,
+                "property_id": request.property_id,
+                "received_at": request.received_at,
+                "raw_payload_hash": request.raw_payload_hash,
+                "payload_json": request.payload_json,
+                "publish_context_json": request.publish_context_json,
+                "gohighlevel_access_token_encrypted": encrypt_text(request.gohighlevel_access_token),
+                "max_attempts": max(1, request.max_attempts),
+                "available_at": request.available_at,
+                "created_at": request.created_at,
+                "updated_at": request.created_at,
+            },
         )
 
     def supersede_queued_jobs(
@@ -190,17 +166,20 @@ class PropertyJobRepository:
     ) -> tuple[str, ...]:
         if property_id is None:
             return ()
-        completed_at = finished_at or _now_iso()
+        completed_at = finished_at or now_iso()
         rows = self.connection.execute(
             f"""
             SELECT event_id
             FROM {PROPERTY_JOB_TABLE_NAME}
-            WHERE site_id = ?
-            AND property_id = ?
+            WHERE site_id = :site_id
+            AND property_id = :property_id
             AND status = 'queued'
             ORDER BY created_at DESC, job_id DESC
             """,
-            (site_id, property_id),
+            {
+                "site_id": site_id,
+                "property_id": property_id,
+            },
         ).fetchall()
         if not rows:
             return ()
@@ -209,34 +188,45 @@ class PropertyJobRepository:
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'superseded',
                 publish_context_json = '',
-                gohighlevel_access_token = '',
+                gohighlevel_access_token_encrypted = :empty_token,
                 last_error = 'Superseded by a newer queued job.',
-                updated_at = ?,
-                finished_at = ?,
-                superseded_by_job_id = ?
-            WHERE site_id = ?
-            AND property_id = ?
+                updated_at = :updated_at,
+                finished_at = :finished_at,
+                superseded_by_job_id = :superseded_by_job_id
+            WHERE site_id = :site_id
+            AND property_id = :property_id
             AND status = 'queued'
             """,
-            (completed_at, completed_at, superseded_by_job_id, site_id, property_id),
+            {
+                "empty_token": encrypt_text(""),
+                "updated_at": completed_at,
+                "finished_at": completed_at,
+                "superseded_by_job_id": superseded_by_job_id,
+                "site_id": site_id,
+                "property_id": property_id,
+            },
         )
         return tuple(str(row["event_id"]) for row in rows)
 
     def recover_expired_processing_jobs(self, *, now: str | None = None) -> int:
-        active_now = now or _now_iso()
+        active_now = now or now_iso()
         cursor = self.connection.execute(
             f"""
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'queued',
                 worker_id = '',
                 lease_expires_at = '',
-                updated_at = ?,
-                available_at = ?
+                updated_at = :updated_at,
+                available_at = :available_at
             WHERE status = 'processing'
             AND lease_expires_at != ''
-            AND lease_expires_at <= ?
+            AND lease_expires_at <= :active_now
             """,
-            (active_now, active_now, active_now),
+            {
+                "updated_at": active_now,
+                "available_at": active_now,
+                "active_now": active_now,
+            },
         )
         return int(cursor.rowcount or 0)
 
@@ -247,20 +237,14 @@ class PropertyJobRepository:
         lease_expires_at: str,
         now: str | None = None,
     ) -> QueuedPropertyJobRecord | None:
-        active_now = now or _now_iso()
+        active_now = now or now_iso()
         row = self.connection.execute(
             f"""
-            UPDATE {PROPERTY_JOB_TABLE_NAME}
-            SET status = 'processing',
-                attempt_count = attempt_count + 1,
-                worker_id = ?,
-                lease_expires_at = ?,
-                updated_at = ?
-            WHERE job_id = (
+            WITH candidate AS (
                 SELECT candidate.job_id
                 FROM {PROPERTY_JOB_TABLE_NAME} AS candidate
                 WHERE candidate.status = 'queued'
-                AND candidate.available_at <= ?
+                AND candidate.available_at <= :active_now
                 AND NOT EXISTS (
                     SELECT 1
                     FROM {PROPERTY_JOB_TABLE_NAME} AS processing
@@ -271,31 +255,45 @@ class PropertyJobRepository:
                     AND processing.property_id = candidate.property_id
                 )
                 ORDER BY candidate.created_at ASC, candidate.job_id ASC
+                FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
+            UPDATE {PROPERTY_JOB_TABLE_NAME} AS queue
+            SET status = 'processing',
+                attempt_count = queue.attempt_count + 1,
+                worker_id = :worker_id,
+                lease_expires_at = :lease_expires_at,
+                updated_at = :updated_at
+            FROM candidate
+            WHERE queue.job_id = candidate.job_id
             RETURNING
-                job_id,
-                event_id,
-                site_id,
-                property_id,
-                received_at,
-                raw_payload_hash,
-                status,
-                payload_json,
-                publish_context_json,
-                gohighlevel_access_token,
-                attempt_count,
-                max_attempts,
-                available_at,
-                lease_expires_at,
-                worker_id,
-                last_error,
-                created_at,
-                updated_at,
-                finished_at,
-                superseded_by_job_id
+                queue.job_id,
+                queue.event_id,
+                queue.site_id,
+                queue.property_id,
+                queue.received_at,
+                queue.raw_payload_hash,
+                queue.status,
+                queue.payload_json,
+                queue.publish_context_json,
+                queue.gohighlevel_access_token_encrypted,
+                queue.attempt_count,
+                queue.max_attempts,
+                queue.available_at,
+                queue.lease_expires_at,
+                queue.worker_id,
+                queue.last_error,
+                queue.created_at,
+                queue.updated_at,
+                queue.finished_at,
+                queue.superseded_by_job_id
             """,
-            (worker_id, lease_expires_at, active_now, active_now),
+            {
+                "worker_id": worker_id,
+                "lease_expires_at": lease_expires_at,
+                "updated_at": active_now,
+                "active_now": active_now,
+            },
         ).fetchone()
         if row is None:
             return None
@@ -309,36 +307,46 @@ class PropertyJobRepository:
         lease_expires_at: str,
         now: str | None = None,
     ) -> bool:
-        active_now = now or _now_iso()
+        active_now = now or now_iso()
         cursor = self.connection.execute(
             f"""
             UPDATE {PROPERTY_JOB_TABLE_NAME}
-            SET lease_expires_at = ?,
-                updated_at = ?
-            WHERE job_id = ?
+            SET lease_expires_at = :lease_expires_at,
+                updated_at = :updated_at
+            WHERE job_id = :job_id
             AND status = 'processing'
-            AND worker_id = ?
+            AND worker_id = :worker_id
             """,
-            (lease_expires_at, active_now, job_id, worker_id),
+            {
+                "lease_expires_at": lease_expires_at,
+                "updated_at": active_now,
+                "job_id": job_id,
+                "worker_id": worker_id,
+            },
         )
         return bool(cursor.rowcount)
 
     def mark_job_completed(self, *, job_id: str, finished_at: str | None = None) -> None:
-        completed_at = finished_at or _now_iso()
+        completed_at = finished_at or now_iso()
         self.connection.execute(
             f"""
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'completed',
                 publish_context_json = '',
-                gohighlevel_access_token = '',
+                gohighlevel_access_token_encrypted = :empty_token,
                 lease_expires_at = '',
                 worker_id = '',
                 last_error = NULL,
-                updated_at = ?,
-                finished_at = ?
-            WHERE job_id = ?
+                updated_at = :updated_at,
+                finished_at = :finished_at
+            WHERE job_id = :job_id
             """,
-            (completed_at, completed_at, job_id),
+            {
+                "empty_token": encrypt_text(""),
+                "updated_at": completed_at,
+                "finished_at": completed_at,
+                "job_id": job_id,
+            },
         )
 
     def mark_job_failed(
@@ -348,21 +356,27 @@ class PropertyJobRepository:
         error_message: str,
         finished_at: str | None = None,
     ) -> None:
-        completed_at = finished_at or _now_iso()
+        completed_at = finished_at or now_iso()
         self.connection.execute(
             f"""
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'failed',
                 publish_context_json = '',
-                gohighlevel_access_token = '',
+                gohighlevel_access_token_encrypted = :empty_token,
                 lease_expires_at = '',
                 worker_id = '',
-                last_error = ?,
-                updated_at = ?,
-                finished_at = ?
-            WHERE job_id = ?
+                last_error = :last_error,
+                updated_at = :updated_at,
+                finished_at = :finished_at
+            WHERE job_id = :job_id
             """,
-            (error_message, completed_at, completed_at, job_id),
+            {
+                "empty_token": encrypt_text(""),
+                "last_error": error_message,
+                "updated_at": completed_at,
+                "finished_at": completed_at,
+                "job_id": job_id,
+            },
         )
 
     def schedule_retry(
@@ -373,31 +387,36 @@ class PropertyJobRepository:
         available_at: str,
         now: str | None = None,
     ) -> None:
-        active_now = now or _now_iso()
+        active_now = now or now_iso()
         self.connection.execute(
             f"""
             UPDATE {PROPERTY_JOB_TABLE_NAME}
             SET status = 'queued',
                 lease_expires_at = '',
                 worker_id = '',
-                last_error = ?,
-                updated_at = ?,
-                available_at = ?,
+                last_error = :last_error,
+                updated_at = :updated_at,
+                available_at = :available_at,
                 finished_at = ''
-            WHERE job_id = ?
+            WHERE job_id = :job_id
             """,
-            (error_message, active_now, available_at, job_id),
+            {
+                "last_error": error_message,
+                "updated_at": active_now,
+                "available_at": available_at,
+                "job_id": job_id,
+            },
         )
 
     def count_active_jobs(self) -> int:
         row = self.connection.execute(
             f"""
-            SELECT COUNT(*)
+            SELECT COUNT(*) AS count
             FROM {PROPERTY_JOB_TABLE_NAME}
             WHERE status IN ('queued', 'processing')
             """
         ).fetchone()
-        return 0 if row is None else int(row[0])
+        return 0 if row is None else int(row["count"])
 
     def get_job(self, job_id: str) -> QueuedPropertyJobRecord | None:
         row = self.connection.execute(
@@ -412,7 +431,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
-                gohighlevel_access_token,
+                gohighlevel_access_token_encrypted,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -424,9 +443,9 @@ class PropertyJobRepository:
                 finished_at,
                 superseded_by_job_id
             FROM {PROPERTY_JOB_TABLE_NAME}
-            WHERE job_id = ?
+            WHERE job_id = :job_id
             """,
-            (job_id,),
+            {"job_id": job_id},
         ).fetchone()
         if row is None:
             return None
@@ -450,7 +469,7 @@ class PropertyJobRepository:
                 status,
                 payload_json,
                 publish_context_json,
-                gohighlevel_access_token,
+                gohighlevel_access_token_encrypted,
                 attempt_count,
                 max_attempts,
                 available_at,
@@ -462,16 +481,19 @@ class PropertyJobRepository:
                 finished_at,
                 superseded_by_job_id
             FROM {PROPERTY_JOB_TABLE_NAME}
-            WHERE site_id = ?
-            AND property_id IS ?
+            WHERE site_id = :site_id
+            AND property_id IS NOT DISTINCT FROM :property_id
             ORDER BY created_at ASC, job_id ASC
             """,
-            (site_id, property_id),
+            {
+                "site_id": site_id,
+                "property_id": property_id,
+            },
         ).fetchall()
         return tuple(_row_to_queued_job(row) for row in rows)
 
 
-def _row_to_queued_job(row: sqlite3.Row) -> QueuedPropertyJobRecord:
+def _row_to_queued_job(row) -> QueuedPropertyJobRecord:
     return QueuedPropertyJobRecord(
         job_id=str(row["job_id"]),
         event_id=str(row["event_id"]),
@@ -482,7 +504,7 @@ def _row_to_queued_job(row: sqlite3.Row) -> QueuedPropertyJobRecord:
         status=str(row["status"]),
         payload_json=str(row["payload_json"] or ""),
         publish_context_json=str(row["publish_context_json"] or ""),
-        gohighlevel_access_token=str(row["gohighlevel_access_token"] or ""),
+        gohighlevel_access_token=decrypt_text(row["gohighlevel_access_token_encrypted"]),
         attempt_count=int(row["attempt_count"] or 0),
         max_attempts=int(row["max_attempts"] or 1),
         available_at=str(row["available_at"] or ""),
@@ -502,4 +524,3 @@ __all__ = [
     "PropertyJobEnqueueRequest",
     "QueuedPropertyJobRecord",
 ]
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -101,7 +102,7 @@ def get_rich_console() -> Console | None:
 @contextmanager
 def create_progress(*, transient: bool = False) -> Progress | NullProgress:
     console = get_rich_console()
-    if console is None or Progress is None:
+    if console is None or Progress is None or not _console_supports_rich_progress(console):
         yield NullProgress()
         return
 
@@ -120,6 +121,34 @@ def create_progress(*, transient: bool = False) -> Progress | NullProgress:
     )
     with progress:
         yield progress
+
+
+def _console_supports_rich_progress_legacy(console: Console) -> bool:
+    output = getattr(console, "file", None) or sys.stdout
+    encoding = getattr(output, "encoding", None) or getattr(sys.stdout, "encoding", None)
+    if not encoding:
+        return True
+    try:
+        "⠋━█".encode(encoding)
+    except UnicodeEncodeError:
+        return False
+    except LookupError:
+        return False
+    return True
+
+
+def _console_supports_rich_progress(console: Console) -> bool:
+    output = getattr(console, "file", None) or sys.stdout
+    encoding = getattr(output, "encoding", None) or getattr(sys.stdout, "encoding", None)
+    if not encoding:
+        return True
+    try:
+        "⠋━█".encode(encoding)
+    except UnicodeEncodeError:
+        return False
+    except LookupError:
+        return False
+    return True
 
 
 def resolve_log_directory(

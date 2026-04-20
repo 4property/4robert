@@ -1,11 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-import sqlite3
 
-from repositories.sqlite_connection import create_sqlite_connection
+from repositories.postgres.repository import PostgresRepositoryBase, ensure_site_context
 
 WEBHOOK_DELIVERY_TABLE_NAME = "webhook_events"
 
@@ -22,51 +20,14 @@ class WebhookDeliveryRecord:
     error_message: str | None
 
 
-class WebhookDeliveryRepository:
+class WebhookDeliveryRepository(PostgresRepositoryBase):
     def __init__(
         self,
-        database_path: str | Path,
+        database_path: str | Path | None,
         *,
-        connection: sqlite3.Connection | None = None,
+        connection=None,
     ) -> None:
-        self.database_path = Path(database_path).expanduser().resolve()
-        self._owns_connection = connection is None
-        self.connection = connection or create_sqlite_connection(self.database_path)
-
-    def __enter__(self) -> "WebhookDeliveryRepository":
-        self.initialise()
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if not self._owns_connection:
-            return
-        if exc_type is None:
-            self.connection.commit()
-        else:
-            self.connection.rollback()
-        self.connection.close()
-
-    def initialise(self) -> None:
-        self.connection.executescript(
-            f"""
-            CREATE TABLE IF NOT EXISTS {WEBHOOK_DELIVERY_TABLE_NAME} (
-                event_id TEXT PRIMARY KEY,
-                site_id TEXT NOT NULL,
-                property_id INTEGER,
-                received_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                status TEXT NOT NULL,
-                raw_payload_hash TEXT NOT NULL,
-                error_message TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_webhook_events_site_received_at
-            ON {WEBHOOK_DELIVERY_TABLE_NAME} (site_id, received_at DESC);
-
-            CREATE INDEX IF NOT EXISTS idx_webhook_events_status_updated_at
-            ON {WEBHOOK_DELIVERY_TABLE_NAME} (status, updated_at DESC);
-            """
-        )
+        super().__init__(database_path, connection=connection)
 
     def create_event(
         self,
@@ -79,6 +40,7 @@ class WebhookDeliveryRepository:
         status: str,
         error_message: str | None = None,
     ) -> None:
+        ensure_site_context(self.connection, site_id)
         self.connection.execute(
             f"""
             INSERT INTO {WEBHOOK_DELIVERY_TABLE_NAME} (
@@ -91,18 +53,27 @@ class WebhookDeliveryRepository:
                 raw_payload_hash,
                 error_message
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (
+                :event_id,
+                :site_id,
+                :property_id,
+                :received_at,
+                :updated_at,
+                :status,
+                :raw_payload_hash,
+                :error_message
+            )
             """,
-            (
-                event_id,
-                site_id,
-                property_id,
-                received_at,
-                received_at,
-                status,
-                raw_payload_hash,
-                error_message,
-            ),
+            {
+                "event_id": event_id,
+                "site_id": site_id,
+                "property_id": property_id,
+                "received_at": received_at,
+                "updated_at": received_at,
+                "status": status,
+                "raw_payload_hash": raw_payload_hash,
+                "error_message": error_message,
+            },
         )
 
     def update_event_status(
@@ -112,14 +83,19 @@ class WebhookDeliveryRepository:
         status: str,
         error_message: str | None = None,
     ) -> None:
-        updated_at = datetime.now(timezone.utc).isoformat()
         self.connection.execute(
             f"""
             UPDATE {WEBHOOK_DELIVERY_TABLE_NAME}
-            SET status = ?, updated_at = ?, error_message = ?
-            WHERE event_id = ?
+            SET status = :status,
+                updated_at = CURRENT_TIMESTAMP,
+                error_message = :error_message
+            WHERE event_id = :event_id
             """,
-            (status, updated_at, error_message, event_id),
+            {
+                "status": status,
+                "error_message": error_message,
+                "event_id": event_id,
+            },
         )
 
     def get_event(self, event_id: str) -> WebhookDeliveryRecord | None:
@@ -127,13 +103,12 @@ class WebhookDeliveryRepository:
             f"""
             SELECT event_id, site_id, property_id, received_at, updated_at, status, raw_payload_hash, error_message
             FROM {WEBHOOK_DELIVERY_TABLE_NAME}
-            WHERE event_id = ?
+            WHERE event_id = :event_id
             """,
-            (event_id,),
+            {"event_id": event_id},
         ).fetchone()
         if row is None:
             return None
-
         return WebhookDeliveryRecord(
             event_id=str(row["event_id"]),
             site_id=str(row["site_id"]),
@@ -151,4 +126,3 @@ __all__ = [
     "WebhookDeliveryRecord",
     "WebhookDeliveryRepository",
 ]
-

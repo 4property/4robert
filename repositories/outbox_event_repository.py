@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-import sqlite3
 from typing import Any
 
-from repositories.sqlite_connection import create_sqlite_connection
+from repositories.postgres.repository import PostgresRepositoryBase
 
 OUTBOX_EVENT_TABLE_NAME = "outbox_events"
 
@@ -38,57 +36,14 @@ class OutboxEventRecord:
         return parsed if isinstance(parsed, dict) else {}
 
 
-def _build_outbox_table_sql() -> str:
-    return f"""
-        CREATE TABLE IF NOT EXISTS {OUTBOX_EVENT_TABLE_NAME} (
-            event_id TEXT PRIMARY KEY,
-            aggregate_type TEXT NOT NULL,
-            aggregate_id TEXT NOT NULL,
-            site_id TEXT NOT NULL DEFAULT '',
-            source_property_id INTEGER,
-            event_type TEXT NOT NULL,
-            payload_json TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            available_at TEXT NOT NULL,
-            published_at TEXT NOT NULL DEFAULT '',
-            last_error TEXT NOT NULL DEFAULT ''
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_outbox_events_status_available_at
-        ON {OUTBOX_EVENT_TABLE_NAME} (status, available_at, created_at);
-
-        CREATE INDEX IF NOT EXISTS idx_outbox_events_site_property_created_at
-        ON {OUTBOX_EVENT_TABLE_NAME} (site_id, source_property_id, created_at DESC);
-    """
-
-
-class OutboxEventRepository:
+class OutboxEventRepository(PostgresRepositoryBase):
     def __init__(
         self,
-        database_path: str | Path,
+        database_path: str | Path | None,
         *,
-        connection: sqlite3.Connection | None = None,
+        connection=None,
     ) -> None:
-        self.database_path = Path(database_path).expanduser().resolve()
-        self._owns_connection = connection is None
-        self.connection = connection or create_sqlite_connection(self.database_path)
-
-    def __enter__(self) -> "OutboxEventRepository":
-        self.initialise()
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if not self._owns_connection:
-            return
-        if exc_type is None:
-            self.connection.commit()
-        else:
-            self.connection.rollback()
-        self.connection.close()
-
-    def initialise(self) -> None:
-        self.connection.executescript(_build_outbox_table_sql())
+        super().__init__(database_path, connection=connection)
 
     def add_event(
         self,
@@ -104,7 +59,8 @@ class OutboxEventRepository:
         created_at: str | None = None,
         available_at: str | None = None,
     ) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        resolved_created_at = created_at or ""
+        resolved_available_at = available_at or created_at or ""
         payload_json = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
         self.connection.execute(
             f"""
@@ -122,20 +78,33 @@ class OutboxEventRepository:
                 published_at,
                 last_error
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '')
+            VALUES (
+                :event_id,
+                :aggregate_type,
+                :aggregate_id,
+                :site_id,
+                :source_property_id,
+                :event_type,
+                :payload_json,
+                :status,
+                :created_at,
+                :available_at,
+                '',
+                ''
+            )
             """,
-            (
-                event_id,
-                aggregate_type,
-                aggregate_id,
-                site_id,
-                source_property_id,
-                event_type,
-                payload_json,
-                status,
-                created_at or now,
-                available_at or created_at or now,
-            ),
+            {
+                "event_id": event_id,
+                "aggregate_type": aggregate_type,
+                "aggregate_id": aggregate_id,
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+                "event_type": event_type,
+                "payload_json": payload_json,
+                "status": status,
+                "created_at": resolved_created_at,
+                "available_at": resolved_available_at,
+            },
         )
 
     def mark_published(self, *, event_id: str, published_at: str | None = None) -> None:
@@ -143,11 +112,14 @@ class OutboxEventRepository:
             f"""
             UPDATE {OUTBOX_EVENT_TABLE_NAME}
             SET status = 'published',
-                published_at = ?,
+                published_at = :published_at,
                 last_error = ''
-            WHERE event_id = ?
+            WHERE event_id = :event_id
             """,
-            (published_at or datetime.now(timezone.utc).isoformat(), event_id),
+            {
+                "published_at": published_at or "",
+                "event_id": event_id,
+            },
         )
 
     def list_events(
@@ -193,16 +165,19 @@ class OutboxEventRepository:
                     published_at,
                     last_error
                 FROM {OUTBOX_EVENT_TABLE_NAME}
-                WHERE site_id = ?
-                AND source_property_id IS ?
+                WHERE site_id = :site_id
+                AND source_property_id IS NOT DISTINCT FROM :source_property_id
                 ORDER BY created_at ASC, event_id ASC
                 """,
-                (site_id, source_property_id),
+                {
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
             ).fetchall()
         return tuple(_row_to_outbox_event(row) for row in rows)
 
 
-def _row_to_outbox_event(row: sqlite3.Row) -> OutboxEventRecord:
+def _row_to_outbox_event(row) -> OutboxEventRecord:
     return OutboxEventRecord(
         event_id=str(row["event_id"]),
         aggregate_type=str(row["aggregate_type"]),

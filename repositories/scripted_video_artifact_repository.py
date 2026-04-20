@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
-from repositories.sqlite_connection import create_sqlite_connection
+from repositories.postgres.repository import PostgresRepositoryBase
 
 SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME = "scripted_video_artifacts"
 
@@ -27,60 +25,16 @@ class ScriptedVideoArtifactRecord:
     updated_at: str
 
 
-def _build_scripted_video_artifact_table_sql() -> str:
-    return f"""
-        CREATE TABLE IF NOT EXISTS {SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME} (
-            render_id TEXT PRIMARY KEY,
-            site_id TEXT NOT NULL,
-            source_property_id INTEGER NOT NULL,
-            property_slug TEXT NOT NULL DEFAULT '',
-            render_profile TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT '',
-            request_manifest_json TEXT NOT NULL DEFAULT '',
-            request_manifest_path TEXT NOT NULL DEFAULT '',
-            resolved_manifest_path TEXT NOT NULL DEFAULT '',
-            media_path TEXT NOT NULL DEFAULT '',
-            error_message TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_scripted_video_artifacts_site_property_created_at
-        ON {SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME} (site_id, source_property_id, created_at DESC);
-    """
-
-
-class ScriptedVideoArtifactRepository:
+class ScriptedVideoArtifactRepository(PostgresRepositoryBase):
     def __init__(
         self,
-        database_path: str | Path,
+        database_path: str | Path | None,
         *,
-        connection: sqlite3.Connection | None = None,
+        connection=None,
     ) -> None:
-        self.database_path = Path(database_path).expanduser().resolve()
-        self._owns_connection = connection is None
-        self.connection = connection or create_sqlite_connection(self.database_path)
-
-    def __enter__(self) -> "ScriptedVideoArtifactRepository":
-        self.initialise()
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if not self._owns_connection:
-            return
-        if exc_type is None:
-            self.connection.commit()
-        else:
-            self.connection.rollback()
-        self.connection.close()
-
-    def initialise(self) -> None:
-        self.connection.executescript(_build_scripted_video_artifact_table_sql())
+        super().__init__(database_path, connection=connection)
 
     def save_artifact(self, record: ScriptedVideoArtifactRecord) -> None:
-        now = datetime.now(timezone.utc).isoformat()
-        created_at = record.created_at or now
-        updated_at = now
         self.connection.execute(
             f"""
             INSERT INTO {SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME} (
@@ -98,33 +52,47 @@ class ScriptedVideoArtifactRepository:
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(render_id) DO UPDATE SET
-                property_slug = excluded.property_slug,
-                render_profile = excluded.render_profile,
-                status = excluded.status,
-                request_manifest_json = excluded.request_manifest_json,
-                request_manifest_path = excluded.request_manifest_path,
-                resolved_manifest_path = excluded.resolved_manifest_path,
-                media_path = excluded.media_path,
-                error_message = excluded.error_message,
-                updated_at = excluded.updated_at
+            VALUES (
+                :render_id,
+                :site_id,
+                :source_property_id,
+                :property_slug,
+                :render_profile,
+                :status,
+                :request_manifest_json,
+                :request_manifest_path,
+                :resolved_manifest_path,
+                :media_path,
+                :error_message,
+                :created_at,
+                :updated_at
+            )
+            ON CONFLICT (render_id) DO UPDATE SET
+                property_slug = EXCLUDED.property_slug,
+                render_profile = EXCLUDED.render_profile,
+                status = EXCLUDED.status,
+                request_manifest_json = EXCLUDED.request_manifest_json,
+                request_manifest_path = EXCLUDED.request_manifest_path,
+                resolved_manifest_path = EXCLUDED.resolved_manifest_path,
+                media_path = EXCLUDED.media_path,
+                error_message = EXCLUDED.error_message,
+                updated_at = EXCLUDED.updated_at
             """,
-            (
-                record.render_id,
-                record.site_id,
-                record.source_property_id,
-                record.property_slug,
-                record.render_profile,
-                record.status,
-                record.request_manifest_json,
-                record.request_manifest_path,
-                record.resolved_manifest_path,
-                record.media_path,
-                record.error_message,
-                created_at,
-                updated_at,
-            ),
+            {
+                "render_id": record.render_id,
+                "site_id": record.site_id,
+                "source_property_id": record.source_property_id,
+                "property_slug": record.property_slug,
+                "render_profile": record.render_profile,
+                "status": record.status,
+                "request_manifest_json": record.request_manifest_json,
+                "request_manifest_path": record.request_manifest_path,
+                "resolved_manifest_path": record.resolved_manifest_path,
+                "media_path": record.media_path,
+                "error_message": record.error_message,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at,
+            },
         )
 
     def get_artifact(self, render_id: str) -> ScriptedVideoArtifactRecord | None:
@@ -145,9 +113,9 @@ class ScriptedVideoArtifactRepository:
                 created_at,
                 updated_at
             FROM {SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME}
-            WHERE render_id = ?
+            WHERE render_id = :render_id
             """,
-            (render_id,),
+            {"render_id": render_id},
         ).fetchone()
         if row is None:
             return None
@@ -176,16 +144,19 @@ class ScriptedVideoArtifactRepository:
                 created_at,
                 updated_at
             FROM {SCRIPTED_VIDEO_ARTIFACT_TABLE_NAME}
-            WHERE site_id = ?
-            AND source_property_id = ?
+            WHERE site_id = :site_id
+            AND source_property_id = :source_property_id
             ORDER BY created_at DESC, render_id DESC
             """,
-            (site_id, source_property_id),
+            {
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+            },
         ).fetchall()
         return tuple(_row_to_scripted_video_artifact(row) for row in rows)
 
 
-def _row_to_scripted_video_artifact(row: sqlite3.Row) -> ScriptedVideoArtifactRecord:
+def _row_to_scripted_video_artifact(row) -> ScriptedVideoArtifactRecord:
     return ScriptedVideoArtifactRecord(
         render_id=str(row["render_id"]),
         site_id=str(row["site_id"]),

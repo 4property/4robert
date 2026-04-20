@@ -1,21 +1,20 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeAlias
 
-from config import (
-    DATABASE_FILENAME,
-    PROPERTY_COLUMN_DEFINITIONS,
-    PROPERTY_UNIQUE_CONSTRAINTS,
-)
+from config import DATABASE_FILENAME
 from models.property import Property
-from repositories.sqlite_connection import create_sqlite_connection
+from repositories.postgres.repository import PostgresRepositoryBase, ensure_site_context
 
 DownloadedImage: TypeAlias = tuple[int, str, Path | None]
+PIPELINE_STATE_TABLE_NAME = "property_pipeline_state"
+PROPERTY_IMAGES_TABLE_NAME = "property_images"
+PROPERTY_TABLE_NAME = "properties"
+
 PROPERTY_REEL_SELECT_FIELDS = (
     "properties.site_id AS site_id",
     "properties.source_property_id AS source_property_id",
@@ -50,7 +49,6 @@ PROPERTY_REEL_SELECT_FIELDS = (
     "pps.local_manifest_path AS local_manifest_path",
     "pps.local_video_path AS local_video_path",
 )
-PIPELINE_STATE_TABLE_NAME = "property_pipeline_state"
 
 
 @dataclass(slots=True)
@@ -142,9 +140,7 @@ def _deserialize_text_tuple(value: Any) -> tuple[str, ...]:
     if isinstance(value, (list, tuple, set)):
         items: list[str] = []
         for item in value:
-            normalized = _deserialize_text_tuple(item)
-            if normalized:
-                items.extend(normalized)
+            items.extend(_deserialize_text_tuple(item))
         return tuple(items)
 
     text = str(value).strip()
@@ -153,82 +149,26 @@ def _deserialize_text_tuple(value: Any) -> tuple[str, ...]:
 
 def _relative_to_base(path: Path, base_dir: Path) -> str:
     try:
-        return str(path.relative_to(base_dir))
+        return str(path.resolve().relative_to(base_dir))
     except ValueError:
-        return str(path)
+        return str(path.resolve())
 
 
 def _build_property_reel_select_sql(where_clause: str) -> str:
-    columns_sql = ",\n                    ".join(PROPERTY_REEL_SELECT_FIELDS)
+    columns_sql = ",\n                ".join(PROPERTY_REEL_SELECT_FIELDS)
     return (
         "SELECT\n"
-        f"                    {columns_sql}\n"
-        "                FROM properties\n"
-        f"                LEFT JOIN {PIPELINE_STATE_TABLE_NAME} AS pps\n"
-        "                    ON pps.site_id = properties.site_id\n"
-        "                    AND pps.source_property_id = properties.source_property_id\n"
-        f"                {where_clause}"
+        f"                {columns_sql}\n"
+        f"FROM {PROPERTY_TABLE_NAME} AS properties\n"
+        f"LEFT JOIN {PIPELINE_STATE_TABLE_NAME} AS pps\n"
+        "    ON pps.site_id = properties.site_id\n"
+        "    AND pps.source_property_id = properties.source_property_id\n"
+        f"{where_clause}"
     )
 
 
-def _build_table_sql(table_name: str) -> str:
-    property_columns_sql = ",\n                ".join(
-        f"{column} {definition}"
-        for column, definition in PROPERTY_COLUMN_DEFINITIONS
-    )
-    constraint_sql = ",\n                ".join(PROPERTY_UNIQUE_CONSTRAINTS)
-    return (
-        f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
-        f"                {property_columns_sql},\n"
-        f"                {constraint_sql}\n"
-        "            );"
-    )
-
-
-def _build_property_images_table_sql(
-    table_name: str,
-    *,
-    property_table_name: str,
-) -> str:
-    return (
-        f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
-        "                record_id INTEGER NOT NULL,\n"
-        "                position INTEGER NOT NULL,\n"
-        "                image_url TEXT NOT NULL,\n"
-        "                local_path TEXT,\n"
-        "                PRIMARY KEY (record_id, position),\n"
-        f"                FOREIGN KEY (record_id) REFERENCES {property_table_name}(record_id) ON DELETE CASCADE\n"
-        "            );"
-    )
-
-
-def _build_pipeline_state_table_sql(table_name: str = PIPELINE_STATE_TABLE_NAME) -> str:
-    return (
-        f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
-        "                site_id TEXT NOT NULL,\n"
-        "                source_property_id INTEGER NOT NULL,\n"
-        "                content_fingerprint TEXT NOT NULL DEFAULT '',\n"
-        "                content_snapshot_json TEXT NOT NULL DEFAULT '',\n"
-        "                publish_target_fingerprint TEXT NOT NULL DEFAULT '',\n"
-        "                publish_target_snapshot_json TEXT NOT NULL DEFAULT '',\n"
-        "                selected_image_folder TEXT NOT NULL DEFAULT '',\n"
-        "                artifact_kind TEXT NOT NULL DEFAULT '',\n"
-        "                local_artifact_path TEXT NOT NULL DEFAULT '',\n"
-        "                local_metadata_path TEXT NOT NULL DEFAULT '',\n"
-        "                render_profile TEXT NOT NULL DEFAULT '',\n"
-        "                local_manifest_path TEXT NOT NULL DEFAULT '',\n"
-        "                local_video_path TEXT NOT NULL DEFAULT '',\n"
-        "                render_status TEXT NOT NULL DEFAULT '',\n"
-        "                publish_status TEXT NOT NULL DEFAULT '',\n"
-        "                workflow_state TEXT NOT NULL DEFAULT '',\n"
-        "                publish_details_json TEXT NOT NULL DEFAULT '',\n"
-        "                current_revision_id TEXT NOT NULL DEFAULT '',\n"
-        "                last_published_location_id TEXT NOT NULL DEFAULT '',\n"
-        "                created_at TEXT NOT NULL,\n"
-        "                updated_at TEXT NOT NULL,\n"
-        "                PRIMARY KEY (site_id, source_property_id)\n"
-        "            );"
-    )
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _empty_pipeline_state(site_id: str, source_property_id: int) -> PropertyPipelineState:
@@ -257,163 +197,50 @@ def _empty_pipeline_state(site_id: str, source_property_id: int) -> PropertyPipe
     )
 
 
-class PropertyPipelineRepository:
+class PropertyPipelineRepository(PostgresRepositoryBase):
     def __init__(
         self,
-        database_path: str | Path,
+        database_path: str | Path | None,
         base_dir: str | Path,
         *,
-        connection: sqlite3.Connection | None = None,
+        connection=None,
     ) -> None:
-        self.database_path = Path(database_path).expanduser().resolve()
+        super().__init__(database_path, connection=connection)
         self.base_dir = Path(base_dir).expanduser().resolve()
-        self._owns_connection = connection is None
-        self.connection = connection or create_sqlite_connection(self.database_path)
-
-    def __enter__(self) -> "PropertyPipelineRepository":
-        self.initialise()
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if not self._owns_connection:
-            return
-        if exc_type is None:
-            self.connection.commit()
-        else:
-            self.connection.rollback()
-        self.connection.close()
-
-    def _table_exists(self, table_name: str) -> bool:
-        row = self.connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (table_name,),
-        ).fetchone()
-        return row is not None
-
-    def _get_table_columns(self, table_name: str) -> list[str]:
-        if not self._table_exists(table_name):
-            return []
-        return [
-            str(row[1])
-            for row in self.connection.execute(f"PRAGMA table_info({table_name})")
-        ]
-
-    def _create_properties_table(self, table_name: str = "properties") -> None:
-        self.connection.executescript(_build_table_sql(table_name))
-
-    def _create_property_images_table(
-        self,
-        table_name: str = "property_images",
-        *,
-        property_table_name: str = "properties",
-    ) -> None:
-        self.connection.executescript(
-            _build_property_images_table_sql(
-                table_name,
-                property_table_name=property_table_name,
-            )
-        )
-
-    def _create_pipeline_state_table(self, table_name: str = PIPELINE_STATE_TABLE_NAME) -> None:
-        self.connection.executescript(_build_pipeline_state_table_sql(table_name))
-
-    def _create_indexes(self) -> None:
-        self.connection.executescript(
-            f"""
-            CREATE INDEX IF NOT EXISTS idx_properties_site_slug
-            ON properties (site_id, slug);
-
-            CREATE INDEX IF NOT EXISTS idx_properties_site_fetched_at
-            ON properties (site_id, fetched_at DESC);
-
-            CREATE INDEX IF NOT EXISTS idx_pipeline_state_site_publish_status
-            ON {PIPELINE_STATE_TABLE_NAME} (site_id, publish_status, updated_at DESC);
-            """
-        )
-
-    def _ensure_property_columns(self) -> None:
-        existing_columns = set(self._get_table_columns("properties"))
-        if not existing_columns:
-            return
-
-        for column, definition in PROPERTY_COLUMN_DEFINITIONS:
-            if column == "record_id" or column in existing_columns:
-                continue
-            self.connection.execute(
-                f"ALTER TABLE properties ADD COLUMN {column} {definition}"
-            )
-
-    def _ensure_pipeline_state_columns(self) -> None:
-        existing_columns = set(self._get_table_columns(PIPELINE_STATE_TABLE_NAME))
-        if not existing_columns:
-            return
-
-        pipeline_columns = {
-            "site_id": "TEXT NOT NULL",
-            "source_property_id": "INTEGER NOT NULL",
-            "content_fingerprint": "TEXT NOT NULL DEFAULT ''",
-            "content_snapshot_json": "TEXT NOT NULL DEFAULT ''",
-            "publish_target_fingerprint": "TEXT NOT NULL DEFAULT ''",
-            "publish_target_snapshot_json": "TEXT NOT NULL DEFAULT ''",
-            "selected_image_folder": "TEXT NOT NULL DEFAULT ''",
-            "artifact_kind": "TEXT NOT NULL DEFAULT ''",
-            "local_artifact_path": "TEXT NOT NULL DEFAULT ''",
-            "local_metadata_path": "TEXT NOT NULL DEFAULT ''",
-            "render_profile": "TEXT NOT NULL DEFAULT ''",
-            "local_manifest_path": "TEXT NOT NULL DEFAULT ''",
-            "local_video_path": "TEXT NOT NULL DEFAULT ''",
-            "render_status": "TEXT NOT NULL DEFAULT ''",
-            "publish_status": "TEXT NOT NULL DEFAULT ''",
-            "workflow_state": "TEXT NOT NULL DEFAULT ''",
-            "publish_details_json": "TEXT NOT NULL DEFAULT ''",
-            "current_revision_id": "TEXT NOT NULL DEFAULT ''",
-            "last_published_location_id": "TEXT NOT NULL DEFAULT ''",
-            "created_at": "TEXT NOT NULL DEFAULT ''",
-            "updated_at": "TEXT NOT NULL DEFAULT ''",
-        }
-        for column, definition in pipeline_columns.items():
-            if column in existing_columns:
-                continue
-            self.connection.execute(
-                f"ALTER TABLE {PIPELINE_STATE_TABLE_NAME} ADD COLUMN {column} {definition}"
-            )
-
-    def initialise(self) -> None:
-        self._create_properties_table()
-        self._create_property_images_table()
-        self._create_pipeline_state_table()
-        self._ensure_property_columns()
-        self._ensure_pipeline_state_columns()
-        self._create_indexes()
 
     def _upsert_property_record(self, record: dict[str, Any]) -> int:
         columns = list(record.keys())
-        placeholders = ", ".join("?" for _ in columns)
+        insert_columns = ", ".join(columns)
+        insert_values = ", ".join(f":{column}" for column in columns)
         update_clause = ",\n                ".join(
-            f"{column} = excluded.{column}"
+            f"{column} = EXCLUDED.{column}"
             for column in columns
+            if column not in {"site_id", "source_property_id"}
         )
-
         self.connection.execute(
             f"""
-            INSERT INTO properties (
-                {", ".join(columns)}
+            INSERT INTO {PROPERTY_TABLE_NAME} (
+                {insert_columns}
             )
-            VALUES ({placeholders})
-            ON CONFLICT(site_id, source_property_id) DO UPDATE SET
+            VALUES (
+                {insert_values}
+            )
+            ON CONFLICT (site_id, source_property_id) DO UPDATE SET
                 {update_clause}
             """,
-            tuple(record[column] for column in columns),
+            record,
         )
-
         row = self.connection.execute(
-            """
+            f"""
             SELECT record_id
-            FROM properties
-            WHERE site_id = ?
-            AND source_property_id = ?
+            FROM {PROPERTY_TABLE_NAME}
+            WHERE site_id = :site_id
+            AND source_property_id = :source_property_id
             """,
-            (record["site_id"], record["source_property_id"]),
+            {
+                "site_id": record["site_id"],
+                "source_property_id": record["source_property_id"],
+            },
         ).fetchone()
         if row is None:
             raise RuntimeError("Failed to resolve the stored property record id.")
@@ -425,38 +252,69 @@ class PropertyPipelineRepository:
         downloaded_images: list[DownloadedImage],
     ) -> None:
         self.connection.execute(
-            "DELETE FROM property_images WHERE record_id = ?",
-            (record_id,),
+            f"DELETE FROM {PROPERTY_IMAGES_TABLE_NAME} WHERE record_id = :record_id",
+            {"record_id": record_id},
         )
-        self.connection.executemany(
-            """
-            INSERT INTO property_images (
-                record_id,
-                position,
-                image_url,
-                local_path
-            )
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                (
+        for position, image_url, local_path in downloaded_images:
+            self.connection.execute(
+                f"""
+                INSERT INTO {PROPERTY_IMAGES_TABLE_NAME} (
                     record_id,
                     position,
                     image_url,
-                    None if local_path is None else _relative_to_base(local_path, self.base_dir),
+                    local_path
                 )
-                for position, image_url, local_path in downloaded_images
-            ],
+                VALUES (
+                    :record_id,
+                    :position,
+                    :image_url,
+                    :local_path
+                )
+                """,
+                {
+                    "record_id": record_id,
+                    "position": position,
+                    "image_url": image_url,
+                    "local_path": (
+                        None
+                        if local_path is None
+                        else _relative_to_base(local_path, self.base_dir)
+                    ),
+                },
+            )
+
+    def _save_property_record(
+        self,
+        property_item: Property,
+        *,
+        site_id: str,
+        downloaded_images: list[DownloadedImage],
+        social_publish_status: str = "",
+        social_publish_details_json: str = "",
+    ) -> None:
+        ensure_site_context(self.connection, site_id)
+        fetched_at = _now_iso()
+        record = property_item.to_db_record(
+            image_folder="",
+            fetched_at=fetched_at,
         )
+        record["site_id"] = site_id
+        record["image_folder"] = ""
+        record["social_publish_status"] = social_publish_status
+        record["social_publish_details_json"] = social_publish_details_json
+        record_id = self._upsert_property_record(record)
+        self._replace_property_images(record_id, downloaded_images)
 
     def get_property_ids(self, *, site_id: str | None = None) -> set[int]:
         if site_id is None:
-            rows = self.connection.execute("SELECT DISTINCT source_property_id FROM properties")
+            rows = self.connection.execute(
+                f"SELECT DISTINCT source_property_id FROM {PROPERTY_TABLE_NAME}"
+            ).fetchall()
         else:
             rows = self.connection.execute(
-                "SELECT source_property_id FROM properties WHERE site_id = ?",
-                (site_id,),
-            )
+                f"SELECT source_property_id FROM {PROPERTY_TABLE_NAME} WHERE site_id = :site_id",
+                {"site_id": site_id},
+            ).fetchall()
         return {int(row[0]) for row in rows}
 
     def get_property_sync_state(
@@ -472,23 +330,25 @@ class PropertyPipelineRepository:
                 properties.raw_json,
                 COALESCE(pps.selected_image_folder, '') AS selected_image_folder,
                 COALESCE(pps.publish_status, '') AS publish_status
-            FROM properties
+            FROM {PROPERTY_TABLE_NAME} AS properties
             LEFT JOIN {PIPELINE_STATE_TABLE_NAME} AS pps
                 ON pps.site_id = properties.site_id
                 AND pps.source_property_id = properties.source_property_id
-            WHERE properties.site_id = ?
-            AND properties.source_property_id = ?
+            WHERE properties.site_id = :site_id
+            AND properties.source_property_id = :source_property_id
             """,
-            (site_id, source_property_id),
+            {
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+            },
         ).fetchone()
         if row is None:
             return None
-
         return PropertySyncState(
             modified_gmt=None if row["modified_gmt"] is None else str(row["modified_gmt"]),
-            raw_json=str(row["raw_json"]),
-            image_folder="" if row["selected_image_folder"] is None else str(row["selected_image_folder"]),
-            social_publish_status="" if row["publish_status"] is None else str(row["publish_status"]),
+            raw_json=str(row["raw_json"] or ""),
+            image_folder=str(row["selected_image_folder"] or ""),
+            social_publish_status=str(row["publish_status"] or ""),
         )
 
     def _get_property_reel_row(
@@ -497,28 +357,36 @@ class PropertyPipelineRepository:
         site_id: str,
         property_id: int | None = None,
         slug: str | None = None,
-    ) -> sqlite3.Row | None:
+    ):
         if property_id is not None:
             return self.connection.execute(
                 _build_property_reel_select_sql(
-                    "WHERE properties.site_id = ? AND properties.source_property_id = ?"
+                    "\nWHERE properties.site_id = :site_id AND properties.source_property_id = :property_id"
                 ),
-                (site_id, property_id),
+                {
+                    "site_id": site_id,
+                    "property_id": property_id,
+                },
             ).fetchone()
 
         if slug is not None:
             return self.connection.execute(
-                _build_property_reel_select_sql("WHERE properties.site_id = ? AND properties.slug = ?"),
-                (site_id, slug),
+                _build_property_reel_select_sql(
+                    "\nWHERE properties.site_id = :site_id AND properties.slug = :slug"
+                ),
+                {
+                    "site_id": site_id,
+                    "slug": slug,
+                },
             ).fetchone()
 
         return self.connection.execute(
             _build_property_reel_select_sql(
-                "WHERE properties.site_id = ? "
+                "\nWHERE properties.site_id = :site_id "
                 "AND COALESCE(pps.selected_image_folder, '') != '' "
                 "ORDER BY properties.fetched_at DESC LIMIT 1"
             ),
-            (site_id,),
+            {"site_id": site_id},
         ).fetchone()
 
     def get_property_reel_record(
@@ -542,53 +410,48 @@ class PropertyPipelineRepository:
             slug=str(row["slug"]),
             title=None if row["title"] is None else str(row["title"]),
             link=None if row["link"] is None else str(row["link"]),
-            selected_image_folder="" if row["selected_image_folder"] is None else str(row["selected_image_folder"]),
-            local_manifest_path="" if row["local_manifest_path"] is None else str(row["local_manifest_path"]),
-            local_video_path="" if row["local_video_path"] is None else str(row["local_video_path"]),
-            featured_image_url=None if row["featured_image_url"] is None else str(row["featured_image_url"]),
-            bedrooms=row["bedrooms"],
-            bathrooms=row["bathrooms"],
+            selected_image_folder=str(row["selected_image_folder"] or ""),
+            local_manifest_path=str(row["local_manifest_path"] or ""),
+            local_video_path=str(row["local_video_path"] or ""),
+            featured_image_url=(
+                None if row["featured_image_url"] is None else str(row["featured_image_url"])
+            ),
+            bedrooms=None if row["bedrooms"] is None else int(row["bedrooms"]),
+            bathrooms=None if row["bathrooms"] is None else int(row["bathrooms"]),
             ber_rating=None if row["ber_rating"] is None else str(row["ber_rating"]),
-            property_status=None if row["property_status"] is None else str(row["property_status"]),
+            property_status=(
+                None if row["property_status"] is None else str(row["property_status"])
+            ),
             agent_name=None if row["agent_name"] is None else str(row["agent_name"]),
-            agent_photo_url=None if row["agent_photo_url"] is None else str(row["agent_photo_url"]),
+            agent_photo_url=(
+                None if row["agent_photo_url"] is None else str(row["agent_photo_url"])
+            ),
             agent_email=None if row["agent_email"] is None else str(row["agent_email"]),
             agent_mobile=None if row["agent_mobile"] is None else str(row["agent_mobile"]),
             agent_number=None if row["agent_number"] is None else str(row["agent_number"]),
             agency_psra=None if row["agency_psra"] is None else str(row["agency_psra"]),
-            agency_logo_url=None if row["agency_logo_url"] is None else str(row["agency_logo_url"]),
+            agency_logo_url=(
+                None if row["agency_logo_url"] is None else str(row["agency_logo_url"])
+            ),
             price=None if row["price"] is None else str(row["price"]),
             price_term=None if row["price_term"] is None else str(row["price_term"]),
-            property_type_label=None if row["property_type_label"] is None else str(row["property_type_label"]),
-            property_area_label=None if row["property_area_label"] is None else str(row["property_area_label"]),
-            property_county_label=None if row["property_county_label"] is None else str(row["property_county_label"]),
+            property_type_label=(
+                None if row["property_type_label"] is None else str(row["property_type_label"])
+            ),
+            property_area_label=(
+                None if row["property_area_label"] is None else str(row["property_area_label"])
+            ),
+            property_county_label=(
+                None if row["property_county_label"] is None else str(row["property_county_label"])
+            ),
             property_size=None if row["property_size"] is None else str(row["property_size"]),
             eircode=None if row["eircode"] is None else str(row["eircode"]),
             viewing_times=_deserialize_text_tuple(row["viewing_times"]),
-            artifact_kind="" if row["artifact_kind"] is None else str(row["artifact_kind"]),
-            local_artifact_path="" if row["local_artifact_path"] is None else str(row["local_artifact_path"]),
-            local_metadata_path="" if row["local_metadata_path"] is None else str(row["local_metadata_path"]),
-            render_profile="" if row["render_profile"] is None else str(row["render_profile"]),
+            artifact_kind=str(row["artifact_kind"] or ""),
+            local_artifact_path=str(row["local_artifact_path"] or ""),
+            local_metadata_path=str(row["local_metadata_path"] or ""),
+            render_profile=str(row["render_profile"] or ""),
         )
-
-    def _save_property_record(
-        self,
-        property_item: Property,
-        *,
-        site_id: str,
-        downloaded_images: list[DownloadedImage],
-    ) -> None:
-        fetched_at = datetime.now(timezone.utc).isoformat()
-        record = property_item.to_db_record(
-            image_folder="",
-            fetched_at=fetched_at,
-        )
-        record["site_id"] = site_id
-        record["image_folder"] = ""
-        record["social_publish_status"] = ""
-        record["social_publish_details_json"] = ""
-        record_id = self._upsert_property_record(record)
-        self._replace_property_images(record_id, downloaded_images)
 
     def get_property_pipeline_state(
         self,
@@ -621,10 +484,13 @@ class PropertyPipelineRepository:
                 created_at,
                 updated_at
             FROM {PIPELINE_STATE_TABLE_NAME}
-            WHERE site_id = ?
-            AND source_property_id = ?
+            WHERE site_id = :site_id
+            AND source_property_id = :source_property_id
             """,
-            (site_id, source_property_id),
+            {
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+            },
         ).fetchone()
         if row is None:
             return None
@@ -639,7 +505,9 @@ class PropertyPipelineRepository:
             selected_image_folder=str(row["selected_image_folder"] or ""),
             artifact_kind=str(row["artifact_kind"] or ""),
             local_artifact_path=str(row["local_artifact_path"] or row["local_video_path"] or ""),
-            local_metadata_path=str(row["local_metadata_path"] or row["local_manifest_path"] or ""),
+            local_metadata_path=str(
+                row["local_metadata_path"] or row["local_manifest_path"] or ""
+            ),
             render_profile=str(row["render_profile"] or ""),
             local_manifest_path=str(row["local_manifest_path"] or ""),
             local_video_path=str(row["local_video_path"] or ""),
@@ -654,7 +522,8 @@ class PropertyPipelineRepository:
         )
 
     def save_property_pipeline_state(self, state: PropertyPipelineState) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+        ensure_site_context(self.connection, state.site_id)
+        now = _now_iso()
         created_at = state.created_at or now
         updated_at = now
         self.connection.execute(
@@ -682,50 +551,72 @@ class PropertyPipelineRepository:
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(site_id, source_property_id) DO UPDATE SET
-                content_fingerprint = excluded.content_fingerprint,
-                content_snapshot_json = excluded.content_snapshot_json,
-                publish_target_fingerprint = excluded.publish_target_fingerprint,
-                publish_target_snapshot_json = excluded.publish_target_snapshot_json,
-                selected_image_folder = excluded.selected_image_folder,
-                artifact_kind = excluded.artifact_kind,
-                local_artifact_path = excluded.local_artifact_path,
-                local_metadata_path = excluded.local_metadata_path,
-                render_profile = excluded.render_profile,
-                local_manifest_path = excluded.local_manifest_path,
-                local_video_path = excluded.local_video_path,
-                render_status = excluded.render_status,
-                publish_status = excluded.publish_status,
-                workflow_state = excluded.workflow_state,
-                publish_details_json = excluded.publish_details_json,
-                current_revision_id = excluded.current_revision_id,
-                last_published_location_id = excluded.last_published_location_id,
-                updated_at = excluded.updated_at
+            VALUES (
+                :site_id,
+                :source_property_id,
+                :content_fingerprint,
+                :content_snapshot_json,
+                :publish_target_fingerprint,
+                :publish_target_snapshot_json,
+                :selected_image_folder,
+                :artifact_kind,
+                :local_artifact_path,
+                :local_metadata_path,
+                :render_profile,
+                :local_manifest_path,
+                :local_video_path,
+                :render_status,
+                :publish_status,
+                :workflow_state,
+                :publish_details_json,
+                :current_revision_id,
+                :last_published_location_id,
+                :created_at,
+                :updated_at
+            )
+            ON CONFLICT (site_id, source_property_id) DO UPDATE SET
+                content_fingerprint = EXCLUDED.content_fingerprint,
+                content_snapshot_json = EXCLUDED.content_snapshot_json,
+                publish_target_fingerprint = EXCLUDED.publish_target_fingerprint,
+                publish_target_snapshot_json = EXCLUDED.publish_target_snapshot_json,
+                selected_image_folder = EXCLUDED.selected_image_folder,
+                artifact_kind = EXCLUDED.artifact_kind,
+                local_artifact_path = EXCLUDED.local_artifact_path,
+                local_metadata_path = EXCLUDED.local_metadata_path,
+                render_profile = EXCLUDED.render_profile,
+                local_manifest_path = EXCLUDED.local_manifest_path,
+                local_video_path = EXCLUDED.local_video_path,
+                render_status = EXCLUDED.render_status,
+                publish_status = EXCLUDED.publish_status,
+                workflow_state = EXCLUDED.workflow_state,
+                publish_details_json = EXCLUDED.publish_details_json,
+                current_revision_id = EXCLUDED.current_revision_id,
+                last_published_location_id = EXCLUDED.last_published_location_id,
+                updated_at = EXCLUDED.updated_at
             """,
-            (
-                state.site_id,
-                state.source_property_id,
-                state.content_fingerprint,
-                state.content_snapshot_json,
-                state.publish_target_fingerprint,
-                state.publish_target_snapshot_json,
-                state.selected_image_folder,
-                state.artifact_kind,
-                state.local_artifact_path,
-                state.local_metadata_path,
-                state.render_profile,
-                state.local_manifest_path,
-                state.local_video_path,
-                state.render_status,
-                state.publish_status,
-                state.workflow_state,
-                state.publish_details_json,
-                state.current_revision_id,
-                state.last_published_location_id,
-                created_at,
-                updated_at,
-            ),
+            {
+                "site_id": state.site_id,
+                "source_property_id": state.source_property_id,
+                "content_fingerprint": state.content_fingerprint,
+                "content_snapshot_json": state.content_snapshot_json,
+                "publish_target_fingerprint": state.publish_target_fingerprint,
+                "publish_target_snapshot_json": state.publish_target_snapshot_json,
+                "selected_image_folder": state.selected_image_folder,
+                "artifact_kind": state.artifact_kind,
+                "local_artifact_path": state.local_artifact_path,
+                "local_metadata_path": state.local_metadata_path,
+                "render_profile": state.render_profile,
+                "local_manifest_path": state.local_manifest_path,
+                "local_video_path": state.local_video_path,
+                "render_status": state.render_status,
+                "publish_status": state.publish_status,
+                "workflow_state": state.workflow_state,
+                "publish_details_json": state.publish_details_json,
+                "current_revision_id": state.current_revision_id,
+                "last_published_location_id": state.last_published_location_id,
+                "created_at": created_at,
+                "updated_at": updated_at,
+            },
         )
 
     def save_property_data(
@@ -744,15 +635,19 @@ class PropertyPipelineRepository:
                 (position, image_url, None)
                 for position, image_url in enumerate(property_item.image_urls, start=1)
             ],
+            social_publish_status=social_publish_status or "",
+            social_publish_details_json=social_publish_details_json or "",
         )
         if image_folder or social_publish_status or social_publish_details_json:
             state = self.get_property_pipeline_state(
                 site_id=site_id,
                 source_property_id=property_item.id,
             ) or _empty_pipeline_state(site_id, property_item.id)
-            details_json = state.publish_details_json
-            if social_publish_details_json is not None:
-                details_json = social_publish_details_json
+            details_json = (
+                state.publish_details_json
+                if social_publish_details_json is None
+                else social_publish_details_json
+            )
             self.save_property_pipeline_state(
                 PropertyPipelineState(
                     site_id=state.site_id,
@@ -793,6 +688,8 @@ class PropertyPipelineRepository:
             property_item,
             site_id=site_id,
             downloaded_images=downloaded_images,
+            social_publish_status=social_publish_status or "",
+            social_publish_details_json=social_publish_details_json or "",
         )
         state = self.get_property_pipeline_state(
             site_id=site_id,
@@ -875,7 +772,9 @@ class PropertyPipelineRepository:
                 workflow_state=state.workflow_state,
                 publish_details_json=details_json,
                 current_revision_id=state.current_revision_id,
-                last_published_location_id=last_published_location_id or state.last_published_location_id,
+                last_published_location_id=(
+                    last_published_location_id or state.last_published_location_id
+                ),
                 created_at=state.created_at,
                 updated_at=state.updated_at,
             )
@@ -986,9 +885,8 @@ class PropertyPipelineRepository:
 __all__ = [
     "DATABASE_FILENAME",
     "DownloadedImage",
+    "PropertyPipelineRepository",
     "PropertyPipelineState",
     "PropertyReelRecord",
     "PropertySyncState",
-    "PropertyPipelineRepository",
 ]
-

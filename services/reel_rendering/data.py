@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from config import DATABASE_FILENAME
+from config import DATABASE_URL
 from core.errors import PropertyReelError, ResourceNotFoundError
 from repositories.property_pipeline_repository import PropertyReelRecord, PropertyPipelineRepository
 from services.reel_rendering.formatting import clean_text
@@ -62,10 +62,10 @@ def load_property_reel_data(
     site_id: str,
     property_id: int | None = None,
     slug: str | None = None,
+    database_locator: str | Path | None = DATABASE_URL,
 ) -> PropertyRenderData:
     workspace_dir = Path(base_dir).expanduser().resolve()
-    database_path = workspace_dir / DATABASE_FILENAME
-    with PropertyPipelineRepository(database_path, workspace_dir) as repository:
+    with PropertyPipelineRepository(database_locator, workspace_dir) as repository:
         record = repository.get_property_reel_record(
             site_id=site_id,
             property_id=property_id,
@@ -80,7 +80,7 @@ def load_property_reel_data(
                 "property_id": property_id if property_id is not None else "",
                 "slug": slug or "",
             },
-            hint="Ensure the property was ingested into SQLite before attempting a standalone render.",
+            hint="Ensure the property was ingested into PostgreSQL before attempting a standalone render.",
         )
 
     property_data = record_to_property_reel_data(workspace_dir, record)

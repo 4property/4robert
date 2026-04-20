@@ -1,88 +1,20 @@
 from __future__ import annotations
 
 
-DATABASE_FILENAME = "db.sqlite3"
-
-PROPERTY_COLUMN_DEFINITIONS: list[tuple[str, str]] = [
-    ("record_id", "INTEGER PRIMARY KEY AUTOINCREMENT"),
-    ("site_id", "TEXT NOT NULL"),
-    ("source_property_id", "INTEGER NOT NULL"),
-    ("slug", "TEXT NOT NULL"),
-    ("title", "TEXT"),
-    ("link", "TEXT"),
-    ("guid", "TEXT"),
-    ("status", "TEXT"),
-    ("resource_type", "TEXT"),
-    ("author_id", "INTEGER"),
-    ("importer_id", "TEXT"),
-    ("list_reference", "TEXT"),
-    ("date", "TEXT"),
-    ("date_gmt", "TEXT"),
-    ("modified", "TEXT"),
-    ("modified_gmt", "TEXT"),
-    ("excerpt_html", "TEXT"),
-    ("content_html", "TEXT"),
-    ("price", "TEXT"),
-    ("price_sold", "TEXT"),
-    ("price_term", "TEXT"),
-    ("property_status", "TEXT"),
-    ("property_market", "TEXT"),
-    ("property_type_label", "TEXT"),
-    ("property_county_label", "TEXT"),
-    ("property_area_label", "TEXT"),
-    ("property_size", "TEXT"),
-    ("property_land_size", "TEXT"),
-    ("property_accommodation", "TEXT"),
-    ("property_disclaimer", "TEXT"),
-    ("bedrooms", "INTEGER"),
-    ("bathrooms", "INTEGER"),
-    ("ber_rating", "TEXT"),
-    ("ber_number", "TEXT"),
-    ("energy_details", "TEXT"),
-    ("bidding_method", "TEXT"),
-    ("living_type", "TEXT"),
-    ("country", "TEXT"),
-    ("eircode", "TEXT"),
-    ("directions", "TEXT"),
-    ("latitude", "REAL"),
-    ("longitude", "REAL"),
-    ("agent_name", "TEXT"),
-    ("agent_photo_url", "TEXT"),
-    ("agent_email", "TEXT"),
-    ("agent_mobile", "TEXT"),
-    ("agent_number", "TEXT"),
-    ("agent_qualification", "TEXT"),
-    ("agency_psra", "TEXT"),
-    ("agency_logo_url", "TEXT"),
-    ("featured_media_id", "INTEGER"),
-    ("featured_image_url", "TEXT"),
-    ("amenities", "TEXT"),
-    ("property_order", "INTEGER"),
-    ("wppd_parent_id", "TEXT"),
-    ("property_type_ids", "TEXT"),
-    ("property_county_ids", "TEXT"),
-    ("property_area_ids", "TEXT"),
-    ("property_features", "TEXT"),
-    ("media_attachments_json", "TEXT"),
-    ("brochure_urls", "TEXT"),
-    ("floorplan_urls", "TEXT"),
-    ("tour_urls", "TEXT"),
-    ("viewing_times", "TEXT"),
-    ("image_folder", "TEXT NOT NULL DEFAULT ''"),
-    ("image_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("social_publish_status", "TEXT NOT NULL DEFAULT ''"),
-    ("social_publish_details_json", "TEXT NOT NULL DEFAULT ''"),
-    ("raw_json", "TEXT NOT NULL DEFAULT '{}'"),
-    ("fetched_at", "TEXT NOT NULL DEFAULT ''"),
-]
-
-PROPERTY_UNIQUE_CONSTRAINTS = (
-    "UNIQUE(site_id, source_property_id)",
-)
+DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:1234@127.0.0.1:5432/miapp"
+DEFAULT_DATABASE_POOL_SIZE = 5
+DEFAULT_DATABASE_MAX_OVERFLOW = 10
+DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS = 30
+# Legacy workspace locator retained for isolated Postgres schemas in tests.
+DATABASE_FILENAME = "db.postgres"
+DEFAULT_DATABASE_ENCRYPTION_KEY = "BU3oBe_-NJKkqpct_qYxUMm2QkzIUcTdKZGp1YEahGw="
 
 
 __all__ = [
     "DATABASE_FILENAME",
-    "PROPERTY_COLUMN_DEFINITIONS",
-    "PROPERTY_UNIQUE_CONSTRAINTS",
+    "DEFAULT_DATABASE_ENCRYPTION_KEY",
+    "DEFAULT_DATABASE_MAX_OVERFLOW",
+    "DEFAULT_DATABASE_POOL_SIZE",
+    "DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS",
+    "DEFAULT_DATABASE_URL",
 ]

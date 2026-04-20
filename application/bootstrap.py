@@ -18,6 +18,7 @@ from application.types import PropertyMediaJob, PropertyVideoJob
 from repositories.sqlite_work_unit import SqliteWorkUnit
 from config import (
     DATABASE_FILENAME,
+    DATABASE_URL,
     GO_HIGH_LEVEL_API_VERSION,
     GO_HIGH_LEVEL_BASE_URL,
     OUTBOUND_HTTP_TIMEOUT_SECONDS,
@@ -73,9 +74,26 @@ def build_default_unit_of_work_factory(workspace_dir: str | Path):
     return lambda: SqliteWorkUnit(workspace_path / DATABASE_FILENAME, workspace_path)
 
 
-def build_default_property_media_pipeline(workspace_dir: str | Path) -> PropertyMediaPipeline:
+def build_runtime_unit_of_work_factory(
+    workspace_dir: str | Path,
+    *,
+    database_locator: str | Path | None = None,
+):
     workspace_path = Path(workspace_dir).expanduser().resolve()
-    unit_of_work_factory = build_default_unit_of_work_factory(workspace_path)
+    resolved_database_locator = DATABASE_URL if database_locator is None else database_locator
+    return lambda: SqliteWorkUnit(resolved_database_locator, workspace_path)
+
+
+def build_default_property_media_pipeline(
+    workspace_dir: str | Path,
+    *,
+    database_locator: str | Path | None = None,
+) -> PropertyMediaPipeline:
+    workspace_path = Path(workspace_dir).expanduser().resolve()
+    unit_of_work_factory = build_runtime_unit_of_work_factory(
+        workspace_path,
+        database_locator=database_locator,
+    )
     social_publishing_active = SOCIAL_PUBLISHING_ENABLED and not SOCIAL_PUBLISHING_LOCAL_ONLY
     social_property_publisher = (
         build_default_social_property_publisher()
@@ -109,17 +127,28 @@ def build_default_property_media_pipeline(workspace_dir: str | Path) -> Property
     )
 
 
-def build_default_property_video_pipeline(workspace_dir: str | Path) -> PropertyVideoPipeline:
-    return build_default_property_media_pipeline(workspace_dir)
+def build_default_property_video_pipeline(
+    workspace_dir: str | Path,
+    *,
+    database_locator: str | Path | None = None,
+) -> PropertyVideoPipeline:
+    return build_default_property_media_pipeline(
+        workspace_dir,
+        database_locator=database_locator,
+    )
 
 
 def build_default_job_handler(
     workspace_dir: str | Path,
     *,
+    database_locator: str | Path | None = None,
     pipeline: PropertyMediaPipeline | PropertyVideoPipeline | None = None,
 ) -> Callable[[PropertyVideoJob], object | None]:
     workspace_path = Path(workspace_dir).expanduser().resolve()
-    active_pipeline = pipeline or build_default_property_media_pipeline(workspace_dir)
+    active_pipeline = pipeline or build_default_property_media_pipeline(
+        workspace_dir,
+        database_locator=database_locator,
+    )
     runner = PropertyMediaJobRunner(
         workspace_path,
         pipeline=active_pipeline,
@@ -134,12 +163,20 @@ def build_default_job_handler(
 def build_default_job_dispatcher(
     workspace_dir: str | Path,
     *,
+    database_locator: str | Path | None = None,
     worker_count: int = WEBHOOK_WORKER_COUNT,
     pipeline: PropertyMediaPipeline | PropertyVideoPipeline | None = None,
 ) -> SqliteJobDispatcher:
     return SqliteJobDispatcher(
-        handler=build_default_job_handler(workspace_dir, pipeline=pipeline),
-        unit_of_work_factory=build_default_unit_of_work_factory(workspace_dir),
+        handler=build_default_job_handler(
+            workspace_dir,
+            database_locator=database_locator,
+            pipeline=pipeline,
+        ),
+        unit_of_work_factory=build_runtime_unit_of_work_factory(
+            workspace_dir,
+            database_locator=database_locator,
+        ),
         worker_count=worker_count,
         poll_interval_seconds=WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS,
         lease_seconds=WEBHOOK_QUEUE_LEASE_SECONDS,
@@ -154,6 +191,7 @@ __all__ = [
     "build_default_job_handler",
     "build_default_property_media_pipeline",
     "build_default_property_video_pipeline",
+    "build_runtime_unit_of_work_factory",
     "build_default_social_property_publisher",
     "build_default_unit_of_work_factory",
 ]

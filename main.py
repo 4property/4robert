@@ -32,6 +32,7 @@ def main() -> None:
     try:
         from application.bootstrap import build_default_job_dispatcher
         from config import (
+            DATABASE_URL,
             LOG_LEVEL,
             PERSISTENT_LOG_BACKUP_COUNT,
             PERSISTENT_LOG_DIRECTORY,
@@ -60,6 +61,7 @@ def main() -> None:
         if args.check:
             readiness = build_readiness_report(
                 base_dir,
+                database_locator=DATABASE_URL,
                 site_secrets=WEBHOOK_SITE_SECRETS,
                 worker_count=WEBHOOK_WORKER_COUNT,
                 security_disabled=WEBHOOK_DISABLE_SECURITY,
@@ -77,10 +79,11 @@ def main() -> None:
                 )
             return
 
-        dispatcher = build_default_job_dispatcher(base_dir)
+        dispatcher = build_default_job_dispatcher(base_dir, database_locator=DATABASE_URL)
         run_wordpress_webhook_server(
             base_dir,
             dispatcher=dispatcher,
+            database_locator=DATABASE_URL,
             host=host,
             port=port,
         )
@@ -147,7 +150,8 @@ def _log_readiness_report(logger: logging.Logger, readiness: dict[str, object]) 
             highlight=True,
         ),
         format_detail_line("Workspace", environment.get("workspace_dir")),
-        format_detail_line("Database", environment.get("database_path")),
+        format_detail_line("Database", environment.get("database_url")),
+        format_detail_line("Database schema", environment.get("database_schema")),
         format_detail_line("Python", environment.get("python_executable")),
         format_detail_line("Python version", environment.get("python_version")),
         format_detail_line("Platform", environment.get("platform")),

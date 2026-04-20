@@ -8,6 +8,13 @@ from pydantic import AliasChoices, Field, ValidationError as PydanticValidationE
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from core.errors import ApplicationError
+from settings.database import (
+    DEFAULT_DATABASE_ENCRYPTION_KEY,
+    DEFAULT_DATABASE_MAX_OVERFLOW,
+    DEFAULT_DATABASE_POOL_SIZE,
+    DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS,
+    DEFAULT_DATABASE_URL,
+)
 
 
 def _parse_key_value_mapping(value: str | dict[str, str] | None) -> dict[str, str]:
@@ -193,10 +200,28 @@ class AppSettings(BaseSettings):
         validation_alias="WEBHOOK_LIMIT_CONCURRENCY",
         ge=1,
     )
-    sqlite_busy_timeout_ms: int = Field(
-        5_000,
-        validation_alias="SQLITE_BUSY_TIMEOUT_MS",
+    database_url: str = Field(
+        DEFAULT_DATABASE_URL,
+        validation_alias="DATABASE_URL",
+    )
+    database_pool_size: int = Field(
+        DEFAULT_DATABASE_POOL_SIZE,
+        validation_alias="DATABASE_POOL_SIZE",
         ge=1,
+    )
+    database_max_overflow: int = Field(
+        DEFAULT_DATABASE_MAX_OVERFLOW,
+        validation_alias="DATABASE_MAX_OVERFLOW",
+        ge=0,
+    )
+    database_pool_timeout_seconds: int = Field(
+        DEFAULT_DATABASE_POOL_TIMEOUT_SECONDS,
+        validation_alias="DATABASE_POOL_TIMEOUT_SECONDS",
+        ge=1,
+    )
+    database_encryption_key: str = Field(
+        DEFAULT_DATABASE_ENCRYPTION_KEY,
+        validation_alias="DATABASE_ENCRYPTION_KEY",
     )
     go_high_level_base_url: str = Field(
         "https://services.leadconnectorhq.com",
@@ -473,6 +498,24 @@ class AppSettings(BaseSettings):
         normalized_value = value.strip().upper()
         if not normalized_value:
             return "INFO"
+        return normalized_value
+
+    @field_validator("database_url")
+    @classmethod
+    def _validate_database_url(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("DATABASE_URL cannot be empty.")
+        if "postgresql" not in normalized_value:
+            raise ValueError("DATABASE_URL must point to PostgreSQL.")
+        return normalized_value
+
+    @field_validator("database_encryption_key")
+    @classmethod
+    def _validate_database_encryption_key(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("DATABASE_ENCRYPTION_KEY cannot be empty.")
         return normalized_value
 
     @field_validator("persistent_log_directory")
