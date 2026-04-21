@@ -8,7 +8,11 @@ from uuid import uuid4
 
 from core.errors import PropertyReelError
 from services.reel_rendering.filters import build_overlay_filter
-from services.reel_rendering.formatting import resolve_agent_image_size, resolve_ber_icon_size
+from services.reel_rendering.formatting import (
+    build_contained_image_filter,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+)
 from services.reel_rendering.layout import BoxLayout, OverlayLayout, build_overlay_layout
 from services.reel_rendering.models import PreparedReelSlide, PropertyRenderData, PropertyReelTemplate
 from services.reel_rendering.preparation import prepare_reel_render_assets
@@ -293,7 +297,9 @@ def _build_poster_filter_script(
     ]
     if overlay_layout.agent_image_box is not None and overlay_layout.agent_image_box.visible:
         filter_parts.append(
-            f"[{agent_input_index}:v]scale={agent_image_size}:{agent_image_size},format=rgba[agent_panel_image]"
+            f"[{agent_input_index}:v]"
+            f"{build_contained_image_filter(agent_image_size, agent_image_size, pixel_format='rgba')}"
+            "[agent_panel_image]"
         )
     if (
         agency_logo_input_index is not None

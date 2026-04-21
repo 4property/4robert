@@ -110,6 +110,27 @@ class _FFmpegTestCase(unittest.TestCase):
             ]
         )
 
+    def _create_horizontal_marker_image(self, output_path: Path, size: str) -> None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._run_ffmpeg(
+            [
+                self._ffmpeg_binary(),
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c=black:s={size}:d=1",
+                "-vf",
+                (
+                    "drawbox=x=0:y=0:w=iw:h=ih/8:color=0xFF0000:t=fill,"
+                    "drawbox=x=0:y=7*ih/8:w=iw:h=ih/8:color=0x0000FF:t=fill"
+                ),
+                "-frames:v",
+                "1",
+                str(output_path),
+            ]
+        )
+
     def _create_audio_asset(self, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         self._run_ffmpeg(
@@ -556,6 +577,136 @@ class ReelPreparationIntegrationTests(_FFmpegTestCase):
                 cover_caption=None,
             )
             self.assertIsNotNone(overlay_layout.agency_logo_box)
+
+    def test_prepare_reel_render_assets_preserves_full_vertical_agent_photo(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            self._create_audio_asset(workspace_dir / "assets" / "music" / "test.mp3")
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            source_path = selected_dir / "primary_image.png"
+            remote_agent_path = workspace_dir / "remote-agent-portrait.png"
+            self._create_image(source_path, "800x600", "teal")
+            self._create_horizontal_marker_image(remote_agent_path, "240x480")
+
+            property_data = self._build_property_data(
+                selected_dir=selected_dir,
+                selected_paths=(source_path,),
+            )
+            property_data.agent_photo_url = "https://cdn.example.com/team/agent-portrait.png"
+            template = PropertyReelTemplate(
+                width=320,
+                height=480,
+                fps=12,
+                max_slide_count=1,
+                include_intro=False,
+                intro_duration_seconds=0.0,
+                total_duration_seconds=0.5,
+                seconds_per_slide=0.5,
+                subtitle_font_size=28,
+                background_audio_filename="music/test.mp3",
+            )
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                self.assertEqual(image_url, property_data.agent_photo_url)
+                shutil.copyfile(remote_agent_path, destination)
+                return destination
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=fake_download,
+            ):
+                prepared_assets = prepare_reel_render_assets(
+                    workspace_dir,
+                    property_data,
+                    template=template,
+                    working_dir=workspace_dir / "_prepared_vertical_agent",
+                )
+
+            agent_width, agent_height = self._probe_image_dimensions(prepared_assets.agent_image_path)
+            center_x = agent_width // 2
+            top_sample = self._sample_pixel_rgb(
+                prepared_assets.agent_image_path,
+                center_x,
+                max(4, agent_height // 16),
+            )
+            bottom_sample = self._sample_pixel_rgb(
+                prepared_assets.agent_image_path,
+                center_x,
+                agent_height - max(4, agent_height // 16),
+            )
+            left_padding_sample = self._sample_pixel_rgb(
+                prepared_assets.agent_image_path,
+                max(2, agent_width // 8),
+                agent_height // 2,
+            )
+
+            self.assertGreater(top_sample[0], 180)
+            self.assertLess(top_sample[1], 100)
+            self.assertLess(top_sample[2], 100)
+            self.assertGreater(bottom_sample[2], 180)
+            self.assertLess(bottom_sample[0], 100)
+            self.assertLess(bottom_sample[1], 100)
+            self.assertLess(left_padding_sample[0], 30)
+            self.assertLess(left_padding_sample[1], 30)
+            self.assertLess(left_padding_sample[2], 30)
+
+    def test_prepare_reel_render_assets_falls_back_when_agent_image_cannot_be_decoded(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            self._create_audio_asset(workspace_dir / "assets" / "music" / "test.mp3")
+            selected_dir = workspace_dir / "selected_photos"
+            selected_dir.mkdir(parents=True, exist_ok=True)
+            source_path = selected_dir / "primary_image.png"
+            remote_logo_path = workspace_dir / "remote-logo.png"
+            self._create_image(source_path, "800x600", "teal")
+            self._create_image(remote_logo_path, "256x256", "lime")
+
+            property_data = self._build_property_data(
+                selected_dir=selected_dir,
+                selected_paths=(source_path,),
+            )
+            property_data.agent_photo_url = "https://cdn.example.com/team/agent-portrait.heic"
+            property_data.agency_logo_url = "https://cdn.example.com/team/agency-logo.png"
+            template = PropertyReelTemplate(
+                width=320,
+                height=480,
+                fps=12,
+                max_slide_count=1,
+                include_intro=False,
+                intro_duration_seconds=0.0,
+                total_duration_seconds=0.5,
+                seconds_per_slide=0.5,
+                subtitle_font_size=28,
+                background_audio_filename="music/test.mp3",
+            )
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                if image_url == property_data.agent_photo_url:
+                    destination.write_text("not a real image", encoding="utf-8")
+                    return destination
+                if image_url == property_data.agency_logo_url:
+                    shutil.copyfile(remote_logo_path, destination)
+                    return destination
+                raise AssertionError(f"Unexpected download URL: {image_url}")
+
+            with patch(
+                "services.reel_rendering.runtime.download_remote_image",
+                side_effect=fake_download,
+            ):
+                prepared_assets = prepare_reel_render_assets(
+                    workspace_dir,
+                    property_data,
+                    template=template,
+                    working_dir=workspace_dir / "_prepared_agent_fallback",
+                )
+
+            center_sample = self._sample_pixel_rgb(
+                prepared_assets.agent_image_path,
+                64,
+                64,
+            )
+            self.assertLess(center_sample[0], 100)
+            self.assertGreater(center_sample[1], 180)
+            self.assertLess(center_sample[2], 100)
 
     def test_background_audio_candidates_are_shuffled_from_assets_music(self) -> None:
         with _workspace_temp_dir() as workspace_dir:

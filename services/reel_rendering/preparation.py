@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 import shutil
@@ -7,7 +8,11 @@ import subprocess
 from pathlib import Path
 
 from core.errors import PropertyReelError
-from services.reel_rendering.formatting import resolve_agent_image_size, resolve_ber_icon_size
+from services.reel_rendering.formatting import (
+    build_contained_image_filter,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+)
 from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.models import (
     PreparedReelAssets,
@@ -23,11 +28,13 @@ from services.reel_rendering.runtime import (
     resolve_ffmpeg_binary,
     select_reel_slides,
     should_reserve_agency_logo_space,
+    _write_transparent_placeholder,
 )
 
 _PNG_IMAGE_CODEC = "png"
 _SLIDE_WORKING_BASE_SCALE = 1.24
 _SLIDE_MOTION_MIN_PIXELS_PER_FRAME = 2.0
+logger = logging.getLogger(__name__)
 
 
 def prepare_reel_render_assets(
@@ -108,8 +115,10 @@ def prepare_reel_render_assets(
         prepared_root,
     )
     prepared_agent_path = overlays_dir / "agent_panel.png"
-    _normalize_agent_image(
+    _normalize_agent_image_with_fallback(
         ffmpeg_binary=ffmpeg_binary,
+        workspace_dir=workspace_dir,
+        prepared_root=prepared_root,
         input_path=agent_source_path,
         output_path=prepared_agent_path,
         settings=settings,
@@ -134,18 +143,18 @@ def prepare_reel_render_assets(
 
     prepared_cover_logo_path: Path | None = None
     cover_logo_path = prepare_cover_logo_image(workspace_dir, property_data, settings)
-    reserve_agency_logo_space = should_reserve_agency_logo_space(
+    should_render_agency_logo = should_reserve_agency_logo_space(
         property_data,
         cover_logo_path=cover_logo_path,
     )
-    if reserve_agency_logo_space:
+    if should_render_agency_logo:
         overlay_layout = build_overlay_layout(
             property_data,
             settings,
             slides=property_data.selected_slides,
             slide_duration=settings.seconds_per_slide,
             has_ber_badge=prepared_ber_icon_path is not None,
-            has_agency_logo=reserve_agency_logo_space,
+            has_agency_logo=should_render_agency_logo,
             cover_caption=None,
         )
         if (
@@ -154,14 +163,29 @@ def prepare_reel_render_assets(
             and overlay_layout.agency_logo_box.visible
         ):
             prepared_cover_logo_path = overlays_dir / "agency_logo.png"
-            _normalize_agency_logo(
-                ffmpeg_binary=ffmpeg_binary,
-                input_path=cover_logo_path,
-                output_path=prepared_cover_logo_path,
-                logo_width=overlay_layout.agency_logo_box.width,
-                logo_height=overlay_layout.agency_logo_box.height,
-                property_data=property_data,
-            )
+            try:
+                _normalize_agency_logo(
+                    ffmpeg_binary=ffmpeg_binary,
+                    input_path=cover_logo_path,
+                    output_path=prepared_cover_logo_path,
+                    logo_width=overlay_layout.agency_logo_box.width,
+                    logo_height=overlay_layout.agency_logo_box.height,
+                    property_data=property_data,
+                )
+            except PropertyReelError as error:
+                logger.warning(
+                    "Failed to normalize agency logo %s for property %s (%s). Continuing without agency logo. Error: %s",
+                    cover_logo_path,
+                    property_data.property_id,
+                    property_data.slug,
+                    error,
+                )
+                prepared_cover_logo_path = None
+
+    reserve_agency_logo_space = should_reserve_agency_logo_space(
+        property_data,
+        cover_logo_path=prepared_cover_logo_path,
+    )
 
     background_audio_candidates = resolve_background_audio_paths(
         workspace_dir,
@@ -180,6 +204,64 @@ def prepare_reel_render_assets(
         background_audio_candidates=background_audio_candidates,
         reserve_agency_logo_space=reserve_agency_logo_space,
     )
+
+
+def _normalize_agent_image_with_fallback(
+    *,
+    ffmpeg_binary: str,
+    workspace_dir: Path,
+    prepared_root: Path,
+    input_path: Path,
+    output_path: Path,
+    settings: PropertyReelTemplate,
+    property_data: PropertyRenderData,
+) -> None:
+    last_error: PropertyReelError | None = None
+
+    candidate_paths: list[Path] = [input_path]
+    agency_logo_path: Path | None = None
+    placeholder_path: Path | None = None
+
+    candidate_index = 0
+    while candidate_index < len(candidate_paths):
+        candidate_path = candidate_paths[candidate_index]
+        try:
+            _normalize_agent_image(
+                ffmpeg_binary=ffmpeg_binary,
+                input_path=candidate_path,
+                output_path=output_path,
+                settings=settings,
+                property_data=property_data,
+            )
+            return
+        except PropertyReelError as error:
+            last_error = error
+            logger.warning(
+                "Failed to normalize agent image source %s for property %s (%s). Trying next fallback. Error: %s",
+                candidate_path,
+                property_data.property_id,
+                property_data.slug,
+                error,
+            )
+            if agency_logo_path is None:
+                agency_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    settings,
+                    suppress_if_duplicate=False,
+                )
+                if agency_logo_path is not None and agency_logo_path not in candidate_paths:
+                    candidate_paths.append(agency_logo_path)
+            if placeholder_path is None:
+                placeholder_path = _write_transparent_placeholder(
+                    prepared_root / "agent_placeholder.png"
+                )
+                if placeholder_path not in candidate_paths:
+                    candidate_paths.append(placeholder_path)
+        candidate_index += 1
+
+    if last_error is not None:
+        raise last_error
 
 
 def _normalize_slide_image(
@@ -332,9 +414,10 @@ def _normalize_agent_image(
     property_data: PropertyRenderData,
 ) -> None:
     agent_image_size = resolve_agent_image_size(settings)
-    filter_text = (
-        f"scale=w={agent_image_size}:h={agent_image_size}:force_original_aspect_ratio=increase,"
-        f"crop={agent_image_size}:{agent_image_size},setsar=1,format=rgba"
+    filter_text = build_contained_image_filter(
+        agent_image_size,
+        agent_image_size,
+        pixel_format="rgba",
     )
     _render_single_frame(
         ffmpeg_binary=ffmpeg_binary,

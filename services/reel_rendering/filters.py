@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from services.reel_rendering.formatting import (
+    build_contained_image_filter,
     escape_drawtext_text,
     escape_filter_path,
     resolve_agent_image_size,
@@ -215,9 +216,7 @@ def build_filter_complex(
     )
     filter_parts.append(
         f"[{agent_image_input_index}:v]"
-        f"scale=w={agent_image_size}:h={agent_image_size}:force_original_aspect_ratio=increase,"
-        f"crop={agent_image_size}:{agent_image_size},"
-        "format=rgba"
+        f"{build_contained_image_filter(agent_image_size, agent_image_size, pixel_format='rgba')}"
         "[agent_panel_image]"
     )
     if ber_icon_input_index is not None:

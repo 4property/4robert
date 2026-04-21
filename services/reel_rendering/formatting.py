@@ -96,6 +96,19 @@ def resolve_agent_image_size(settings: PropertyReelTemplate) -> int:
     return max(120, min(196, round(settings.height * 0.094)))
 
 
+def build_contained_image_filter(
+    width: int,
+    height: int,
+    *,
+    pixel_format: str = "rgba",
+) -> str:
+    return (
+        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0,"
+        f"setsar=1,format={pixel_format}"
+    )
+
+
 def resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
     base_height = max(_BER_ICON_MIN_HEIGHT, round(settings.height * _BER_ICON_HEIGHT_RATIO))
     icon_height = max(1, round(base_height * settings.ber_icon_scale))
@@ -441,6 +454,7 @@ __all__ = [
     "OVERLAY_TEXT_COLOR_SUBTITLE",
     "WrappedTextResult",
     "build_agent_lines",
+    "build_contained_image_filter",
     "build_display_price",
     "build_property_header_details_line",
     "build_property_header_viewing_times_line",

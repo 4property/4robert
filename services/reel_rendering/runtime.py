@@ -9,12 +9,12 @@ import shutil
 import struct
 import zlib
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from config import GEMINI_SELECTION_AUDIT_FILENAME
-from settings.images import IMAGE_EXTENSIONS
-from settings.http import HTTP_HEADERS, OUTBOUND_HTTP_TIMEOUT_SECONDS
+from settings.images import IMAGE_EXTENSIONS, IMAGE_HEADERS
+from settings.http import OUTBOUND_HTTP_TIMEOUT_SECONDS
 from core.dependencies import require_dependency
 from core.errors import PropertyReelError, ResourceNotFoundError
 from services.ai_photo_selection.prompting import normalize_caption
@@ -28,6 +28,38 @@ from services.webhook_transport.site_storage import resolve_site_storage_layout,
 
 logger = logging.getLogger(__name__)
 _BRANDING_CACHE_DIRNAME = "_branding"
+_REMOTE_IMAGE_QUERY_FILENAME_KEYS = frozenset({"img", "image", "filename", "file", "src"})
+_REMOTE_IMAGE_EXTENSION_CANDIDATES = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".gif",
+    ".avif",
+    ".heic",
+    ".heif",
+    ".jfif",
+    ".svg",
+)
+_REMOTE_IMAGE_EXTENSIONS = frozenset(_REMOTE_IMAGE_EXTENSION_CANDIDATES)
+_REMOTE_IMAGE_SUFFIX_BY_CONTENT_TYPE = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/x-ms-bmp": ".bmp",
+    "image/tiff": ".tiff",
+    "image/x-tiff": ".tiff",
+    "image/gif": ".gif",
+    "image/avif": ".avif",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "image/svg+xml": ".svg",
+}
 _VALID_BER_ICON_CODES = {
     "A1",
     "A2",
@@ -181,11 +213,32 @@ def resolve_ber_icon_path(
 
 
 def download_remote_image(image_url: str, destination: Path) -> Path:
-    request = Request(image_url, headers=HTTP_HEADERS)
-    with urlopen(request, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
-        with destination.open("wb") as file_handle:
-            shutil.copyfileobj(response, file_handle)
-    return destination
+    request = Request(image_url, headers=IMAGE_HEADERS)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    download_token = hashlib.sha1(f"{image_url}|{destination}".encode("utf-8")).hexdigest()[:10]
+    temporary_destination = destination.parent / f"{destination.name}.{download_token}.download"
+
+    try:
+        with urlopen(request, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
+            content_type = response.headers.get("Content-Type")
+            content_disposition = response.headers.get("Content-Disposition")
+            with temporary_destination.open("wb") as file_handle:
+                shutil.copyfileobj(response, file_handle)
+
+        final_destination = _resolve_downloaded_image_destination(
+            image_url=image_url,
+            requested_destination=destination,
+            downloaded_path=temporary_destination,
+            content_type=content_type,
+            content_disposition=content_disposition,
+        )
+        if final_destination.exists() and final_destination != temporary_destination:
+            final_destination.unlink(missing_ok=True)
+        temporary_destination.replace(final_destination)
+        return final_destination
+    except Exception:
+        temporary_destination.unlink(missing_ok=True)
+        raise
 
 
 def download_primary_image(primary_image_url: str, destination: Path) -> Path:
@@ -197,8 +250,7 @@ def _normalize_image_basename(image_reference: str | None) -> str | None:
     if not normalized_reference:
         return None
 
-    parsed_reference = urlparse(normalized_reference)
-    basename = Path(parsed_reference.path or normalized_reference).name.strip().lower()
+    basename = _resolve_remote_image_name(normalized_reference).strip().lower()
     return basename or None
 
 
@@ -237,14 +289,6 @@ def prepare_cover_logo_image(
             property_data.slug,
         )
         return None
-    if _has_explicit_unsupported_image_suffix(agency_logo_url):
-        logger.warning(
-            "Skipping agency logo %r for property %s (%s) because the file extension is not supported.",
-            agency_logo_url,
-            property_data.property_id,
-            property_data.slug,
-        )
-        return None
 
     destination = _resolve_cached_branding_destination(
         workspace_dir=workspace_dir,
@@ -253,8 +297,9 @@ def prepare_cover_logo_image(
         image_url=agency_logo_url,
         label="agency-logo",
     )
-    if destination.exists() and destination.stat().st_size > 0:
-        return destination
+    existing_destination = _find_existing_remote_image(destination)
+    if existing_destination is not None:
+        return existing_destination
 
     try:
         return download_remote_image(agency_logo_url, destination)
@@ -279,6 +324,7 @@ def prepare_agent_image(
     settings: PropertyReelTemplate,
     temp_dir: Path,
 ) -> Path:
+    temp_dir.mkdir(parents=True, exist_ok=True)
     if not property_data.agent_photo_url:
         agency_logo_path = prepare_cover_logo_image(
             workspace_dir,
@@ -619,17 +665,184 @@ def _resolve_cached_branding_destination(
 
 
 def _resolve_remote_image_suffix(image_url: str) -> str:
-    parsed_path = urlparse(image_url).path
-    suffix = Path(parsed_path).suffix.lower()
-    if suffix in IMAGE_EXTENSIONS:
+    suffix = _normalize_remote_image_suffix(Path(_resolve_remote_image_name(image_url)).suffix)
+    if suffix is not None:
         return suffix
     return ".png"
 
 
-def _has_explicit_unsupported_image_suffix(image_url: str) -> bool:
-    parsed_path = urlparse(image_url).path
-    suffix = Path(parsed_path).suffix.lower()
-    return bool(suffix) and suffix not in IMAGE_EXTENSIONS
+def _resolve_remote_image_name(image_url: str) -> str:
+    parsed_url = urlparse(image_url)
+    query_pairs = parse_qsl(parsed_url.query, keep_blank_values=False)
+
+    for key, value in query_pairs:
+        if key.lower() not in _REMOTE_IMAGE_QUERY_FILENAME_KEYS:
+            continue
+        basename = Path(unquote(value)).name.strip()
+        if basename:
+            return basename
+
+    path_basename = Path(unquote(parsed_url.path)).name.strip()
+    if path_basename:
+        return path_basename
+    return image_url.strip()
+
+
+def _resolve_downloaded_image_destination(
+    *,
+    image_url: str,
+    requested_destination: Path,
+    downloaded_path: Path,
+    content_type: str | None,
+    content_disposition: str | None,
+) -> Path:
+    resolved_suffix = _resolve_downloaded_image_suffix(
+        image_url=image_url,
+        downloaded_path=downloaded_path,
+        content_type=content_type,
+        content_disposition=content_disposition,
+        fallback_suffix=requested_destination.suffix,
+    )
+    current_suffix = _normalize_remote_image_suffix(requested_destination.suffix)
+    if current_suffix == resolved_suffix:
+        return requested_destination
+    if requested_destination.suffix:
+        return requested_destination.with_suffix(resolved_suffix)
+    return requested_destination.with_name(f"{requested_destination.name}{resolved_suffix}")
+
+
+def _resolve_downloaded_image_suffix(
+    *,
+    image_url: str,
+    downloaded_path: Path,
+    content_type: str | None,
+    content_disposition: str | None,
+    fallback_suffix: str | None,
+) -> str:
+    sniffed_suffix = _sniff_downloaded_image_suffix(downloaded_path)
+    if _is_probably_non_image_response(content_type, sniffed_suffix):
+        raise ValueError(
+            f"Remote image download for {image_url!r} did not return an image response."
+        )
+
+    content_disposition_filename = _resolve_content_disposition_filename(content_disposition)
+    candidates = (
+        sniffed_suffix,
+        _normalize_remote_image_suffix(Path(content_disposition_filename or "").suffix),
+        _suffix_from_content_type(content_type),
+        _normalize_remote_image_suffix(Path(_resolve_remote_image_name(image_url)).suffix),
+        _normalize_remote_image_suffix(fallback_suffix),
+    )
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
+    return ".png"
+
+
+def _resolve_content_disposition_filename(content_disposition: str | None) -> str | None:
+    if not content_disposition:
+        return None
+
+    encoded_match = re.search(r"filename\*\s*=\s*(?:UTF-8''|utf-8'')?([^;]+)", content_disposition)
+    if encoded_match is not None:
+        filename = unquote(encoded_match.group(1).strip().strip('"'))
+        resolved = Path(filename).name.strip()
+        return resolved or None
+
+    plain_match = re.search(r'filename\s*=\s*"?(?P<filename>[^";]+)"?', content_disposition)
+    if plain_match is not None:
+        filename = unquote(plain_match.group("filename").strip())
+        resolved = Path(filename).name.strip()
+        return resolved or None
+    return None
+
+
+def _suffix_from_content_type(content_type: str | None) -> str | None:
+    if not content_type:
+        return None
+    normalized_content_type = content_type.split(";", 1)[0].strip().lower()
+    return _REMOTE_IMAGE_SUFFIX_BY_CONTENT_TYPE.get(normalized_content_type)
+
+
+def _normalize_remote_image_suffix(suffix: str | None) -> str | None:
+    normalized_suffix = str(suffix or "").strip().lower()
+    if not normalized_suffix:
+        return None
+    if not normalized_suffix.startswith("."):
+        normalized_suffix = f".{normalized_suffix}"
+    if normalized_suffix == ".jpe":
+        normalized_suffix = ".jpg"
+    if normalized_suffix in _REMOTE_IMAGE_EXTENSIONS or normalized_suffix in IMAGE_EXTENSIONS:
+        return normalized_suffix
+    return None
+
+
+def _sniff_downloaded_image_suffix(downloaded_path: Path) -> str | None:
+    try:
+        header = downloaded_path.read_bytes()[:4096]
+    except OSError:
+        return None
+    if not header:
+        return None
+
+    stripped_header = header.lstrip()
+    if stripped_header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if header.startswith(b"BM"):
+        return ".bmp"
+    if header.startswith((b"II*\x00", b"MM\x00*")):
+        return ".tiff"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return ".webp"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        brand = header[8:12]
+        if brand in {b"avif", b"avis"}:
+            return ".avif"
+        if brand in {b"heic", b"heix", b"hevc", b"hevx"}:
+            return ".heic"
+        if brand in {b"mif1", b"msf1"}:
+            return ".heif"
+    lowered_text = stripped_header[:512].lower()
+    if b"<svg" in lowered_text:
+        return ".svg"
+    return None
+
+
+def _is_probably_non_image_response(content_type: str | None, sniffed_suffix: str | None) -> bool:
+    if sniffed_suffix is not None:
+        return False
+    if not content_type:
+        return False
+    normalized_content_type = content_type.split(";", 1)[0].strip().lower()
+    if normalized_content_type.startswith("image/"):
+        return False
+    return normalized_content_type not in {
+        "application/octet-stream",
+        "binary/octet-stream",
+        "application/binary",
+    }
+
+
+def _find_existing_remote_image(destination: Path) -> Path | None:
+    candidates: list[Path] = [destination]
+    candidates.extend(sorted(destination.parent.glob(f"{destination.stem}.*")))
+    seen_candidates: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen_candidates:
+            continue
+        seen_candidates.add(candidate)
+        if (
+            candidate.exists()
+            and candidate.is_file()
+            and candidate.stat().st_size > 0
+            and _normalize_remote_image_suffix(candidate.suffix) is not None
+        ):
+            return candidate
+    return None
 
 
 def _write_transparent_placeholder(destination: Path) -> Path:

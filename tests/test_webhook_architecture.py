@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -68,7 +69,13 @@ from services.reel_rendering.models import (
     PropertyReelTemplate,
 )
 from services.reel_rendering.render import build_reel_template_for_render_profile
-from services.reel_rendering.runtime import prepare_cover_logo_image, resolve_ber_icon_path, resolve_font_path
+from services.reel_rendering.runtime import (
+    download_remote_image,
+    prepare_agent_image,
+    prepare_cover_logo_image,
+    resolve_ber_icon_path,
+    resolve_font_path,
+)
 from services.webhook_transport.operations import build_readiness_report
 from services.webhook_transport.uvicorn_protocols import (
     build_invalid_http_request_preview,
@@ -2993,6 +3000,60 @@ class BerIconRuntimeTests(unittest.TestCase):
 
 
 class AgencyLogoRuntimeTests(unittest.TestCase):
+    @staticmethod
+    def _build_http_response(
+        payload: bytes,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> io.BytesIO:
+        class _FakeHTTPResponse(io.BytesIO):
+            def __init__(self, body: bytes, response_headers: dict[str, str]) -> None:
+                super().__init__(body)
+                self.headers = response_headers
+
+            def __enter__(self) -> _FakeHTTPResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                self.close()
+                return False
+
+        return _FakeHTTPResponse(payload, headers or {})
+
+    def test_download_remote_image_prefers_content_type_over_destination_suffix(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            with patch(
+                "services.reel_rendering.runtime.urlopen",
+                return_value=self._build_http_response(
+                    b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 32,
+                    headers={"Content-Type": "image/webp"},
+                ),
+            ):
+                downloaded_path = download_remote_image(
+                    "https://example.com/agent.png",
+                    workspace_dir / "agent_photo.png",
+                )
+
+            self.assertEqual(downloaded_path.suffix, ".webp")
+            self.assertTrue(downloaded_path.exists())
+
+    def test_download_remote_image_sniffs_binary_signature_when_content_type_is_generic(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            with patch(
+                "services.reel_rendering.runtime.urlopen",
+                return_value=self._build_http_response(
+                    b"\x89PNG\r\n\x1a\n" + b"\x00" * 32,
+                    headers={"Content-Type": "application/octet-stream"},
+                ),
+            ):
+                downloaded_path = download_remote_image(
+                    "https://example.com/ShowThumbnail.aspx?id=42",
+                    workspace_dir / "agent_photo.bin",
+                )
+
+            self.assertEqual(downloaded_path.suffix, ".png")
+            self.assertTrue(downloaded_path.exists())
+
     def test_prepare_cover_logo_image_downloads_agency_logo_when_available(self) -> None:
         with workspace_temp_dir() as workspace_dir:
             property_data = PropertyRenderData(
@@ -3157,6 +3218,103 @@ class AgencyLogoRuntimeTests(unittest.TestCase):
                 )
 
         self.assertIsNone(cover_logo_path)
+
+    def test_prepare_cover_logo_image_accepts_dynamic_aspx_image_url(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            dynamic_image_url = (
+                "https://old.4pm.ie/ShowThumbnail.aspx?"
+                "img=4pm.ie__agentPhoto.png&h=400&w=400&crop=False"
+            )
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=None,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url=dynamic_image_url,
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                self.assertEqual(image_url, dynamic_image_url)
+                self.assertEqual(destination.suffix, ".png")
+                destination.write_bytes(b"logo")
+                return destination
+
+            with patch("services.reel_rendering.runtime.download_remote_image", side_effect=fake_download):
+                cover_logo_path = prepare_cover_logo_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                )
+
+        self.assertIsNotNone(cover_logo_path)
+        assert cover_logo_path is not None
+        self.assertEqual(cover_logo_path.suffix, ".png")
+
+    def test_prepare_agent_image_accepts_dynamic_aspx_image_url(self) -> None:
+        with workspace_temp_dir() as workspace_dir:
+            dynamic_image_url = (
+                "https://old.4pm.ie/ShowThumbnail.aspx?"
+                "img=4pm.ie__agentPhoto.png&h=400&w=400&crop=False"
+            )
+            property_data = PropertyRenderData(
+                site_id="ckp.ie",
+                property_id=170800,
+                slug="sample-property",
+                title="46 Example Street, Dublin 4",
+                link="https://ckp.ie/property/sample-property",
+                property_status="For Sale",
+                selected_image_dir=Path("images"),
+                selected_image_paths=(),
+                featured_image_url=None,
+                bedrooms=3,
+                bathrooms=2,
+                ber_rating="B2",
+                agent_name="Jane Doe",
+                agent_photo_url=dynamic_image_url,
+                agent_email="jane@example.com",
+                agent_mobile=None,
+                agent_number="+353 1 234 5678",
+                agency_logo_url=None,
+                price="650000",
+                property_type_label="Apartment",
+                property_area_label="Dublin 4",
+                property_county_label="Dublin",
+                eircode="D04 TEST",
+            )
+
+            def fake_download(image_url: str, destination: Path) -> Path:
+                self.assertEqual(image_url, dynamic_image_url)
+                self.assertEqual(destination.name, "agent_photo.png")
+                destination.write_bytes(b"agent")
+                return destination
+
+            with patch("services.reel_rendering.runtime.download_remote_image", side_effect=fake_download):
+                agent_image_path = prepare_agent_image(
+                    workspace_dir,
+                    property_data,
+                    PropertyReelTemplate(),
+                    workspace_dir / "prepared",
+                )
+
+        self.assertEqual(agent_image_path.name, "agent_photo.png")
 
 
 class ReelRuntimePathTests(unittest.TestCase):
