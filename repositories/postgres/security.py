@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from cryptography.fernet import Fernet
 
-from config import DATABASE_ENCRYPTION_KEY
+from settings import DATABASE_ENCRYPTION_KEY
 
 
 def _fernet() -> Fernet:

@@ -5,10 +5,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from models.property import Property
-from repositories.property_pipeline_repository import DownloadedImage
-from services.social_delivery.platforms import normalize_platform_name
-from services.webhook_transport.site_storage import SiteStorageLayout
+from domain.properties.model import Property
+from domain.publishing.platforms import normalize_platform_name
+from domain.tenancy.context import TenantContext
+from domain.tenancy.storage import SiteStorageLayout
+from domain.media.types import DownloadedImage
 
 
 def _normalise_platforms(raw_platforms: list[object] | tuple[object, ...]) -> tuple[str, ...]:
@@ -91,15 +92,19 @@ class PlatformPublishTargetPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class PropertyVideoJob:
+class PropertyMediaJob:
     event_id: str
-    site_id: str
+    tenant: TenantContext
     property_id: int | None
     received_at: str
     raw_payload_hash: str
     payload: dict[str, Any]
     publish_context: SocialPublishContext | None = None
     job_id: str = ""
+
+    @property
+    def site_id(self) -> str:
+        return self.tenant.site_id
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -201,7 +206,7 @@ class RenderedMediaArtifact:
 class PropertyContext:
     workspace_dir: Path
     storage_paths: SiteStorageLayout
-    site_id: str
+    tenant: TenantContext
     property: Property
     delivery_plan: MediaDeliveryPlan = field(
         default_factory=lambda: MediaDeliveryPlan(
@@ -235,8 +240,8 @@ class PropertyContext:
         return self.requires_asset_preparation
 
     @property
-    def existing_published_video(self) -> PublishedMediaArtifact | None:
-        return self.existing_published_media
+    def site_id(self) -> str:
+        return self.tenant.site_id
 
 
 def _guess_mime_type(artifact_kind: str, media_path: Path) -> str:
@@ -248,25 +253,13 @@ def _guess_mime_type(artifact_kind: str, media_path: Path) -> str:
     if artifact_kind == "poster_image":
         return "image/jpeg"
     return "application/octet-stream"
-
-
-PublishedVideoArtifact = PublishedMediaArtifact
-PropertyMediaJob = PropertyVideoJob
-RenderedVideoArtifact = RenderedMediaArtifact
-SelectedPhotoSet = PreparedMediaAssets
-
-
 __all__ = [
     "MediaDeliveryPlan",
     "PlatformPublishTargetPlan",
     "PreparedMediaAssets",
     "PropertyContext",
     "PropertyMediaJob",
-    "PropertyVideoJob",
     "PublishedMediaArtifact",
-    "PublishedVideoArtifact",
     "RenderedMediaArtifact",
-    "RenderedVideoArtifact",
-    "SelectedPhotoSet",
     "SocialPublishContext",
 ]

@@ -30,8 +30,8 @@ def main() -> None:
     logger = logging.getLogger(__name__)
 
     try:
-        from application.bootstrap import build_default_job_dispatcher
-        from config import (
+        from application.bootstrap.runtime import build_default_job_dispatcher
+        from settings import (
             DATABASE_URL,
             LOG_LEVEL,
             PERSISTENT_LOG_BACKUP_COUNT,
@@ -44,8 +44,8 @@ def main() -> None:
             WEBHOOK_SITE_SECRETS,
             WEBHOOK_WORKER_COUNT,
         )
-        from services.webhook_transport.operations import build_readiness_report
-        from services.webhook_transport.server import run_wordpress_webhook_server
+        from services.transport.http.operations import build_readiness_report
+        from services.transport.http.server import run_wordpress_webhook_server
 
         configure_logging(
             LOG_LEVEL,

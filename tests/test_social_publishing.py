@@ -15,43 +15,44 @@ APPLICATION_ROOT = Path(__file__).resolve().parents[1]
 if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
-from application.bootstrap import build_default_social_property_publisher
-from application.types import PropertyContext, PublishedVideoArtifact, SocialPublishContext
+from application.bootstrap.runtime import build_default_social_property_publisher
+from application.types import PropertyContext, PublishedMediaArtifact, SocialPublishContext
 from core.errors import (
     SocialPublishingError,
     SocialPublishingResultError,
     TransientSocialPublishingError,
 )
-from models.property import Property
-from services.social_delivery.description import (
+from domain.properties.model import Property
+from domain.tenancy.context import TenantContext
+from services.publishing.social_delivery.description import (
     build_platform_description_for_property,
     build_property_public_url,
     build_tiktok_description,
 )
-from services.social_delivery.platform_policy import resolve_platform_social_post_type
-from services.social_delivery.post_copy import (
+from services.publishing.social_delivery.platform_policy import resolve_platform_social_post_type
+from services.publishing.social_delivery.post_copy import (
     DEFAULT_PROPERTY_CAPTION_LAYOUT,
     PropertyCaptionContext,
     render_property_caption,
 )
-from services.social_delivery.gohighlevel_client import GoHighLevelApiError, GoHighLevelClient
-from services.social_delivery.gohighlevel_media_service import GoHighLevelMediaService
-from services.social_delivery.gohighlevel_publisher import GoHighLevelPublisher
-from services.social_delivery.gohighlevel_social_service import GoHighLevelSocialService
-from services.social_delivery.platforms import (
+from services.publishing.social_delivery.gohighlevel_client import GoHighLevelApiError, GoHighLevelClient
+from services.publishing.social_delivery.gohighlevel_media_service import GoHighLevelMediaService
+from services.publishing.social_delivery.gohighlevel_publisher import GoHighLevelPublisher
+from services.publishing.social_delivery.gohighlevel_social_service import GoHighLevelSocialService
+from services.publishing.social_delivery.platforms import (
     get_platform_config,
     list_supported_platforms,
     normalize_platform_name,
 )
-from services.social_delivery.user_selection import select_first_available_location_user
-from services.social_delivery.models import (
+from services.publishing.social_delivery.user_selection import select_first_available_location_user
+from services.publishing.social_delivery.models import (
     MultiPlatformPublishRequest,
     PlatformPublishTarget,
     PublishVideoRequest,
     PublishVideoResult,
 )
-from services.social_delivery.property_publisher import GoHighLevelPropertyPublisher
-from services.webhook_transport.site_storage import resolve_site_storage_layout
+from services.publishing.social_delivery.property_publisher import GoHighLevelPropertyPublisher
+from services.media.site_storage import resolve_site_storage_layout
 
 TEST_TEMP_ROOT = APPLICATION_ROOT / ".tmp_test_cases"
 TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1525,7 +1526,11 @@ class PropertyPublisherTests(unittest.TestCase):
             context = PropertyContext(
                 workspace_dir=workspace_dir,
                 storage_paths=storage_paths,
-                site_id="ckp.ie",
+                tenant=TenantContext(
+                    site_id="ckp.ie",
+                    agency_id="agency-1",
+                    wordpress_source_id="source-1",
+                ),
                 property=property_item,
                 publish_context=SocialPublishContext(
                     provider="gohighlevel",
@@ -1539,7 +1544,7 @@ class PropertyPublisherTests(unittest.TestCase):
                 publish_target_url="https://ckp.ie/property/sample-property",
                 pending_publish_platforms=("tiktok",),
             )
-            published_video = PublishedVideoArtifact(
+            published_video = PublishedMediaArtifact(
                 manifest_path=workspace_dir / "sample.json",
                 video_path=workspace_dir / "sample.mp4",
             )
@@ -1583,7 +1588,11 @@ class PropertyPublisherTests(unittest.TestCase):
             context = PropertyContext(
                 workspace_dir=workspace_dir,
                 storage_paths=storage_paths,
-                site_id="ckp.ie",
+                tenant=TenantContext(
+                    site_id="ckp.ie",
+                    agency_id="agency-1",
+                    wordpress_source_id="source-1",
+                ),
                 property=property_item,
                 publish_context=SocialPublishContext(
                     provider="gohighlevel",
@@ -1597,7 +1606,7 @@ class PropertyPublisherTests(unittest.TestCase):
                 publish_target_url="https://ckp.ie/property/sample-property",
                 pending_publish_platforms=("youtube",),
             )
-            published_video = PublishedVideoArtifact(
+            published_video = PublishedMediaArtifact(
                 manifest_path=workspace_dir / "sample.json",
                 video_path=workspace_dir / "sample.mp4",
             )
@@ -1636,12 +1645,16 @@ class PropertyPublisherTests(unittest.TestCase):
             context = PropertyContext(
                 workspace_dir=workspace_dir,
                 storage_paths=storage_paths,
-                site_id="ckp.ie",
+                tenant=TenantContext(
+                    site_id="ckp.ie",
+                    agency_id="agency-1",
+                    wordpress_source_id="source-1",
+                ),
                 property=property_item,
             )
 
             with patch(
-                "services.social_delivery.property_publisher.generate_property_poster_from_data",
+                "services.publishing.social_delivery.property_publisher.generate_property_poster_from_data",
                 side_effect=AssertionError("poster should not be regenerated"),
             ):
                 poster_path = GoHighLevelPropertyPublisher(
@@ -1669,7 +1682,11 @@ class PropertyPublisherTests(unittest.TestCase):
             context = PropertyContext(
                 workspace_dir=workspace_dir,
                 storage_paths=storage_paths,
-                site_id="ckp.ie",
+                tenant=TenantContext(
+                    site_id="ckp.ie",
+                    agency_id="agency-1",
+                    wordpress_source_id="source-1",
+                ),
                 property=property_item,
                 publish_context=SocialPublishContext(
                     provider="gohighlevel",
@@ -1688,7 +1705,7 @@ class PropertyPublisherTests(unittest.TestCase):
                 publish_target_url="https://ckp.ie/property/sample-property",
                 pending_publish_platforms=("facebook", "google_business_profile"),
             )
-            published_video = PublishedVideoArtifact(
+            published_video = PublishedMediaArtifact(
                 manifest_path=workspace_dir / "sample.json",
                 video_path=workspace_dir / "sample.mp4",
             )

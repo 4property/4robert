@@ -5,12 +5,12 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from config import DATABASE_URL
+from settings import DATABASE_URL
 from repositories.postgres.base import Base
 from repositories.postgres import models as _models  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

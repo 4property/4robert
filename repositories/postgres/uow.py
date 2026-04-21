@@ -3,16 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from application.persistence import UnitOfWork
-from repositories.media_revision_repository import MediaRevisionRepository
-from repositories.outbox_event_repository import OutboxEventRepository
-from repositories.property_job_repository import PropertyJobRepository
-from repositories.property_pipeline_repository import PropertyPipelineRepository
-from repositories.scripted_video_artifact_repository import ScriptedVideoArtifactRepository
-from repositories.webhook_delivery_repository import WebhookDeliveryRepository
+from repositories.stores.media_revision_store import MediaRevisionRepository
+from repositories.stores.outbox_event_store import OutboxEventRepository
+from repositories.stores.job_queue_store import PropertyJobRepository
+from repositories.stores.pipeline_state_store import PipelineStateStore
+from repositories.stores.property_store import PropertyStore
+from repositories.stores.scripted_video_artifact_store import ScriptedVideoArtifactRepository
+from repositories.stores.webhook_event_store import WebhookDeliveryRepository
+from repositories.stores.wordpress_source_store import WordPressSourceStore
 from repositories.postgres.session import CompatConnection, create_session
 
 
-class PostgresWorkUnit:
+class DatabaseUnitOfWork:
     def __init__(self, database_locator: str | Path | None, base_dir: str | Path) -> None:
         self.database_locator = database_locator
         self.base_dir = Path(base_dir).expanduser().resolve()
@@ -25,6 +27,7 @@ class PostgresWorkUnit:
         self.webhook_event_store = None
         self.job_queue_store = None
         self.scripted_video_store = None
+        self.wordpress_source_store = None
 
     def begin_immediate(self) -> None:
         if self.session is None:
@@ -35,12 +38,16 @@ class PostgresWorkUnit:
     def __enter__(self) -> UnitOfWork:
         self.session = create_session(self.database_locator)
         self.connection = CompatConnection(self.session)
-        self.property_repository = PropertyPipelineRepository(
+        self.property_repository = PropertyStore(
             self.database_locator,
             self.base_dir,
             connection=self.connection,
         )
-        self.pipeline_state_repository = self.property_repository
+        self.pipeline_state_repository = PipelineStateStore(
+            self.database_locator,
+            self.base_dir,
+            connection=self.connection,
+        )
         self.media_revision_store = MediaRevisionRepository(
             self.database_locator,
             connection=self.connection,
@@ -61,16 +68,24 @@ class PostgresWorkUnit:
             self.database_locator,
             connection=self.connection,
         )
+        self.wordpress_source_store = WordPressSourceStore(
+            self.database_locator,
+            connection=self.connection,
+        )
         self.property_repository.__enter__()
+        self.pipeline_state_repository.__enter__()
         self.media_revision_store.__enter__()
         self.outbox_event_store.__enter__()
         self.webhook_event_store.__enter__()
         self.job_queue_store.__enter__()
         self.scripted_video_store.__enter__()
+        self.wordpress_source_store.__enter__()
         self.session.commit()
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self.wordpress_source_store is not None:
+            self.wordpress_source_store.__exit__(exc_type, exc, exc_tb)
         if self.scripted_video_store is not None:
             self.scripted_video_store.__exit__(exc_type, exc, exc_tb)
         if self.job_queue_store is not None:
@@ -81,6 +96,8 @@ class PostgresWorkUnit:
             self.outbox_event_store.__exit__(exc_type, exc, exc_tb)
         if self.media_revision_store is not None:
             self.media_revision_store.__exit__(exc_type, exc, exc_tb)
+        if self.pipeline_state_repository is not None:
+            self.pipeline_state_repository.__exit__(exc_type, exc, exc_tb)
         if self.property_repository is not None:
             self.property_repository.__exit__(exc_type, exc, exc_tb)
         if self.session is not None:
@@ -93,4 +110,4 @@ class PostgresWorkUnit:
         self.connection = None
 
 
-__all__ = ["PostgresWorkUnit"]
+__all__ = ["DatabaseUnitOfWork"]

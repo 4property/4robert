@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from sqlalchemy import (
-    JSON,
-    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -31,58 +29,6 @@ class AgencyModel(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class UserModel(Base):
-    __tablename__ = "users"
-    __table_args__ = (
-        UniqueConstraint("auth_provider", "provider_user_id", name="uq_users_provider_identity"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    auth_provider: Mapped[str] = mapped_column(Text, nullable=False, default="gohighlevel")
-    provider_user_id: Mapped[str] = mapped_column(Text, nullable=False)
-    email: Mapped[str | None] = mapped_column(Text)
-    full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    avatar_url: Mapped[str | None] = mapped_column(Text)
-    last_login_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class AgencyMembershipModel(Base):
-    __tablename__ = "agency_memberships"
-    __table_args__ = (
-        UniqueConstraint("agency_id", "user_id", name="uq_agency_memberships_agency_user"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
-    role: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class GoHighLevelConnectionModel(Base):
-    __tablename__ = "ghl_connections"
-    __table_args__ = (
-        UniqueConstraint("agency_id", "location_id", name="uq_ghl_connections_agency_location"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    location_id: Mapped[str] = mapped_column(Text, nullable=False)
-    company_id: Mapped[str | None] = mapped_column(Text)
-    access_token_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, default=b"")
-    refresh_token_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, default=b"")
-    token_expires_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    scopes_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="connected")
-    connected_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 class WordPressSourceModel(Base):
     __tablename__ = "wordpress_sources"
     __table_args__ = (
@@ -103,76 +49,6 @@ class WordPressSourceModel(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ReelProfileModel(Base):
-    __tablename__ = "reel_profiles"
-    __table_args__ = (
-        UniqueConstraint("agency_id", "name", "version", name="uq_reel_profiles_name_version"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    render_profile_key: Mapped[str] = mapped_column(Text, nullable=False)
-    manifest_template: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    branding_settings: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    render_settings: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class WorkflowPolicyModel(Base):
-    __tablename__ = "workflow_policies"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    mode: Mapped[str] = mapped_column(Text, nullable=False)
-    delay_hours: Mapped[int | None] = mapped_column(Integer)
-    send_review_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    review_email_to: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class AssetLibraryItemModel(Base):
-    __tablename__ = "asset_library_items"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    asset_type: Mapped[str] = mapped_column(Text, nullable=False)
-    usage_type: Mapped[str] = mapped_column(Text, nullable=False)
-    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
-    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
-    mime_type: Mapped[str] = mapped_column(Text, nullable=False)
-    checksum: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    duration_ms: Mapped[int | None] = mapped_column(Integer)
-    width: Mapped[int | None] = mapped_column(Integer)
-    height: Mapped[int | None] = mapped_column(Integer)
-    uploaded_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-
-
-class ReelProfileAssetModel(Base):
-    __tablename__ = "reel_profile_assets"
-    __table_args__ = (
-        UniqueConstraint("profile_id", "slot", "sort_order", name="uq_reel_profile_assets_slot_order"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    profile_id: Mapped[str] = mapped_column(String(36), ForeignKey("reel_profiles.id"), nullable=False)
-    asset_id: Mapped[str] = mapped_column(String(36), ForeignKey("asset_library_items.id"), nullable=False)
-    slot: Mapped[str] = mapped_column(Text, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    config_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-
-
 class PropertyModel(Base):
     __tablename__ = "properties"
     __table_args__ = (
@@ -182,8 +58,8 @@ class PropertyModel(Base):
     )
 
     record_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
@@ -274,8 +150,8 @@ class PropertyPipelineStateModel(Base):
         Index("idx_pipeline_state_site_publish_status", "site_id", "publish_status", "updated_at"),
     )
 
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
     content_fingerprint: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -307,8 +183,8 @@ class WebhookEventModel(Base):
     )
 
     event_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     property_id: Mapped[int | None] = mapped_column(Integer)
     received_at: Mapped[str] = mapped_column(Text, nullable=False)
@@ -327,8 +203,8 @@ class JobQueueModel(Base):
     )
 
     job_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     event_id: Mapped[str] = mapped_column(Text, nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     property_id: Mapped[int | None] = mapped_column(Integer)
@@ -357,8 +233,8 @@ class MediaRevisionModel(Base):
     )
 
     revision_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
     artifact_kind: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -382,8 +258,8 @@ class OutboxEventModel(Base):
     event_id: Mapped[str] = mapped_column(Text, primary_key=True)
     aggregate_type: Mapped[str] = mapped_column(Text, nullable=False)
     aggregate_id: Mapped[str] = mapped_column(Text, nullable=False)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
     source_property_id: Mapped[int | None] = mapped_column(Integer)
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -402,8 +278,8 @@ class ScriptedVideoArtifactModel(Base):
     )
 
     render_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agency_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agencies.id"))
-    wordpress_source_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("wordpress_sources.id"))
+    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
+    wordpress_source_id: Mapped[str] = mapped_column(String(36), ForeignKey("wordpress_sources.id"), nullable=False)
     site_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
     property_slug: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -418,126 +294,15 @@ class ScriptedVideoArtifactModel(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class PropertySnapshotModel(Base):
-    __tablename__ = "property_snapshots"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    site_id: Mapped[str] = mapped_column(Text, nullable=False)
-    source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_event_id: Mapped[str | None] = mapped_column(Text)
-    content_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
-    raw_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    normalized_payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ReelRenderModel(Base):
-    __tablename__ = "reel_renders"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    site_id: Mapped[str] = mapped_column(Text, nullable=False)
-    source_property_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    render_job_id: Mapped[str | None] = mapped_column(String(36))
-    snapshot_id: Mapped[str | None] = mapped_column(String(36))
-    profile_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("reel_profiles.id"))
-    manifest_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    manifest_storage_key: Mapped[str | None] = mapped_column(Text)
-    video_asset_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("asset_library_items.id"))
-    poster_asset_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("asset_library_items.id"))
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
-    review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class ReviewRequestModel(Base):
-    __tablename__ = "review_requests"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    reel_render_id: Mapped[str] = mapped_column(String(36), ForeignKey("reel_renders.id"), nullable=False)
-    requested_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
-    assigned_to_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
-    decision_note: Mapped[str | None] = mapped_column(Text)
-    due_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    decided_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class PublicationJobModel(Base):
-    __tablename__ = "publication_jobs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    reel_render_id: Mapped[str] = mapped_column(String(36), ForeignKey("reel_renders.id"), nullable=False)
-    ghl_connection_id: Mapped[str] = mapped_column(String(36), ForeignKey("ghl_connections.id"), nullable=False)
-    platform: Mapped[str] = mapped_column(Text, nullable=False)
-    scheduled_for: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
-    provider_post_id: Mapped[str | None] = mapped_column(Text)
-    provider_response: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    error_message: Mapped[str | None] = mapped_column(Text)
-    published_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class NotificationRuleModel(Base):
-    __tablename__ = "notification_rules"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    event_type: Mapped[str] = mapped_column(Text, nullable=False)
-    channel: Mapped[str] = mapped_column(Text, nullable=False)
-    destination: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class NotificationDeliveryModel(Base):
-    __tablename__ = "notification_deliveries"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    agency_id: Mapped[str] = mapped_column(String(36), ForeignKey("agencies.id"), nullable=False)
-    rule_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("notification_rules.id"))
-    aggregate_type: Mapped[str] = mapped_column(Text, nullable=False)
-    aggregate_id: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
-    payload_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    scheduled_for: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    sent_at: Mapped[object | None] = mapped_column(DateTime(timezone=True))
-    provider_message_id: Mapped[str | None] = mapped_column(Text)
-    error_message: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 __all__ = [
-    "AgencyMembershipModel",
     "AgencyModel",
-    "AssetLibraryItemModel",
-    "GoHighLevelConnectionModel",
     "JobQueueModel",
     "MediaRevisionModel",
-    "NotificationDeliveryModel",
-    "NotificationRuleModel",
     "OutboxEventModel",
     "PropertyImageModel",
     "PropertyModel",
     "PropertyPipelineStateModel",
-    "PropertySnapshotModel",
-    "PublicationJobModel",
-    "ReelProfileAssetModel",
-    "ReelProfileModel",
-    "ReelRenderModel",
-    "ReviewRequestModel",
     "ScriptedVideoArtifactModel",
-    "UserModel",
     "WebhookEventModel",
     "WordPressSourceModel",
-    "WorkflowPolicyModel",
 ]

@@ -1,70 +1,45 @@
 from __future__ import annotations
 
-import hashlib
-from importlib import import_module
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
 
-from config import (
+from settings import (
     DATABASE_MAX_OVERFLOW,
     DATABASE_POOL_SIZE,
     DATABASE_POOL_TIMEOUT_SECONDS,
     DATABASE_URL,
 )
-from repositories.postgres.base import Base
 from repositories.postgres import models as _models  # noqa: F401
 
 _DATABASE_URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
-_ENGINE_CACHE: dict[tuple[str, str | None], Engine] = {}
-_AUTO_SCHEMA_CACHE: set[tuple[str, str]] = set()
+_ENGINE_CACHE: dict[str, Engine] = {}
 
 
 @dataclass(frozen=True, slots=True)
 class DatabaseBinding:
     url: str
     schema: str | None
-    auto_create_schema: bool
 
 
 def resolve_database_binding(database_locator: str | Path | None) -> DatabaseBinding:
-    if database_locator is None:
-        return DatabaseBinding(
-            url=DATABASE_URL,
-            schema=None,
-            auto_create_schema=False,
-        )
-
-    raw_locator = str(database_locator).strip()
-    if _DATABASE_URL_RE.match(raw_locator):
-        return DatabaseBinding(
-            url=raw_locator,
-            schema=None,
-            auto_create_schema=False,
-        )
-
-    resolved_locator = Path(raw_locator).expanduser().resolve()
-    digest = hashlib.sha1(str(resolved_locator).encode("utf-8")).hexdigest()[:16]
-    return DatabaseBinding(
-        url=DATABASE_URL,
-        schema=f"ws_{digest}",
-        auto_create_schema=True,
-    )
+    raw_locator = DATABASE_URL if database_locator is None else str(database_locator).strip()
+    if not _DATABASE_URL_RE.match(raw_locator):
+        raise ValueError("database_locator must be a PostgreSQL database URL.")
+    return DatabaseBinding(url=raw_locator, schema=None)
 
 
 def get_engine(database_locator: str | Path | None = None) -> Engine:
     binding = resolve_database_binding(database_locator)
-    cache_key = (binding.url, binding.schema)
+    cache_key = binding.url
     engine = _ENGINE_CACHE.get(cache_key)
     if engine is None:
         connect_args: dict[str, Any] = {}
-        if binding.schema:
-            connect_args["options"] = f"-csearch_path={binding.schema}"
         connect_args.setdefault("connect_timeout", 5)
         engine = create_engine(
             binding.url,
@@ -76,8 +51,6 @@ def get_engine(database_locator: str | Path | None = None) -> Engine:
             connect_args=connect_args,
         )
         _ENGINE_CACHE[cache_key] = engine
-    if binding.schema and binding.auto_create_schema:
-        _ensure_auto_schema(engine, binding.schema)
     return engine
 
 
@@ -99,21 +72,6 @@ def describe_database_binding(database_locator: str | Path | None) -> dict[str, 
         "database_url": _mask_database_url(binding.url),
         "database_schema": binding.schema or "public",
     }
-
-
-def _ensure_auto_schema(engine: Engine, schema: str) -> None:
-    cache_key = (str(engine.url), schema)
-    import_module("repositories.postgres.models")
-    required_tables = set(Base.metadata.tables)
-    if cache_key in _AUTO_SCHEMA_CACHE:
-        inspector = inspect(engine)
-        existing_tables = set(inspector.get_table_names(schema=schema))
-        if required_tables.issubset(existing_tables):
-            return
-    with engine.begin() as connection:
-        connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
-        Base.metadata.create_all(connection)
-    _AUTO_SCHEMA_CACHE.add(cache_key)
 
 
 def _mask_database_url(url: str) -> str:
