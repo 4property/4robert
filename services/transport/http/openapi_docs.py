@@ -79,6 +79,10 @@ def _enrich_openapi_schema(
                 "name": "Video Rendering",
                 "description": "Render síncrono de videos guionizados a partir de manifiestos JSON.",
             },
+            {
+                "name": "Admin",
+                "description": "Operaciones administrativas protegidas para gestionar el aprovisionamiento de sitios WordPress.",
+            },
         ),
     )
     _decorate_health_operations(schema)
@@ -319,17 +323,30 @@ def _decorate_webhook_operation(
                 }
             },
         },
-        "503": {
-            "description": "El dispatcher no acepta nuevos trabajos.",
+        "404": {
+            "description": "El site_id del webhook no estÃ¡ provisionado o activo.",
             "content": {
                 "application/json": {
                     "schema": _error_response_schema(),
                     "example": {
-                        "error": "Webhook dispatcher is not accepting new jobs.",
-                        "code": "DISPATCHER_UNAVAILABLE",
+                        "error": "The webhook site is not provisioned.",
+                        "code": "UNKNOWN_WORDPRESS_SITE",
+                        "hint": "Provision an active wordpress_sources row for this site_id before sending webhooks.",
+                    },
+                }
+            },
+        },
+        "500": {
+            "description": "Se produjo un error al aceptar o encolar el webhook.",
+            "content": {
+                "application/json": {
+                    "schema": _error_response_schema(),
+                    "example": {
+                        "error": "Failed to accept webhook delivery.",
+                        "code": "WEBHOOK_ACCEPTANCE_FAILED",
                         "hint": (
-                            "Check the service logs for startup or queue failures and verify the "
-                            "background dispatcher completed startup."
+                            "Check errors.log, warnings-errors.log, and audit.jsonl for the request_id and "
+                            "underlying acceptance failure."
                         ),
                     },
                 }

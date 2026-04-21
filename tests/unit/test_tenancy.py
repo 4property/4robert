@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 APPLICATION_ROOT = Path(__file__).resolve().parents[2]
 if str(APPLICATION_ROOT) not in sys.path:
@@ -43,6 +44,28 @@ class TenantResolverTests(unittest.TestCase):
 
                 with self.assertRaises(ResourceNotFoundError):
                     resolver.resolve(site_id="inactive.example")
+
+    def test_resolve_can_auto_provision_unknown_site_for_testing(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                resolver = TenantResolver(
+                    unit_of_work_factory=lambda: DatabaseUnitOfWork(database.url, workspace_dir),
+                    allow_unknown_sites_for_testing=True,
+                    unsafe_test_source_provisioner=lambda **_: SimpleNamespace(
+                        source=SimpleNamespace(
+                            site_id="missing.example",
+                            agency_id="agency-1",
+                            wordpress_source_id="source-1",
+                        )
+                    ),
+                )
+
+                context = resolver.resolve(site_id="missing.example")
+
+                self.assertEqual(context.site_id, "missing.example")
+                self.assertEqual(context.agency_id, "agency-1")
+                self.assertEqual(context.wordpress_source_id, "source-1")
+                self.assertTrue(context.auto_provisioned)
 
 
 if __name__ == "__main__":

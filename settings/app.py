@@ -135,6 +135,10 @@ class AppSettings(BaseSettings):
         False,
         validation_alias="WEBHOOK_DISABLE_SECURITY",
     )
+    webhook_auto_provision_unknown_sites_for_testing: bool = Field(
+        False,
+        validation_alias="WEBHOOK_AUTO_PROVISION_UNKNOWN_SITES_FOR_TESTING",
+    )
     webhook_enable_docs: bool = Field(
         False,
         validation_alias="WEBHOOK_ENABLE_DOCS",
@@ -199,6 +203,22 @@ class AppSettings(BaseSettings):
         64,
         validation_alias="WEBHOOK_LIMIT_CONCURRENCY",
         ge=1,
+    )
+    admin_api_enabled: bool = Field(
+        True,
+        validation_alias="ADMIN_API_ENABLED",
+    )
+    admin_api_base_path: str = Field(
+        "/admin",
+        validation_alias="ADMIN_API_BASE_PATH",
+    )
+    admin_api_token: str = Field(
+        "",
+        validation_alias="ADMIN_API_TOKEN",
+    )
+    admin_api_disable_auth_for_testing: bool = Field(
+        False,
+        validation_alias="ADMIN_API_DISABLE_AUTH_FOR_TESTING",
     )
     database_url: str = Field(
         DEFAULT_DATABASE_URL,
@@ -492,6 +512,16 @@ class AppSettings(BaseSettings):
             raise ValueError("WEBHOOK_PATH must start with '/'.")
         return normalized_value
 
+    @field_validator("admin_api_base_path")
+    @classmethod
+    def _validate_admin_api_base_path(cls, value: str) -> str:
+        normalized_value = value.strip()
+        if not normalized_value:
+            raise ValueError("ADMIN_API_BASE_PATH cannot be empty.")
+        if not normalized_value.startswith("/"):
+            raise ValueError("ADMIN_API_BASE_PATH must start with '/'.")
+        return normalized_value.rstrip("/") or "/admin"
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, value: str) -> str:
@@ -541,6 +571,11 @@ class AppSettings(BaseSettings):
 
         if not self.log_level:
             self.log_level = "INFO"
+
+        if not self.admin_api_base_path:
+            self.admin_api_base_path = "/admin"
+        elif self.admin_api_base_path != "/":
+            self.admin_api_base_path = self.admin_api_base_path.rstrip("/") or "/admin"
 
         if not self.persistent_log_directory:
             self.persistent_log_directory = "logs"
