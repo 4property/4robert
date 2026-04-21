@@ -2,16 +2,20 @@
 
 import json
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from application.admin import UpsertWordPressSourceRequest, WordPressSourceAdminService
 from application.scripted_render.service import ScriptedVideoRenderService
 from application.bootstrap.runtime import (
     build_default_job_dispatcher,
@@ -22,6 +26,10 @@ from application.tenancy.resolver import TenantResolver
 from application.types import SocialPublishContext
 from application.dispatch.webhook_acceptance import WebhookAcceptanceService
 from settings import (
+    ADMIN_API_BASE_PATH,
+    ADMIN_API_DISABLE_AUTH_FOR_TESTING,
+    ADMIN_API_ENABLED,
+    ADMIN_API_TOKEN,
     DATABASE_URL,
     LOG_LEVEL,
     PERSISTENT_LOG_BACKUP_COUNT,
@@ -30,6 +38,7 @@ from settings import (
     PERSISTENT_LOGGING_ENABLED,
     SOCIAL_PUBLISHING_DEFAULT_PLATFORMS,
     WEBHOOK_ALLOWED_HOSTS,
+    WEBHOOK_AUTO_PROVISION_UNKNOWN_SITES_FOR_TESTING,
     WEBHOOK_DISABLE_SECURITY,
     WEBHOOK_ENABLE_DOCS,
     WEBHOOK_FORWARDED_ALLOW_IPS,
@@ -50,8 +59,21 @@ from settings import (
     WEBHOOK_TRUST_PROXY_HEADERS,
     WEBHOOK_WORKER_COUNT,
 )
-from core.errors import ApplicationError, DependencyNotInstalledError, ResourceNotFoundError, ValidationError
-from core.logging import configure_logging, format_console_block, format_detail_line, log_persistent_event, resolve_log_directory
+from core.errors import (
+    ApplicationError,
+    DependencyNotInstalledError,
+    ResourceNotFoundError,
+    ValidationError,
+    extract_error_details,
+)
+from core.logging import (
+    configure_logging,
+    format_console_block,
+    format_context_line,
+    format_detail_line,
+    log_persistent_event,
+    resolve_log_directory,
+)
 from services.transport.http.operations import build_readiness_report, run_startup_checks
 from services.transport.http.openapi_docs import OpenApiDocsConfig, install_openapi_examples
 from services.transport.http.uvicorn_protocols import VerboseAutoHTTPProtocol
@@ -74,6 +96,29 @@ _SENSITIVE_HEADER_NAMES = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _AdminAccessPolicy:
+    enabled: bool
+    base_path: str
+    bearer_token: str
+    disable_auth_for_testing: bool
+
+
+class _AdminWordPressSourceUpsertPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    source_name: str = Field(min_length=1)
+    agency_id: str | None = None
+    agency_name: str | None = None
+    agency_slug: str | None = None
+    agency_timezone: str | None = None
+    agency_status: str | None = None
+    site_url: str | None = None
+    normalized_host: str | None = None
+    source_status: str | None = None
+    webhook_secret: str | None = None
+
+
 class WordPressWebhookApplication:
     def __init__(
         self,
@@ -91,7 +136,12 @@ class WordPressWebhookApplication:
         site_secrets: dict[str, str] | None = None,
         allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
+        webhook_auto_provision_unknown_sites_for_testing: bool = WEBHOOK_AUTO_PROVISION_UNKNOWN_SITES_FOR_TESTING,
         enable_docs: bool = WEBHOOK_ENABLE_DOCS,
+        admin_api_enabled: bool = ADMIN_API_ENABLED,
+        admin_api_base_path: str = ADMIN_API_BASE_PATH,
+        admin_api_token: str = ADMIN_API_TOKEN,
+        admin_api_disable_auth_for_testing: bool = ADMIN_API_DISABLE_AUTH_FOR_TESTING,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -105,9 +155,17 @@ class WordPressWebhookApplication:
             self.workspace_dir,
             database_locator=self.database_locator,
         )
+        self.wordpress_source_admin_service = WordPressSourceAdminService(
+            unit_of_work_factory=self.unit_of_work_factory,
+        )
+        self.allow_unknown_sites_for_testing = bool(
+            security_disabled and webhook_auto_provision_unknown_sites_for_testing
+        )
         self.acceptance_service = WebhookAcceptanceService(
             tenant_resolver=TenantResolver(
                 unit_of_work_factory=self.unit_of_work_factory,
+                allow_unknown_sites_for_testing=self.allow_unknown_sites_for_testing,
+                unsafe_test_source_provisioner=self.wordpress_source_admin_service.ensure_source_for_testing,
             ),
             unit_of_work_factory=self.unit_of_work_factory,
             job_max_attempts=job_max_attempts,
@@ -127,6 +185,12 @@ class WordPressWebhookApplication:
         self.allowed_hosts = tuple(allowed_hosts)
         self.security_disabled = security_disabled
         self.enable_docs = bool(enable_docs)
+        self.admin_access_policy = _AdminAccessPolicy(
+            enabled=bool(admin_api_enabled),
+            base_path=admin_api_base_path,
+            bearer_token=str(admin_api_token or ""),
+            disable_auth_for_testing=bool(admin_api_disable_auth_for_testing),
+        )
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.timestamp_tolerance_seconds = timestamp_tolerance_seconds
         self.max_payload_bytes = max_payload_bytes
@@ -175,8 +239,21 @@ class WordPressWebhookApplication:
                 ),
                 format_detail_line("Security disabled", "Yes" if self.security_disabled else "No"),
                 format_detail_line(
+                    "Unknown sites auto-provisioned for testing",
+                    "Yes" if self.allow_unknown_sites_for_testing else "No",
+                ),
+                format_detail_line(
                     "Allowed hosts",
                     ", ".join(effective_allowed_hosts) if effective_allowed_hosts else "Disabled",
+                ),
+                format_detail_line(
+                    "Admin API",
+                    (
+                        f"{self.admin_access_policy.base_path} "
+                        f"(enabled={'yes' if self.admin_access_policy.enabled else 'no'}, "
+                        f"token_configured={'yes' if bool(self.admin_access_policy.bearer_token) else 'no'}, "
+                        f"auth_disabled_for_testing={'yes' if self.admin_access_policy.disable_auth_for_testing else 'no'})"
+                    ),
                 ),
                 format_detail_line("Log directory", log_dir),
             )
@@ -187,7 +264,12 @@ class WordPressWebhookApplication:
             webhook_path=self.path,
             worker_count=self.worker_count,
             security_disabled=self.security_disabled,
+            webhook_auto_provision_unknown_sites_for_testing=self.allow_unknown_sites_for_testing,
             allowed_hosts=list(effective_allowed_hosts),
+            admin_api_enabled=self.admin_access_policy.enabled,
+            admin_api_base_path=self.admin_access_policy.base_path,
+            admin_api_token_configured=bool(self.admin_access_policy.bearer_token),
+            admin_api_disable_auth_for_testing=self.admin_access_policy.disable_auth_for_testing,
             log_directory=str(log_dir),
         )
         if self.security_disabled:
@@ -196,6 +278,22 @@ class WordPressWebhookApplication:
                     "Webhook Security Disabled",
                     "Incoming requests are accepted without signature validation.",
                     "Use this mode only for local testing.",
+                )
+            )
+        if self.allow_unknown_sites_for_testing:
+            logger.warning(
+                format_console_block(
+                    "Unknown WordPress Sites Auto-Provisioned For Testing",
+                    "Unregistered site_id values will create placeholder tenant rows automatically.",
+                    "Use this mode only for disposable local or staging test data.",
+                )
+            )
+        if self.admin_access_policy.disable_auth_for_testing:
+            logger.warning(
+                format_console_block(
+                    "Admin API Authentication Disabled For Testing",
+                    "Admin endpoints will allow requests without Authorization: Bearer.",
+                    "Use this mode only in an isolated test environment.",
                 )
             )
 
@@ -306,8 +404,6 @@ class WordPressWebhookApplication:
         payload: dict[str, Any],
         publish_context: SocialPublishContext | None,
     ):
-        if not self.dispatcher.is_accepting_jobs():
-            raise RuntimeError("Webhook dispatcher is not accepting new jobs.")
         return self.acceptance_service.accept_delivery(
             site_id=site_id,
             property_id=property_id,
@@ -341,7 +437,12 @@ class WordPressWebhookServer:
         site_secrets: dict[str, str] | None = None,
         allowed_hosts: tuple[str, ...] = WEBHOOK_ALLOWED_HOSTS,
         security_disabled: bool = WEBHOOK_DISABLE_SECURITY,
+        webhook_auto_provision_unknown_sites_for_testing: bool = WEBHOOK_AUTO_PROVISION_UNKNOWN_SITES_FOR_TESTING,
         enable_docs: bool = WEBHOOK_ENABLE_DOCS,
+        admin_api_enabled: bool = ADMIN_API_ENABLED,
+        admin_api_base_path: str = ADMIN_API_BASE_PATH,
+        admin_api_token: str = ADMIN_API_TOKEN,
+        admin_api_disable_auth_for_testing: bool = ADMIN_API_DISABLE_AUTH_FOR_TESTING,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -366,7 +467,12 @@ class WordPressWebhookServer:
             site_secrets=site_secrets,
             allowed_hosts=allowed_hosts,
             security_disabled=security_disabled,
+            webhook_auto_provision_unknown_sites_for_testing=webhook_auto_provision_unknown_sites_for_testing,
             enable_docs=enable_docs,
+            admin_api_enabled=admin_api_enabled,
+            admin_api_base_path=admin_api_base_path,
+            admin_api_token=admin_api_token,
+            admin_api_disable_auth_for_testing=admin_api_disable_auth_for_testing,
             shutdown_timeout_seconds=shutdown_timeout_seconds,
             timestamp_tolerance_seconds=timestamp_tolerance_seconds,
             max_payload_bytes=max_payload_bytes,
@@ -429,6 +535,7 @@ def create_fastapi_app(
         if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
             raw_body = await request.body()
             request = _rebuild_request_with_body(request, raw_body)
+        request.state.request_id = request_id
 
         log_persistent_event(
             "http.request",
@@ -493,6 +600,223 @@ def create_fastapi_app(
     @app.get("/health/ready")
     async def health_ready(request: Request) -> JSONResponse:
         return await _health_ready_response(request)
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/wordpress-sources",
+        tags=["Admin"],
+    )
+    async def list_admin_wordpress_sources(request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        sources = runtime.wordpress_source_admin_service.list_sources()
+        request_id = _get_request_id(request)
+        log_persistent_event(
+            "admin.wordpress_sources_listed",
+            request_id=request_id,
+            client=_format_client(request),
+            source_count=len(sources),
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "items": [_serialize_wordpress_source_details(source) for source in sources],
+                "count": len(sources),
+            },
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/wordpress-sources/{{site_id}}",
+        tags=["Admin"],
+    )
+    async def get_admin_wordpress_source(site_id: str, request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        try:
+            source = runtime.wordpress_source_admin_service.get_source(site_id=site_id)
+        except ValidationError as error:
+            _log_admin_failure(
+                request=request,
+                action="wordpress_source.get",
+                error=error,
+                title="Admin WordPress Source Lookup Rejected",
+                persistent_event_type="admin.wordpress_source_lookup_rejected",
+                tone="warning",
+                site_id=site_id,
+            )
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+
+        if source is None:
+            return _json_error(
+                404,
+                "The wordpress source does not exist.",
+                code="ADMIN_SOURCE_NOT_FOUND",
+                hint="Create the site first with the admin provisioning endpoint.",
+                details={"site_id": site_id},
+            )
+
+        log_persistent_event(
+            "admin.wordpress_source_loaded",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            site_id=source.site_id,
+            agency_id=source.agency_id,
+            wordpress_source_id=source.wordpress_source_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"source": _serialize_wordpress_source_details(source)},
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/wordpress-sources/{{site_id}}",
+        tags=["Admin"],
+    )
+    async def upsert_admin_wordpress_source(
+        site_id: str,
+        payload: _AdminWordPressSourceUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        request_id = _get_request_id(request)
+        try:
+            result = runtime.wordpress_source_admin_service.upsert_source(
+                UpsertWordPressSourceRequest(
+                    site_id=site_id,
+                    source_name=payload.source_name,
+                    agency_id=payload.agency_id,
+                    agency_name=payload.agency_name,
+                    agency_slug=payload.agency_slug,
+                    agency_timezone=payload.agency_timezone,
+                    agency_status=payload.agency_status,
+                    site_url=payload.site_url,
+                    normalized_host=payload.normalized_host,
+                    source_status=payload.source_status,
+                    webhook_secret=payload.webhook_secret,
+                    update_webhook_secret="webhook_secret" in payload.model_fields_set,
+                )
+            )
+        except ResourceNotFoundError as error:
+            _log_admin_failure(
+                request=request,
+                action="wordpress_source.upsert",
+                error=error,
+                title="Admin WordPress Source Upsert Failed",
+                persistent_event_type="admin.wordpress_source_upsert_failed",
+                tone="warning",
+                site_id=site_id,
+            )
+            return _json_error(
+                404,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ValidationError as error:
+            _log_admin_failure(
+                request=request,
+                action="wordpress_source.upsert",
+                error=error,
+                title="Admin WordPress Source Upsert Rejected",
+                persistent_event_type="admin.wordpress_source_upsert_rejected",
+                tone="warning",
+                site_id=site_id,
+            )
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            _log_admin_failure(
+                request=request,
+                action="wordpress_source.upsert",
+                error=error,
+                title="Admin WordPress Source Upsert Failed",
+                persistent_event_type="admin.wordpress_source_upsert_failed",
+                tone="failure",
+                site_id=site_id,
+            )
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "ADMIN_SOURCE_UPSERT_FAILED"),
+                hint=error.hint,
+                details={"context": error.context} if getattr(error, "context", None) else None,
+            )
+        except Exception as error:
+            _log_admin_failure(
+                request=request,
+                action="wordpress_source.upsert",
+                error=error,
+                title="Admin WordPress Source Upsert Failed",
+                persistent_event_type="admin.wordpress_source_upsert_failed",
+                tone="failure",
+                site_id=site_id,
+            )
+            return _json_error(
+                500,
+                "Failed to provision the wordpress source.",
+                code="ADMIN_SOURCE_UPSERT_FAILED",
+                hint="Check the admin request_id in the logs and retry after fixing the underlying error.",
+                details={"request_id": request_id, "site_id": site_id},
+            )
+
+        status_code = 201 if result.created_source else 200
+        log_persistent_event(
+            "admin.wordpress_source_upserted",
+            request_id=request_id,
+            client=_format_client(request),
+            site_id=result.source.site_id,
+            agency_id=result.source.agency_id,
+            wordpress_source_id=result.source.wordpress_source_id,
+            created_agency=result.created_agency,
+            updated_agency=result.updated_agency,
+            created_source=result.created_source,
+            updated_source=result.updated_source,
+        )
+        logger.info(
+            format_console_block(
+                "Admin WordPress Source Upserted",
+                format_detail_line("Request ID", request_id or "<unknown>"),
+                format_detail_line("Site ID", result.source.site_id),
+                format_detail_line("Agency ID", result.source.agency_id),
+                format_detail_line("WordPress source ID", result.source.wordpress_source_id),
+                format_detail_line("Created agency", "Yes" if result.created_agency else "No"),
+                format_detail_line("Updated agency", "Yes" if result.updated_agency else "No"),
+                format_detail_line("Created source", "Yes" if result.created_source else "No"),
+                format_detail_line("Updated source", "Yes" if result.updated_source else "No"),
+            )
+        )
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "created" if result.created_source else "updated",
+                "created_agency": result.created_agency,
+                "updated_agency": result.updated_agency,
+                "created_source": result.created_source,
+                "updated_source": result.updated_source,
+                "source": _serialize_wordpress_source_details(result.source),
+            },
+        )
 
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
@@ -627,6 +951,28 @@ def create_fastapi_app(
 
         property_id = _extract_property_id(payload)
         raw_payload_hash = build_raw_payload_hash(raw_body)
+        request_id = _get_request_id(request)
+        dispatcher_accepting_jobs = runtime.dispatcher.is_accepting_jobs()
+
+        if not dispatcher_accepting_jobs:
+            logger.warning(
+                format_console_block(
+                    "Webhook Accepted While Dispatcher Paused",
+                    format_detail_line("Request ID", request_id or "<unknown>"),
+                    format_detail_line("Client", _format_client(request)),
+                    format_detail_line("Site ID", site_id),
+                    format_detail_line("Property ID", property_id),
+                    "The webhook will still be enqueued in the durable PostgreSQL queue.",
+                )
+            )
+            log_persistent_event(
+                "webhook.dispatcher_paused",
+                request_id=request_id,
+                site_id=site_id,
+                property_id=property_id,
+                client=_format_client(request),
+                dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+            )
 
         try:
             accepted_delivery = runtime.accept_webhook_delivery(
@@ -641,31 +987,151 @@ def create_fastapi_app(
                     platforms=tuple(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
                 ),
             )
-        except RuntimeError:
+        except ResourceNotFoundError as error:
+            _log_webhook_acceptance_failure(
+                request=request,
+                request_id=request_id,
+                site_id=site_id,
+                property_id=property_id,
+                dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                error=error,
+                title="Webhook Acceptance Rejected",
+                persistent_event_type="webhook.acceptance_rejected",
+                tone="warning",
+            )
+            status_code = 404 if error.code == "UNKNOWN_WORDPRESS_SITE" else 400
             return _json_error(
-                503,
-                "Webhook dispatcher is not accepting new jobs.",
-                code="DISPATCHER_UNAVAILABLE",
-                hint="Check the service logs for startup or queue failures and verify the background dispatcher completed startup.",
+                status_code,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details=_build_acceptance_error_details(
+                    request_id=request_id,
+                    dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                    context=error.context,
+                ),
+            )
+        except ValidationError as error:
+            _log_webhook_acceptance_failure(
+                request=request,
+                request_id=request_id,
+                site_id=site_id,
+                property_id=property_id,
+                dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                error=error,
+                title="Webhook Acceptance Rejected",
+                persistent_event_type="webhook.acceptance_rejected",
+                tone="warning",
+            )
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details=_build_acceptance_error_details(
+                    request_id=request_id,
+                    dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                    context=error.context,
+                ),
+            )
+        except ApplicationError as error:
+            _log_webhook_acceptance_failure(
+                request=request,
+                request_id=request_id,
+                site_id=site_id,
+                property_id=property_id,
+                dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                error=error,
+                title="Webhook Acceptance Failed",
+                persistent_event_type="webhook.acceptance_failed",
+                tone="failure",
+            )
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "WEBHOOK_ACCEPTANCE_FAILED"),
+                hint=error.hint,
+                details=_build_acceptance_error_details(
+                    request_id=request_id,
+                    dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                    context=error.context,
+                ),
+            )
+        except Exception as error:
+            _log_webhook_acceptance_failure(
+                request=request,
+                request_id=request_id,
+                site_id=site_id,
+                property_id=property_id,
+                dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                error=error,
+                title="Webhook Acceptance Failed",
+                persistent_event_type="webhook.acceptance_failed",
+                tone="failure",
+            )
+            return _json_error(
+                500,
+                "Failed to accept webhook delivery.",
+                code="WEBHOOK_ACCEPTANCE_FAILED",
+                hint=(
+                    "Check errors.log, warnings-errors.log, and audit.jsonl for the request_id and "
+                    "underlying acceptance failure."
+                ),
+                details=_build_acceptance_error_details(
+                    request_id=request_id,
+                    dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+                ),
+            )
+
+        if accepted_delivery.tenant_auto_provisioned:
+            logger.warning(
+                format_console_block(
+                    "Webhook Site Auto-Provisioned For Testing",
+                    format_detail_line("Request ID", request_id or "<unknown>"),
+                    format_detail_line("Site ID", site_id),
+                    format_detail_line("Event ID", accepted_delivery.event_id),
+                    format_detail_line("Job ID", accepted_delivery.job_id),
+                    "A placeholder tenant was created automatically so the webhook could be queued.",
+                )
+            )
+            log_persistent_event(
+                "webhook.site_auto_provisioned_for_testing",
+                request_id=request_id,
+                event_id=accepted_delivery.event_id,
+                job_id=accepted_delivery.job_id,
+                site_id=site_id,
+                property_id=property_id,
             )
 
         logger.info(
             format_console_block(
                 "Webhook Accepted",
+                format_detail_line("Request ID", request_id or "<unknown>"),
                 format_detail_line("Event ID", accepted_delivery.event_id),
                 format_detail_line("Job ID", accepted_delivery.job_id),
                 format_detail_line("Site ID", site_id),
                 format_detail_line("Property ID", property_id),
+                format_detail_line(
+                    "Dispatcher accepting jobs",
+                    "Yes" if dispatcher_accepting_jobs else "No",
+                ),
+                format_detail_line(
+                    "Site auto-provisioned for testing",
+                    "Yes" if accepted_delivery.tenant_auto_provisioned else "No",
+                ),
                 "The payload was queued for background processing.",
             )
         )
         log_persistent_event(
             "webhook.accepted",
+            request_id=request_id,
             event_id=accepted_delivery.event_id,
             job_id=accepted_delivery.job_id,
             site_id=site_id,
             property_id=property_id,
             raw_payload_hash=raw_payload_hash,
+            dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+            tenant_auto_provisioned=accepted_delivery.tenant_auto_provisioned,
         )
         return JSONResponse(
             status_code=202,
@@ -675,6 +1141,7 @@ def create_fastapi_app(
                 "job_id": accepted_delivery.job_id,
                 "site_id": site_id,
                 "property_id": property_id,
+                "site_auto_provisioned": accepted_delivery.tenant_auto_provisioned,
             },
         )
 
@@ -898,8 +1365,271 @@ def _json_error(
     return JSONResponse(status_code=status_code, content=payload)
 
 
-def _build_minimal_readiness_payload(readiness: dict[str, object]) -> dict[str, str]:
-    return {"status": "ready" if readiness.get("ready") else "not_ready"}
+def _serialize_wordpress_source_details(source: object) -> dict[str, object]:
+    return {
+        "wordpress_source_id": getattr(source, "wordpress_source_id"),
+        "site_id": getattr(source, "site_id"),
+        "name": getattr(source, "name"),
+        "site_url": getattr(source, "site_url"),
+        "normalized_host": getattr(source, "normalized_host"),
+        "status": getattr(source, "status"),
+        "has_webhook_secret": getattr(source, "has_webhook_secret"),
+        "last_event_at": getattr(source, "last_event_at"),
+        "created_at": getattr(source, "created_at"),
+        "updated_at": getattr(source, "updated_at"),
+        "agency": {
+            "agency_id": getattr(source, "agency_id"),
+            "name": getattr(source, "agency_name"),
+            "slug": getattr(source, "agency_slug"),
+            "timezone": getattr(source, "agency_timezone"),
+            "status": getattr(source, "agency_status"),
+        },
+    }
+
+
+def _authorize_admin_request(
+    request: Request,
+    runtime: WordPressWebhookApplication,
+) -> JSONResponse | None:
+    policy = runtime.admin_access_policy
+    request_id = _get_request_id(request)
+    if not policy.enabled:
+        log_persistent_event(
+            "admin.authorization_failed",
+            request_id=request_id,
+            client=_format_client(request),
+            reason="disabled",
+            path=request.url.path,
+        )
+        return _json_error(
+            404,
+            "The admin API is disabled.",
+            code="ADMIN_API_DISABLED",
+            hint="Enable ADMIN_API_ENABLED before using the admin management endpoints.",
+            details={"request_id": request_id, "path": request.url.path},
+        )
+
+    if policy.disable_auth_for_testing:
+        logger.warning(
+            format_console_block(
+                "Admin Authentication Bypassed For Testing",
+                format_detail_line("Request ID", request_id or "<unknown>"),
+                format_detail_line("Client", _format_client(request)),
+                format_detail_line("Path", request.url.path),
+                "The request was allowed without verifying an admin bearer token.",
+            )
+        )
+        log_persistent_event(
+            "admin.authorization_bypassed_for_testing",
+            request_id=request_id,
+            client=_format_client(request),
+            path=request.url.path,
+        )
+        return None
+
+    if not policy.bearer_token:
+        logger.warning(
+            format_console_block(
+                "Admin API Not Configured",
+                format_detail_line("Request ID", request_id or "<unknown>"),
+                format_detail_line("Client", _format_client(request)),
+                format_detail_line("Path", request.url.path),
+                "Set ADMIN_API_TOKEN before exposing the admin endpoints.",
+            )
+        )
+        log_persistent_event(
+            "admin.authorization_failed",
+            request_id=request_id,
+            client=_format_client(request),
+            reason="not_configured",
+            path=request.url.path,
+        )
+        return _json_error(
+            503,
+            "The admin API is not configured.",
+            code="ADMIN_API_NOT_CONFIGURED",
+            hint="Set ADMIN_API_TOKEN in the environment and restart the service before using the admin endpoints.",
+            details={"request_id": request_id, "path": request.url.path},
+        )
+
+    provided_token = _extract_bearer_token(request.headers.get("Authorization"))
+    if not provided_token:
+        log_persistent_event(
+            "admin.authorization_failed",
+            request_id=request_id,
+            client=_format_client(request),
+            reason="missing_bearer_token",
+            path=request.url.path,
+        )
+        return _json_error(
+            401,
+            "Admin authentication is required.",
+            code="ADMIN_AUTH_REQUIRED",
+            hint="Send Authorization: Bearer <ADMIN_API_TOKEN> on admin requests.",
+            details={"request_id": request_id, "path": request.url.path},
+        )
+
+    if not secrets.compare_digest(provided_token, policy.bearer_token):
+        logger.warning(
+            format_console_block(
+                "Admin Authentication Failed",
+                format_detail_line("Request ID", request_id or "<unknown>"),
+                format_detail_line("Client", _format_client(request)),
+                format_detail_line("Path", request.url.path),
+                "The provided admin bearer token is invalid.",
+            )
+        )
+        log_persistent_event(
+            "admin.authorization_failed",
+            request_id=request_id,
+            client=_format_client(request),
+            reason="invalid_bearer_token",
+            path=request.url.path,
+        )
+        return _json_error(
+            401,
+            "The admin bearer token is invalid.",
+            code="INVALID_ADMIN_TOKEN",
+            hint="Send the token configured in ADMIN_API_TOKEN using the Authorization header.",
+            details={"request_id": request_id, "path": request.url.path},
+        )
+
+    return None
+
+
+def _build_minimal_readiness_payload(readiness: dict[str, object]) -> dict[str, object]:
+    payload: dict[str, object] = {"status": "ready" if readiness.get("ready") else "not_ready"}
+    if isinstance(readiness.get("dispatcher_accepting_jobs"), bool):
+        payload["dispatcher_accepting_jobs"] = readiness["dispatcher_accepting_jobs"]
+    return payload
+
+
+def _build_acceptance_error_details(
+    *,
+    request_id: str | None,
+    dispatcher_accepting_jobs: bool,
+    context: dict[str, object] | None = None,
+) -> dict[str, object]:
+    details: dict[str, object] = {
+        "dispatcher_accepting_jobs": dispatcher_accepting_jobs,
+    }
+    if request_id:
+        details["request_id"] = request_id
+    if context:
+        details["context"] = context
+    return details
+
+
+def _get_request_id(request: Request) -> str | None:
+    value = getattr(request.state, "request_id", None)
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _log_webhook_acceptance_failure(
+    *,
+    request: Request,
+    request_id: str | None,
+    site_id: str | None,
+    property_id: int | None,
+    dispatcher_accepting_jobs: bool,
+    error: Exception,
+    title: str,
+    persistent_event_type: str,
+    tone: str,
+) -> None:
+    error_details = extract_error_details(error)
+    log_lines = [
+        format_detail_line("Request ID", request_id or "<unknown>"),
+        format_detail_line("Client", _format_client(request)),
+        format_detail_line("Site ID", site_id or "<unresolved>"),
+        format_detail_line("Property ID", property_id),
+        format_detail_line("Dispatcher accepting jobs", "Yes" if dispatcher_accepting_jobs else "No"),
+        format_detail_line("Reason", error_details.get("message") or error, highlight=True),
+        format_detail_line("Error type", error_details.get("type")),
+        format_detail_line("Error code", error_details.get("code")),
+        format_detail_line("Hint", error_details.get("hint")),
+        format_context_line(
+            error_details.get("context")
+            if isinstance(error_details.get("context"), dict)
+            else None
+        ),
+    ]
+    if tone == "warning":
+        logger.warning(format_console_block(title, *log_lines, tone=tone))
+    else:
+        logger.error(format_console_block(title, *log_lines, tone=tone), exc_info=error)
+
+    log_persistent_event(
+        persistent_event_type,
+        request_id=request_id,
+        client=_format_client(request),
+        site_id=site_id,
+        property_id=property_id,
+        dispatcher_accepting_jobs=dispatcher_accepting_jobs,
+        error_type=error_details.get("type"),
+        error_code=error_details.get("code"),
+        error_message=error_details.get("message") or str(error),
+        hint=error_details.get("hint"),
+        context=(
+            error_details.get("context")
+            if isinstance(error_details.get("context"), dict)
+            else None
+        ),
+    )
+
+
+def _log_admin_failure(
+    *,
+    request: Request,
+    action: str,
+    error: Exception,
+    title: str,
+    persistent_event_type: str,
+    tone: str,
+    site_id: str | None = None,
+) -> None:
+    request_id = _get_request_id(request)
+    error_details = extract_error_details(error)
+    log_lines = [
+        format_detail_line("Request ID", request_id or "<unknown>"),
+        format_detail_line("Client", _format_client(request)),
+        format_detail_line("Path", request.url.path),
+        format_detail_line("Action", action),
+        format_detail_line("Site ID", site_id or "<unresolved>"),
+        format_detail_line("Reason", error_details.get("message") or error, highlight=True),
+        format_detail_line("Error type", error_details.get("type")),
+        format_detail_line("Error code", error_details.get("code")),
+        format_detail_line("Hint", error_details.get("hint")),
+        format_context_line(
+            error_details.get("context")
+            if isinstance(error_details.get("context"), dict)
+            else None
+        ),
+    ]
+    if tone == "warning":
+        logger.warning(format_console_block(title, *log_lines, tone=tone))
+    else:
+        logger.error(format_console_block(title, *log_lines, tone=tone), exc_info=error)
+
+    log_persistent_event(
+        persistent_event_type,
+        request_id=request_id,
+        client=_format_client(request),
+        path=request.url.path,
+        action=action,
+        site_id=site_id,
+        error_type=error_details.get("type"),
+        error_code=error_details.get("code"),
+        error_message=error_details.get("message") or str(error),
+        hint=error_details.get("hint"),
+        context=(
+            error_details.get("context")
+            if isinstance(error_details.get("context"), dict)
+            else None
+        ),
+    )
 
 
 def _resolve_allowed_hosts(application: WordPressWebhookApplication) -> tuple[str, ...]:
@@ -1005,6 +1735,17 @@ def _get_header_value(request: Request, *names: str) -> str | None:
         if value:
             return value
     return None
+
+
+def _extract_bearer_token(header_value: str | None) -> str | None:
+    normalized_value = str(header_value or "").strip()
+    if not normalized_value:
+        return None
+    parts = normalized_value.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    token = parts[1].strip()
+    return token or None
 
 
 def _parse_webhook_payload(raw_body: bytes) -> tuple[dict[str, Any] | None, str | None]:

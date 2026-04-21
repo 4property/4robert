@@ -20,6 +20,7 @@ class AcceptedWebhookDelivery:
     wordpress_source_id: str
     site_id: str
     property_id: int | None
+    tenant_auto_provisioned: bool = False
 
 
 class WebhookAcceptanceService:
@@ -109,6 +110,7 @@ class WebhookAcceptanceService:
             wordpress_source_id=tenant.wordpress_source_id,
             site_id=tenant.site_id,
             property_id=property_id,
+            tenant_auto_provisioned=tenant.auto_provisioned,
         )
 
 

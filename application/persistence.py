@@ -3,7 +3,8 @@
 from typing import Protocol
 
 from domain.properties.model import Property
-from repositories.stores.wordpress_source_store import WordPressSourceRecord
+from repositories.stores.agency_store import AgencyRecord
+from repositories.stores.wordpress_source_store import WordPressSourceDetailsRecord, WordPressSourceRecord
 from repositories.stores.media_revision_store import MediaRevisionRecord
 from repositories.stores.outbox_event_store import OutboxEventRecord
 from repositories.stores.job_queue_store import PropertyJobEnqueueRequest, QueuedPropertyJobRecord
@@ -276,6 +277,69 @@ class WordPressSourceStore(Protocol):
     def get_by_site_id(self, site_id: str) -> WordPressSourceRecord | None:
         ...
 
+    def get_details_by_site_id(self, site_id: str) -> WordPressSourceDetailsRecord | None:
+        ...
+
+    def list_sources(self) -> tuple[WordPressSourceDetailsRecord, ...]:
+        ...
+
+    def create_source(
+        self,
+        *,
+        wordpress_source_id: str,
+        agency_id: str,
+        site_id: str,
+        name: str,
+        site_url: str | None = None,
+        normalized_host: str | None = None,
+        status: str = "active",
+        webhook_secret: str = "",
+    ) -> None:
+        ...
+
+    def update_source(
+        self,
+        *,
+        wordpress_source_id: str,
+        name: str,
+        site_url: str | None = None,
+        normalized_host: str | None = None,
+        status: str = "active",
+        webhook_secret: str = "",
+        update_webhook_secret: bool = False,
+    ) -> None:
+        ...
+
+
+class AgencyStore(Protocol):
+    def get_by_id(self, agency_id: str) -> AgencyRecord | None:
+        ...
+
+    def get_by_slug(self, slug: str) -> AgencyRecord | None:
+        ...
+
+    def create_agency(
+        self,
+        *,
+        agency_id: str,
+        name: str,
+        slug: str,
+        timezone: str = "UTC",
+        status: str = "active",
+    ) -> None:
+        ...
+
+    def update_agency(
+        self,
+        *,
+        agency_id: str,
+        name: str,
+        slug: str,
+        timezone: str,
+        status: str,
+    ) -> None:
+        ...
+
 
 class UnitOfWork(Protocol):
     property_repository: PropertyRepository
@@ -286,6 +350,7 @@ class UnitOfWork(Protocol):
     job_queue_store: JobQueueStore
     scripted_video_store: ScriptedVideoArtifactStore
     wordpress_source_store: WordPressSourceStore
+    agency_store: AgencyStore
 
     def begin_immediate(self) -> None:
         ...
@@ -298,6 +363,7 @@ class UnitOfWork(Protocol):
 
 
 __all__ = [
+    "AgencyStore",
     "JobQueueStore",
     "MediaRevisionStore",
     "OutboxEventStore",
