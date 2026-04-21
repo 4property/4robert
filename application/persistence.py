@@ -2,17 +2,16 @@
 
 from typing import Protocol
 
-from models.property import Property
-from repositories.media_revision_repository import MediaRevisionRecord
-from repositories.outbox_event_repository import OutboxEventRecord
-from repositories.property_job_repository import PropertyJobEnqueueRequest, QueuedPropertyJobRecord
-from repositories.scripted_video_artifact_repository import ScriptedVideoArtifactRecord
-from repositories.webhook_delivery_repository import WebhookDeliveryRecord
-from repositories.property_pipeline_repository import (
-    DownloadedImage,
-    PropertyPipelineState,
-    PropertyReelRecord,
-)
+from domain.properties.model import Property
+from repositories.stores.wordpress_source_store import WordPressSourceRecord
+from repositories.stores.media_revision_store import MediaRevisionRecord
+from repositories.stores.outbox_event_store import OutboxEventRecord
+from repositories.stores.job_queue_store import PropertyJobEnqueueRequest, QueuedPropertyJobRecord
+from repositories.stores.pipeline_state_store import PropertyPipelineState
+from repositories.stores.scripted_video_artifact_store import ScriptedVideoArtifactRecord
+from repositories.stores.property_store import PropertyReelRecord
+from repositories.stores.webhook_event_store import WebhookDeliveryRecord
+from domain.media.types import DownloadedImage
 
 
 class PropertyRepository(Protocol):
@@ -20,6 +19,8 @@ class PropertyRepository(Protocol):
         self,
         property_item: Property,
         *,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         image_folder: str = "",
         social_publish_status: str | None = None,
@@ -33,6 +34,8 @@ class PropertyRepository(Protocol):
         property_dir,
         downloaded_images: list[DownloadedImage],
         *,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         social_publish_status: str | None = None,
         social_publish_details_json: str | None = None,
@@ -64,6 +67,8 @@ class PropertyPipelineStateRepository(Protocol):
     def save_local_artifacts(
         self,
         *,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         source_property_id: int,
         artifact_kind: str = "reel_video",
@@ -79,6 +84,8 @@ class PropertyPipelineStateRepository(Protocol):
     def update_social_publish_status(
         self,
         *,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         source_property_id: int,
         status: str,
@@ -90,6 +97,8 @@ class PropertyPipelineStateRepository(Protocol):
     def update_workflow_state(
         self,
         *,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         source_property_id: int,
         workflow_state: str,
@@ -123,6 +132,8 @@ class OutboxEventStore(Protocol):
         aggregate_id: str,
         event_type: str,
         payload: dict[str, object] | None = None,
+        agency_id: str = "",
+        wordpress_source_id: str = "",
         site_id: str = "",
         source_property_id: int | None = None,
         status: str = "pending",
@@ -148,6 +159,8 @@ class WebhookEventStore(Protocol):
         self,
         *,
         event_id: str,
+        agency_id: str,
+        wordpress_source_id: str,
         site_id: str,
         property_id: int | None,
         received_at: str,
@@ -259,6 +272,11 @@ class ScriptedVideoArtifactStore(Protocol):
         ...
 
 
+class WordPressSourceStore(Protocol):
+    def get_by_site_id(self, site_id: str) -> WordPressSourceRecord | None:
+        ...
+
+
 class UnitOfWork(Protocol):
     property_repository: PropertyRepository
     pipeline_state_repository: PropertyPipelineStateRepository
@@ -267,6 +285,7 @@ class UnitOfWork(Protocol):
     webhook_event_store: WebhookEventStore
     job_queue_store: JobQueueStore
     scripted_video_store: ScriptedVideoArtifactStore
+    wordpress_source_store: WordPressSourceStore
 
     def begin_immediate(self) -> None:
         ...
@@ -287,5 +306,6 @@ __all__ = [
     "ScriptedVideoArtifactStore",
     "UnitOfWork",
     "WebhookEventStore",
+    "WordPressSourceStore",
 ]
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from repositories.postgres.engine import get_engine
 
-_PRAGMA_TABLE_INFO_RE = re.compile(r"^\s*PRAGMA\s+table_info\((?P<table>[A-Za-z0-9_]+)\)\s*$", re.IGNORECASE)
+import re
+
 _POSITIONAL_PLACEHOLDER_RE = re.compile(r"\?")
 
 
@@ -104,41 +104,6 @@ def _translate_sqlite_compat(
     statement: str,
     params: dict[str, object] | list[object] | tuple[object, ...] | None,
 ) -> tuple[str, dict[str, object]]:
-    pragma_match = _PRAGMA_TABLE_INFO_RE.match(statement)
-    if pragma_match:
-        return (
-            """
-            SELECT
-                columns.ordinal_position - 1 AS cid,
-                columns.column_name AS name,
-                columns.data_type AS type,
-                CASE WHEN columns.is_nullable = 'NO' THEN 1 ELSE 0 END AS notnull,
-                columns.column_default AS dflt_value,
-                CASE WHEN key_usage.position_in_unique_constraint IS NOT NULL THEN 1 ELSE 0 END AS pk
-            FROM information_schema.columns AS columns
-            LEFT JOIN information_schema.key_column_usage AS key_usage
-                ON columns.table_schema = key_usage.table_schema
-                AND columns.table_name = key_usage.table_name
-                AND columns.column_name = key_usage.column_name
-            WHERE columns.table_schema = current_schema()
-            AND columns.table_name = :table_name
-            ORDER BY columns.ordinal_position
-            """,
-            {"table_name": pragma_match.group("table")},
-        )
-
-    if "FROM sqlite_master" in statement and "type = 'table'" in statement:
-        return (
-            """
-            SELECT table_name AS name
-            FROM information_schema.tables
-            WHERE table_schema = current_schema()
-            AND table_type = 'BASE TABLE'
-            ORDER BY table_name
-            """,
-            {},
-        )
-
     if isinstance(params, (list, tuple)):
         translated_params = {
             f"p{index}": value

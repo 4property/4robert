@@ -16,28 +16,28 @@ APPLICATION_ROOT = Path(__file__).resolve().parents[1]
 if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
-from services.reel_rendering.manifest import build_property_reel_manifest_from_data
-from services.reel_rendering.layout import build_overlay_layout
-from services.reel_rendering.models import (
+from services.media.reel_rendering.manifest import build_property_reel_manifest_from_data
+from services.media.reel_rendering.layout import build_overlay_layout
+from services.media.reel_rendering.models import (
     PreparedReelAssets,
     PreparedReelSlide,
     PropertyReelSlide,
     PropertyRenderData,
     PropertyReelTemplate,
 )
-from services.reel_rendering.poster import (
+from services.media.reel_rendering.poster import (
     _build_poster_filter_script,
     _resolve_poster_photo_box,
     generate_property_poster_from_data,
 )
-from services.reel_rendering.preparation import prepare_reel_render_assets
-from services.reel_rendering.render import (
+from services.media.reel_rendering.preparation import prepare_reel_render_assets
+from services.media.reel_rendering.render import (
     _build_concat_command,
     _build_slide_segment_filter,
     build_reel_template_for_render_profile,
     generate_property_reel_from_data,
 )
-from services.reel_rendering.runtime import (
+from services.media.reel_rendering.runtime import (
     compute_segment_timing,
     resolve_background_audio_paths,
     resolve_ffmpeg_binary,
@@ -527,7 +527,7 @@ class ReelPreparationIntegrationTests(_FFmpegTestCase):
                 return destination
 
             with patch(
-                "services.reel_rendering.runtime.download_remote_image",
+                "services.media.reel_rendering.runtime.download_remote_image",
                 side_effect=fake_download,
             ):
                 prepared_assets = prepare_reel_render_assets(
@@ -565,7 +565,7 @@ class ReelPreparationIntegrationTests(_FFmpegTestCase):
             self._create_audio_asset(music_dir / "c-track.mp3")
             template = PropertyReelTemplate(background_audio_filename="music/a-track.mp3")
 
-            with patch("services.reel_rendering.runtime.random.SystemRandom") as system_random:
+            with patch("services.media.reel_rendering.runtime.random.SystemRandom") as system_random:
                 system_random.return_value.shuffle.side_effect = lambda sequence: sequence.reverse()
                 audio_candidates = resolve_background_audio_paths(
                     workspace_dir,
@@ -1049,7 +1049,7 @@ class PosterRenderIntegrationTests(_FFmpegTestCase):
             output_path = workspace_dir / "poster-horizontal.jpg"
 
             with patch(
-                "services.reel_rendering.poster.prepare_reel_render_assets",
+                "services.media.reel_rendering.poster.prepare_reel_render_assets",
                 return_value=prepared_assets,
             ):
                 generate_property_poster_from_data(

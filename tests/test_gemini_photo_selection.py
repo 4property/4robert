@@ -15,27 +15,27 @@ APPLICATION_ROOT = Path(__file__).resolve().parents[1]
 if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
-from config import GEMINI_SELECTION_AUDIT_FILENAME
+from settings import GEMINI_SELECTION_AUDIT_FILENAME
 from core.errors import PhotoFilteringError
-from models.property import Property
-from services.ai_photo_selection.client import (
+from domain.properties.model import Property
+from services.ai.photo_selection.client import (
     GEMINI_BASE_URL,
     GeminiConfigurationError,
     GeminiPhotoSelectionClient,
     GeminiQuotaExhaustedError,
 )
-from services.ai_photo_selection.prompting import (
+from services.ai.photo_selection.prompting import (
     build_prompt,
     build_property_context,
     normalize_caption,
 )
-from services.ai_photo_selection.selection import (
+from services.ai.photo_selection.selection import (
     GeminiImageRecord,
     choose_selected_rows,
     classify_property_images,
 )
-from services.property_media.naming import build_image_filename, build_selected_image_filename
-from services.property_media.selection import download_and_filter_property_images
+from services.media.property_media.naming import build_image_filename, build_selected_image_filename
+from services.media.property_media.selection import download_and_filter_property_images
 
 TEST_TEMP_ROOT = APPLICATION_ROOT / ".tmp_test_cases"
 TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -566,11 +566,11 @@ class WordPressImageIntegrationTests(unittest.TestCase):
 
             with (
                 patch(
-                    "services.property_media.downloads.download_image",
+                    "services.media.property_media.downloads.download_image",
                     side_effect=self._fake_download_image,
                 ),
                 patch(
-                    "services.ai_photo_selection.selection.GeminiPhotoSelectionClient",
+                    "services.ai.photo_selection.selection.GeminiPhotoSelectionClient",
                     FakeGeminiClient,
                 ),
             ):
@@ -606,11 +606,11 @@ class WordPressImageIntegrationTests(unittest.TestCase):
 
             with (
                 patch(
-                    "services.property_media.downloads.download_image",
+                    "services.media.property_media.downloads.download_image",
                     side_effect=self._fake_download_image,
                 ),
                 patch(
-                    "services.ai_photo_selection.selection.GeminiPhotoSelectionClient",
+                    "services.ai.photo_selection.selection.GeminiPhotoSelectionClient",
                     FailingGeminiClient,
                 ),
             ):
@@ -668,11 +668,11 @@ class WordPressImageIntegrationTests(unittest.TestCase):
 
             with (
                 patch(
-                    "services.property_media.downloads.download_image",
+                    "services.media.property_media.downloads.download_image",
                     side_effect=self._fake_download_image,
                 ),
                 patch(
-                    "services.ai_photo_selection.selection.GeminiPhotoSelectionClient",
+                    "services.ai.photo_selection.selection.GeminiPhotoSelectionClient",
                     FakeGeminiClient,
                 ),
             ):
