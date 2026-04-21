@@ -6,7 +6,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from pathlib import Path
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -57,6 +57,8 @@ _TITLE_COLORS: Final[dict[str, str]] = {
 }
 _AUDIT_LOGGER_NAME: Final[str] = "cpihed.audit"
 _RICH_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r"\[/?[^\[\]]+\]")
+_PERSISTENT_LOG_FORMAT: Final[str] = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+_PERSISTENT_LOG_DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 
 
 @dataclass(slots=True)
@@ -211,8 +213,8 @@ def configure_logging(
         application_handler.setLevel(logging.DEBUG)
         application_handler.setFormatter(
             PlainTextFormatter(
-                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-                "%Y-%m-%d %H:%M:%S",
+                _PERSISTENT_LOG_FORMAT,
+                _PERSISTENT_LOG_DATE_FORMAT,
             )
         )
         handlers.append(application_handler)
@@ -226,11 +228,28 @@ def configure_logging(
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(
             PlainTextFormatter(
-                "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-                "%Y-%m-%d %H:%M:%S",
+                _PERSISTENT_LOG_FORMAT,
+                _PERSISTENT_LOG_DATE_FORMAT,
             )
         )
         handlers.append(error_handler)
+
+        warning_error_daily_handler = TimedRotatingFileHandler(
+            log_dir / "warnings-errors.log",
+            when="midnight",
+            interval=1,
+            backupCount=persistent_log_backup_count,
+            encoding="utf-8",
+        )
+        warning_error_daily_handler.setLevel(logging.WARNING)
+        warning_error_daily_handler.suffix = "%Y-%m-%d"
+        warning_error_daily_handler.setFormatter(
+            PlainTextFormatter(
+                _PERSISTENT_LOG_FORMAT,
+                _PERSISTENT_LOG_DATE_FORMAT,
+            )
+        )
+        handlers.append(warning_error_daily_handler)
 
     logging.basicConfig(
         level=logging.DEBUG if log_dir is not None else level_value,
