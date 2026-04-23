@@ -4,8 +4,10 @@ import shutil
 import sys
 import unittest
 from contextlib import contextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import Iterator
+from urllib.error import HTTPError
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -15,6 +17,7 @@ if str(APPLICATION_ROOT) not in sys.path:
 
 from services.media.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
 from services.media.reel_rendering.runtime import (
+    download_remote_image,
     prepare_agent_image,
     prepare_cover_logo_image,
     should_reserve_agency_logo_space,
@@ -63,6 +66,40 @@ def _build_property_data(workspace_dir: Path) -> PropertyRenderData:
 
 
 class ReelRuntimeDynamicUrlTests(unittest.TestCase):
+    def test_download_remote_image_retries_showthumbnail_after_http_406(self) -> None:
+        with _workspace_temp_dir() as workspace_dir:
+            image_url = (
+                "https://old.4pm.ie/ShowThumbnail.aspx"
+                "?img=4pm.ie__agentPhoto.png&h=400&w=400&crop=False&off=1455&neg=127795&t=photo"
+            )
+            destination = workspace_dir / "agent_photo.png"
+            request_headers: list[dict[str, str]] = []
+
+            class _FakeResponse(BytesIO):
+                def __enter__(self) -> "_FakeResponse":
+                    return self
+
+                def __exit__(self, exc_type, exc, exc_tb) -> None:
+                    self.close()
+
+            def fake_urlopen(request, timeout):
+                del timeout
+                request_headers.append(
+                    {key.lower(): value for key, value in request.header_items()}
+                )
+                if len(request_headers) == 1:
+                    raise HTTPError(request.full_url, 406, "Not Acceptable", hdrs=None, fp=None)
+                return _FakeResponse(b"image-bytes")
+
+            with patch("services.media.reel_rendering.runtime.urlopen", side_effect=fake_urlopen):
+                downloaded_path = download_remote_image(image_url, destination)
+
+            self.assertEqual(downloaded_path, destination)
+            self.assertEqual(destination.read_bytes(), b"image-bytes")
+            self.assertEqual(len(request_headers), 2)
+            self.assertEqual(request_headers[0].get("accept"), "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+            self.assertEqual(request_headers[1].get("accept"), "*/*")
+
     def test_prepare_agent_image_accepts_thumbnail_aspx_url(self) -> None:
         with _workspace_temp_dir() as workspace_dir:
             property_data = _build_property_data(workspace_dir)

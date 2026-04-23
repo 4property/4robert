@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from core.errors import PropertyReelError
+<<<<<<< HEAD
 <<<<<<< HEAD:services/reel_rendering/preparation.py
 from services.reel_rendering.formatting import (
     build_contained_image_filter,
@@ -18,6 +19,13 @@ from services.reel_rendering.layout import build_overlay_layout
 from services.reel_rendering.models import (
 =======
 from services.media.reel_rendering.formatting import resolve_agent_image_size, resolve_ber_icon_size
+=======
+from services.media.reel_rendering.formatting import (
+    build_fit_inside_rgba_filter,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+)
+>>>>>>> 4fc9ba9 (fix: agente_photo error)
 from services.media.reel_rendering.layout import build_overlay_layout
 from services.media.reel_rendering.models import (
 >>>>>>> 7313fa1 (for change branch):services/media/reel_rendering/preparation.py
@@ -420,10 +428,17 @@ def _normalize_agent_image(
     property_data: PropertyRenderData,
 ) -> None:
     agent_image_size = resolve_agent_image_size(settings)
+<<<<<<< HEAD
     filter_text = build_contained_image_filter(
         agent_image_size,
         agent_image_size,
         pixel_format="rgba",
+=======
+    filter_text = build_fit_inside_rgba_filter(
+        agent_image_size,
+        agent_image_size,
+        include_setsar=True,
+>>>>>>> 4fc9ba9 (fix: agente_photo error)
     )
     _render_single_frame(
         ffmpeg_binary=ffmpeg_binary,

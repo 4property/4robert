@@ -96,6 +96,7 @@ def resolve_agent_image_size(settings: PropertyReelTemplate) -> int:
     return max(120, min(196, round(settings.height * 0.094)))
 
 
+<<<<<<< HEAD
 def build_contained_image_filter(
     width: int,
     height: int,
@@ -107,6 +108,22 @@ def build_contained_image_filter(
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0,"
         f"setsar=1,format={pixel_format}"
     )
+=======
+def build_fit_inside_rgba_filter(
+    width: int,
+    height: int,
+    *,
+    include_setsar: bool = False,
+) -> str:
+    filter_parts = [
+        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease",
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0",
+    ]
+    if include_setsar:
+        filter_parts.append("setsar=1")
+    filter_parts.append("format=rgba")
+    return ",".join(filter_parts)
+>>>>>>> 4fc9ba9 (fix: agente_photo error)
 
 
 def resolve_ber_icon_size(settings: PropertyReelTemplate) -> tuple[int, int]:
@@ -465,6 +482,7 @@ __all__ = [
     "OVERLAY_TEXT_COLOR_PRIMARY",
     "OVERLAY_TEXT_COLOR_SUBTITLE",
     "WrappedTextResult",
+    "build_fit_inside_rgba_filter",
     "build_agent_lines",
     "build_contained_image_filter",
     "build_display_price",

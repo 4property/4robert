@@ -21,7 +21,11 @@ from services.reel_rendering.runtime import resolve_ffmpeg_binary
 from services.webhook_transport.site_storage import (
 =======
 from services.media.reel_rendering.filters import build_overlay_filter
-from services.media.reel_rendering.formatting import resolve_agent_image_size, resolve_ber_icon_size
+from services.media.reel_rendering.formatting import (
+    build_fit_inside_rgba_filter,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+)
 from services.media.reel_rendering.layout import BoxLayout, OverlayLayout, build_overlay_layout
 from services.media.reel_rendering.models import PreparedReelSlide, PropertyRenderData, PropertyReelTemplate
 from services.media.reel_rendering.preparation import prepare_reel_render_assets
@@ -275,10 +279,16 @@ def _build_poster_filter_script(
         cover_caption=None,
     )
     photo_box = _resolve_poster_photo_box(settings, overlay_layout)
-    agent_image_size = (
-        overlay_layout.agent_image_box.width
+    agent_image_width, agent_image_height = (
+        (
+            overlay_layout.agent_image_box.width,
+            overlay_layout.agent_image_box.height,
+        )
         if overlay_layout.agent_image_box is not None and overlay_layout.agent_image_box.visible
-        else resolve_agent_image_size(settings)
+        else (
+            resolve_agent_image_size(settings),
+            resolve_agent_image_size(settings),
+        )
     )
     ber_icon_width, ber_icon_height = (
         (
@@ -307,9 +317,17 @@ def _build_poster_filter_script(
     ]
     if overlay_layout.agent_image_box is not None and overlay_layout.agent_image_box.visible:
         filter_parts.append(
+<<<<<<< HEAD
             f"[{agent_input_index}:v]"
             f"{build_contained_image_filter(agent_image_size, agent_image_size, pixel_format='rgba')}"
             "[agent_panel_image]"
+=======
+            (
+                f"[{agent_input_index}:v]"
+                f"{build_fit_inside_rgba_filter(agent_image_width, agent_image_height)}"
+                "[agent_panel_image]"
+            )
+>>>>>>> 4fc9ba9 (fix: agente_photo error)
         )
     if (
         agency_logo_input_index is not None

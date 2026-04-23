@@ -11,6 +11,7 @@ from core.errors import PropertyReelError
 from core.logging import format_console_block, format_detail_line
 from services.media.reel_rendering.data import load_property_reel_data
 from services.media.reel_rendering.filters import build_overlay_filter
+from services.media.reel_rendering.formatting import build_fit_inside_rgba_filter
 from services.media.reel_rendering.layout import build_overlay_layout
 from services.media.reel_rendering.models import (
     PreparedReelAssets,
@@ -383,7 +384,13 @@ def _build_intro_segment_filter(
         current_label = "intro_base"
 
     if intro_layout.agent_image_box is not None and intro_layout.agent_image_box.visible:
-        filter_parts.append(f"[{next_input_index}:v]format=rgba[agent_panel_image]")
+        filter_parts.append(
+            (
+                f"[{next_input_index}:v]"
+                f"{build_fit_inside_rgba_filter(intro_layout.agent_image_box.width, intro_layout.agent_image_box.height)}"
+                "[agent_panel_image]"
+            )
+        )
         next_input_index += 1
     ber_icon_label: str | None = None
     if (
@@ -488,7 +495,13 @@ def _build_slide_segment_filter(
     ]
     next_input_index = 1
     if segment_layout.agent_image_box is not None and segment_layout.agent_image_box.visible:
-        filter_parts.append(f"[{next_input_index}:v]format=rgba[agent_panel_image]")
+        filter_parts.append(
+            (
+                f"[{next_input_index}:v]"
+                f"{build_fit_inside_rgba_filter(segment_layout.agent_image_box.width, segment_layout.agent_image_box.height)}"
+                "[agent_panel_image]"
+            )
+        )
         next_input_index += 1
     logo_image_label: str | None = None
     if (
