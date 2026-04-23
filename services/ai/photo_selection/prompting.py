@@ -116,6 +116,12 @@ def normalize_highlights(value: object) -> list[str]:
     return highlights
 
 
+def normalize_reject_reason(value: object) -> str | None:
+    text = clean_whitespace(str(value or "")).lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return text or None
+
+
 def build_property_context(property_item: Property) -> dict[str, Any]:
     title = html_to_text(property_item.title)
     excerpt = html_to_text(property_item.excerpt_html)
@@ -201,7 +207,9 @@ def build_prompt(property_context: dict[str, Any]) -> str:
   "showcase_score": 0,
   "space_id": "short_snake_case_space_identifier",
   "highlights": ["short factual fragments"],
-  "caption": "short estate-agent style fragment"
+  "caption": "short estate-agent style fragment",
+  "reject_asset": false,
+  "reject_reason": null
 }"""
     return f"""
 You are selecting photos for a real-estate sales presentation and generating short slide copy for each selected image.
@@ -229,7 +237,17 @@ Rules:
 - "showcase_score" must be an integer between 0 and 100.
 - "space_id" must identify the exact physical space shown. Photos of the same room or same outdoor area must use the same space_id.
 - Different bedrooms must use different space_id values. Different bathrooms must use different space_id values.
-- Never select a photo of a map niether house plans or sky view
+- Never select a floor plan, house plan, site plan, location map, aerial/satellite image, sky view, brochure graphic, or any other non-photo property asset.
+- Do not confuse an open-plan living/kitchen space with a floor plan drawing.
+- If the image is any rejected non-photo asset, set:
+  - "area" to "other"
+  - "showcase_score" to 0
+  - "space_id" to "discarded_non_photo_asset"
+  - "highlights" to []
+  - "caption" to "Discarded non-photo asset"
+  - "reject_asset" to true
+  - "reject_reason" to a short snake_case reason such as "floorplan", "map", or "aerial_view"
+- If the image is a normal saleable property photo, set "reject_asset" to false and "reject_reason" to null.
 - If the image shows an open-plan kitchen, dining, and living area, use one shared space_id for that whole space.
 - "highlights" must contain 2 to 4 short factual fragments, not full sentences.
 - Prefer highlights that help distinguish this space from other photos of the same property.
@@ -275,6 +293,7 @@ __all__ = [
     "html_to_text",
     "normalize_caption",
     "normalize_highlights",
+    "normalize_reject_reason",
     "normalize_space_id",
     "parse_int",
     "slugify",

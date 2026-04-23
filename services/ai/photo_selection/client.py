@@ -19,6 +19,7 @@ from services.ai.photo_selection.prompting import (
     clamp_int,
     normalize_caption,
     normalize_highlights,
+    normalize_reject_reason,
     normalize_space_id,
 )
 
@@ -261,6 +262,8 @@ class GeminiPhotoSelectionClient:
                     result.get("caption"),
                     "Well-presented interior photo.",
                 ),
+                "reject_asset": bool(result.get("reject_asset")),
+                "reject_reason": normalize_reject_reason(result.get("reject_reason")),
             }
 
         raise GeminiSelectionError(

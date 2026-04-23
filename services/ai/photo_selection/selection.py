@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -29,11 +30,39 @@ from services.ai.photo_selection.prompting import (
     clamp_int,
     normalize_caption,
     normalize_highlights,
+    normalize_reject_reason,
     normalize_space_id,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 logger = logging.getLogger(__name__)
+_REJECTED_NON_PHOTO_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "floorplan",
+        re.compile(
+            r"(?<![a-z0-9])floor[\s_-]*plan(?![a-z0-9])|(?<![a-z0-9])site[\s_-]*plan(?![a-z0-9])|"
+            r"(?<![a-z0-9])house[\s_-]*plan(?![a-z0-9])|(?<![a-z0-9])property[\s_-]*plan(?![a-z0-9])|"
+            r"(?<![a-z0-9])architectural[\s_-]*plan(?![a-z0-9])|(?<![a-z0-9])blueprint(?![a-z0-9])",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "map",
+        re.compile(
+            r"(?<![a-z0-9])location[\s_-]*map(?![a-z0-9])|(?<![a-z0-9])site[\s_-]*map(?![a-z0-9])|"
+            r"(?<![a-z0-9])google[\s_-]*map(?![a-z0-9])|(?<![a-z0-9])map(?![a-z0-9])",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "aerial_view",
+        re.compile(
+            r"(?<![a-z0-9])aerial(?![a-z0-9])|(?<![a-z0-9])satellite(?![a-z0-9])|"
+            r"(?<![a-z0-9])bird'?s[\s_-]*eye(?![a-z0-9])|(?<![a-z0-9])sky[\s_-]*view(?![a-z0-9])",
+            re.IGNORECASE,
+        ),
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +87,22 @@ def build_result_row(image_record: GeminiImageRecord, result: dict[str, Any]) ->
     if area not in GEMINI_AREA_SET:
         area = "other"
 
+    rejected_reason = detect_rejected_non_photo_asset(image_record, result)
+    rejected = rejected_reason is not None
+    highlights = normalize_highlights(result.get("highlights"))
+    caption = normalize_caption(
+        result.get("caption"),
+        "Well-presented interior photo.",
+    )
+    space_id = normalize_space_id(result.get("space_id"), area)
+    showcase_score = clamp_int(result.get("showcase_score"), 0)
+    if rejected:
+        area = "other"
+        showcase_score = 0
+        space_id = "discarded_non_photo_asset"
+        highlights = []
+        caption = "Discarded non-photo asset."
+
     return {
         "file": image_record.file,
         "source_url": image_record.source_url,
@@ -65,13 +110,12 @@ def build_result_row(image_record: GeminiImageRecord, result: dict[str, Any]) ->
         "local_path": image_record.relative_path,
         "area": area,
         "confidence": clamp_int(result.get("confidence"), 0),
-        "showcase_score": clamp_int(result.get("showcase_score"), 0),
-        "space_id": normalize_space_id(result.get("space_id"), area),
-        "highlights": normalize_highlights(result.get("highlights")),
-        "caption": normalize_caption(
-            result.get("caption"),
-            "Well-presented interior photo.",
-        ),
+        "showcase_score": showcase_score,
+        "space_id": space_id,
+        "highlights": highlights,
+        "caption": caption,
+        "rejected": rejected,
+        "rejected_reason": rejected_reason,
         "reserved": image_record.reserved,
     }
 
@@ -88,6 +132,8 @@ def build_error_row(image_record: GeminiImageRecord, area: str, message: str) ->
         "space_id": normalize_space_id(area, area),
         "highlights": [],
         "caption": normalize_caption(message, "Processing issue."),
+        "rejected": False,
+        "rejected_reason": None,
         "reserved": image_record.reserved,
     }
 
@@ -105,7 +151,33 @@ def build_ordered_results(
 
 
 def is_valid_candidate(row: dict[str, Any]) -> bool:
-    return row.get("area") in GEMINI_AREA_SET
+    return row.get("area") in GEMINI_AREA_SET and not bool(row.get("rejected"))
+
+
+def detect_rejected_non_photo_asset(
+    image_record: GeminiImageRecord,
+    result: dict[str, Any],
+) -> str | None:
+    explicit_reason = normalize_reject_reason(result.get("reject_reason"))
+    if bool(result.get("reject_asset")):
+        return explicit_reason or "non_photo_asset"
+
+    signals = [
+        image_record.file,
+        image_record.source_url,
+        str(result.get("space_id") or ""),
+        str(result.get("caption") or ""),
+        *(str(item) for item in normalize_highlights(result.get("highlights"))),
+        explicit_reason or "",
+    ]
+    combined_signal_text = "\n".join(signal for signal in signals if signal).strip()
+    if not combined_signal_text:
+        return None
+
+    for rejected_reason, pattern in _REJECTED_NON_PHOTO_PATTERNS:
+        if pattern.search(combined_signal_text):
+            return rejected_reason
+    return None
 
 
 def area_limit(area: str) -> int:
@@ -581,15 +653,25 @@ def classify_property_images(
                     try:
                         result = active_client.classify_image(image_record.local_path, prompt_text)
                         row = build_result_row(image_record, result)
-                        logger.info(
-                            "%s\n%s\n%s\n%s\n%s\n%s",
-                            format_message_line("Gemini image classification completed", tone="success"),
-                            format_detail_line("File", row["file"], highlight=True),
-                            format_detail_line("Area", row["area"], highlight=True),
-                            format_detail_line("Confidence", row["confidence"]),
-                            format_detail_line("Showcase score", row["showcase_score"]),
-                            format_detail_line("Caption", row["caption"]),
-                        )
+                        if row["rejected"]:
+                            logger.warning(
+                                "%s\n%s\n%s\n%s\n%s",
+                                format_message_line("Gemini image discarded", tone="warning"),
+                                format_detail_line("File", row["file"], highlight=True),
+                                format_detail_line("Rejected reason", row["rejected_reason"], highlight=True),
+                                format_detail_line("Area", row["area"]),
+                                format_detail_line("Caption", row["caption"]),
+                            )
+                        else:
+                            logger.info(
+                                "%s\n%s\n%s\n%s\n%s\n%s",
+                                format_message_line("Gemini image classification completed", tone="success"),
+                                format_detail_line("File", row["file"], highlight=True),
+                                format_detail_line("Area", row["area"], highlight=True),
+                                format_detail_line("Confidence", row["confidence"]),
+                                format_detail_line("Showcase score", row["showcase_score"]),
+                                format_detail_line("Caption", row["caption"]),
+                            )
                     except GeminiQuotaExhaustedError as exc:
                         row = build_error_row(image_record, "quota_exhausted", str(exc))
                         results_by_file[row["file"]] = row
