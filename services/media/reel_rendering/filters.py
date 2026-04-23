@@ -61,14 +61,6 @@ def build_overlay_filter(
                 "color=black@0.46:t=fill"
             )
         )
-    if active_layout.agent_image_box is not None and active_layout.agent_image_box.visible:
-        text_filters.append(
-            (
-                f"drawbox=x={active_layout.agent_image_box.x - 6}:y={active_layout.agent_image_box.y - 6}:"
-                f"w={active_layout.agent_image_box.width + 12}:h={active_layout.agent_image_box.height + 12}:"
-                "color=white@0.14:t=fill"
-            )
-        )
     if active_layout.top_panel is not None and active_layout.top_panel.visible:
         text_filters.append(
             (

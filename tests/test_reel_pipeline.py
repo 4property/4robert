@@ -758,6 +758,56 @@ class ReelRenderIntegrationTests(_FFmpegTestCase):
         self.assertNotIn("[2:v]format=rgba[agency_logo]", filter_text)
         self.assertNotIn("[video_with_agent_panel][agency_logo]overlay=", filter_text)
 
+    def test_slide_segment_filter_fits_agent_image_inside_box_without_backplate(self) -> None:
+        slide = PreparedReelSlide(
+            original_path=Path("source.jpg"),
+            working_path=Path("slide.png"),
+            caption="Bright living room",
+            working_width=1340,
+            working_height=1786,
+            motion_mode="horizontal",
+        )
+        property_data = self._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(),
+        )
+        template = PropertyReelTemplate()
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(PropertyReelSlide(image_path=slide.working_path, caption=slide.caption),),
+            slide_duration=5.0,
+            has_ber_badge=False,
+            has_agency_logo=False,
+            cover_caption=None,
+        )
+        assert overlay_layout.agent_image_box is not None
+
+        filter_text = _build_slide_segment_filter(
+            property_data=property_data,
+            settings=template,
+            slide=slide,
+            slide_frames=120,
+            slide_duration=5.0,
+            include_agency_logo=False,
+            include_ber_icon=False,
+        )
+
+        self.assertIn(
+            (
+                f"[1:v]scale=w={overlay_layout.agent_image_box.width}:h={overlay_layout.agent_image_box.height}:"
+                f"force_original_aspect_ratio=decrease,pad={overlay_layout.agent_image_box.width}:"
+                f"{overlay_layout.agent_image_box.height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0,"
+                "format=rgba[agent_panel_image]"
+            ),
+            filter_text,
+        )
+        self.assertNotIn(
+            f"crop={overlay_layout.agent_image_box.width}:{overlay_layout.agent_image_box.height}",
+            filter_text,
+        )
+        self.assertNotIn("color=white@0.14:t=fill", filter_text)
+
     def test_first_slide_segment_filter_omits_fade_in(self) -> None:
         slide = PreparedReelSlide(
             original_path=Path("source.jpg"),
@@ -978,6 +1028,54 @@ class PosterRenderIntegrationTests(_FFmpegTestCase):
         self.assertIsNotNone(overlay_layout.agency_logo_box)
         self.assertNotIn("[agency_logo]", filter_text)
         self.assertNotIn("video_with_agency_logo", filter_text)
+
+    def test_poster_filter_fits_agent_image_inside_box_without_backplate(self) -> None:
+        property_data = self._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(Path("selected_photos/primary_image.png"),),
+        )
+        template = PropertyReelTemplate(
+            width=720,
+            height=1280,
+            max_slide_count=1,
+            include_intro=False,
+            intro_duration_seconds=0.0,
+        )
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(),
+            slide_duration=None,
+            has_ber_badge=False,
+            has_agency_logo=False,
+            cover_caption=None,
+        )
+        assert overlay_layout.agent_image_box is not None
+
+        filter_text = _build_poster_filter_script(
+            property_data=property_data,
+            settings=template,
+            include_agency_logo=False,
+            include_ber_icon=False,
+            agent_input_index=1,
+            agency_logo_input_index=None,
+            ber_icon_input_index=None,
+        )
+
+        self.assertIn(
+            (
+                f"[1:v]scale=w={overlay_layout.agent_image_box.width}:h={overlay_layout.agent_image_box.height}:"
+                f"force_original_aspect_ratio=decrease,pad={overlay_layout.agent_image_box.width}:"
+                f"{overlay_layout.agent_image_box.height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0,"
+                "format=rgba[agent_panel_image]"
+            ),
+            filter_text,
+        )
+        self.assertNotIn(
+            f"[1:v]scale={overlay_layout.agent_image_box.width}:{overlay_layout.agent_image_box.height},format=rgba",
+            filter_text,
+        )
+        self.assertNotIn("color=white@0.14:t=fill", filter_text)
 
     def test_generate_property_poster_from_data_uses_configured_output_resolution(self) -> None:
         with _workspace_temp_dir() as workspace_dir:

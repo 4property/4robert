@@ -7,7 +7,11 @@ import subprocess
 from pathlib import Path
 
 from core.errors import PropertyReelError
-from services.media.reel_rendering.formatting import resolve_agent_image_size, resolve_ber_icon_size
+from services.media.reel_rendering.formatting import (
+    build_fit_inside_rgba_filter,
+    resolve_agent_image_size,
+    resolve_ber_icon_size,
+)
 from services.media.reel_rendering.layout import build_overlay_layout
 from services.media.reel_rendering.models import (
     PreparedReelAssets,
@@ -332,9 +336,10 @@ def _normalize_agent_image(
     property_data: PropertyRenderData,
 ) -> None:
     agent_image_size = resolve_agent_image_size(settings)
-    filter_text = (
-        f"scale=w={agent_image_size}:h={agent_image_size}:force_original_aspect_ratio=increase,"
-        f"crop={agent_image_size}:{agent_image_size},setsar=1,format=rgba"
+    filter_text = build_fit_inside_rgba_filter(
+        agent_image_size,
+        agent_image_size,
+        include_setsar=True,
     )
     _render_single_frame(
         ffmpeg_binary=ffmpeg_binary,

@@ -9,12 +9,13 @@ import shutil
 import struct
 import zlib
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from settings import GEMINI_SELECTION_AUDIT_FILENAME
-from settings.images import IMAGE_EXTENSIONS
-from settings.http import HTTP_HEADERS, OUTBOUND_HTTP_TIMEOUT_SECONDS
+from settings.images import IMAGE_EXTENSIONS, IMAGE_HEADERS
+from settings.http import OUTBOUND_HTTP_TIMEOUT_SECONDS
 from core.dependencies import require_dependency
 from core.errors import PropertyReelError, ResourceNotFoundError
 from services.ai.photo_selection.prompting import normalize_caption
@@ -48,6 +49,11 @@ _VALID_BER_ICON_CODES = {
 _SUPPORTED_BACKGROUND_AUDIO_EXTENSIONS = frozenset(
     {".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"}
 )
+_REMOTE_IMAGE_RETRY_STATUS_CODES = frozenset({403, 406})
+_RELAXED_REMOTE_IMAGE_HEADERS = {
+    "Accept": "*/*",
+    "User-Agent": IMAGE_HEADERS.get("User-Agent", "Mozilla/5.0 (compatible; CPIHED/1.0)"),
+}
 
 
 def resolve_ffmpeg_binary() -> str:
@@ -181,10 +187,28 @@ def resolve_ber_icon_path(
 
 
 def download_remote_image(image_url: str, destination: Path) -> Path:
-    request = Request(image_url, headers=HTTP_HEADERS)
-    with urlopen(request, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
-        with destination.open("wb") as file_handle:
-            shutil.copyfileobj(response, file_handle)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    request_headers = (IMAGE_HEADERS, _RELAXED_REMOTE_IMAGE_HEADERS)
+    last_error: HTTPError | None = None
+
+    for attempt_index, headers in enumerate(request_headers):
+        request = Request(image_url, headers=headers)
+        try:
+            with urlopen(request, timeout=OUTBOUND_HTTP_TIMEOUT_SECONDS) as response:
+                with destination.open("wb") as file_handle:
+                    shutil.copyfileobj(response, file_handle)
+            return destination
+        except HTTPError as error:
+            last_error = error
+            if (
+                attempt_index == 0
+                and error.code in _REMOTE_IMAGE_RETRY_STATUS_CODES
+            ):
+                continue
+            raise
+
+    if last_error is not None:
+        raise last_error
     return destination
 
 
