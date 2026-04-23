@@ -154,13 +154,9 @@ def format_property_size(value: str | None) -> str | None:
         return None
 
     compact = re.sub(r"\s+", " ", normalized)
-    unit_match = _PROPERTY_SIZE_WITH_UNIT_PATTERN.fullmatch(compact)
-    if unit_match is not None:
-        return _format_square_meter_value(unit_match.group("value"))
-
-    compact_numeric = compact.replace(",", ".")
-    if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
-        return _format_square_meter_value(compact_numeric)
+    square_meter_value = _extract_square_meter_value(compact)
+    if square_meter_value is not None:
+        return _format_square_meter_value(square_meter_value)
 
     return compact
 
@@ -171,15 +167,31 @@ def format_property_size_header(value: str | None) -> str | None:
         return None
 
     compact = re.sub(r"\s+", " ", normalized)
-    unit_match = _PROPERTY_SIZE_WITH_UNIT_PATTERN.fullmatch(compact)
-    if unit_match is not None:
-        return _format_square_meter_header_value(unit_match.group("value"))
-
-    compact_numeric = compact.replace(",", ".")
-    if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
-        return _format_square_meter_header_value(compact_numeric)
+    square_meter_value = _extract_square_meter_value(compact)
+    if square_meter_value is not None:
+        return _format_square_meter_header_value(square_meter_value)
 
     return compact.replace(" ", "")
+
+
+def _extract_square_meter_value(value: str) -> str | None:
+    unit_match = _PROPERTY_SIZE_WITH_UNIT_PATTERN.fullmatch(value)
+    if unit_match is not None:
+        return unit_match.group("value")
+
+    leading_metric_match = re.match(
+        r"^(?P<value>\d+(?:[.,]\d+)?)\s*(?:mÂ²|mÃ‚Â²|m2|sqm|sq\.?\s*m)\b",
+        value,
+        re.IGNORECASE,
+    )
+    if leading_metric_match is not None:
+        return leading_metric_match.group("value")
+
+    compact_numeric = value.replace(",", ".")
+    if _PROPERTY_SIZE_NUMERIC_PATTERN.fullmatch(compact_numeric):
+        return compact_numeric
+
+    return None
 
 
 def _format_square_meter_value(value: str) -> str:

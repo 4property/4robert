@@ -2319,11 +2319,13 @@ class RenderOverlayTests(unittest.TestCase):
         self.assertEqual(format_property_size("285"), "285 m²")
         self.assertEqual(format_property_size("285 sqm"), "285 m²")
         self.assertEqual(format_property_size("285 m2"), "285 m²")
+        self.assertEqual(format_property_size("188 sq.m. (2,024 sq.ft.)"), "188 m²")
 
     def test_format_property_size_header_compacts_square_meter_units(self) -> None:
         self.assertEqual(format_property_size_header("285"), "285m²")
         self.assertEqual(format_property_size_header("285 sqm"), "285m²")
         self.assertEqual(format_property_size_header("285 m2"), "285m²")
+        self.assertEqual(format_property_size_header("188 sq.m. (2,024 sq.ft.)"), "188m²")
 
     def test_build_property_header_details_line_skips_zero_counts_and_uses_singular_bath(self) -> None:
         property_data = PropertyRenderData(
