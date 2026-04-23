@@ -31,6 +31,7 @@ from services.ai.photo_selection.prompting import (
 )
 from services.ai.photo_selection.selection import (
     GeminiImageRecord,
+    build_result_row,
     choose_selected_rows,
     classify_property_images,
 )
@@ -108,6 +109,10 @@ class PromptBuilderTests(unittest.TestCase):
         self.assertIn('  - "Fully fitted bathroom"', prompt)
         self.assertNotIn('  - "Key features: Fully fitted bathroom"', prompt)
         self.assertNotIn("['Own-door access'", prompt)
+        self.assertIn('"reject_asset": false', prompt)
+        self.assertIn('"reject_reason": null', prompt)
+        self.assertIn("Never select a floor plan, house plan, site plan", prompt)
+        self.assertIn('Do not confuse an open-plan living/kitchen space with a floor plan drawing.', prompt)
 
     def test_build_property_context_splits_pipe_delimited_property_features(self) -> None:
         property_item = Property.from_api_payload(
@@ -237,6 +242,8 @@ class GeminiClientTests(unittest.TestCase):
         self.assertEqual(result["area"], "living_room")
         self.assertEqual(result["space_id"], "main_living_space")
         self.assertEqual(result["caption"], "Living room with feature fireplace.")
+        self.assertFalse(result["reject_asset"])
+        self.assertIsNone(result["reject_reason"])
 
     def test_classify_image_raises_daily_quota_error_on_daily_limit(self) -> None:
         with workspace_temp_dir() as temp_dir:
@@ -277,6 +284,62 @@ class GeminiClientTests(unittest.TestCase):
 
 
 class GeminiSelectionRuleTests(unittest.TestCase):
+    def test_build_result_row_rejects_floorplan_assets(self) -> None:
+        image_record = GeminiImageRecord(
+            file="004_floorplan.jpg",
+            source_url="https://example.com/brochures/floorplan.jpg",
+            source_index=4,
+            local_path=Path("004_floorplan.jpg"),
+            relative_path="raw/004_floorplan.jpg",
+        )
+
+        row = build_result_row(
+            image_record,
+            {
+                "area": "living_room",
+                "confidence": 96,
+                "showcase_score": 80,
+                "space_id": "main_living_space",
+                "highlights": ["floor plan", "room layout"],
+                "caption": "Floor plan overview",
+                "reject_asset": True,
+                "reject_reason": "floorplan",
+            },
+        )
+
+        self.assertTrue(row["rejected"])
+        self.assertEqual(row["rejected_reason"], "floorplan")
+        self.assertEqual(row["area"], "other")
+        self.assertEqual(row["showcase_score"], 0)
+        self.assertEqual(row["space_id"], "discarded_non_photo_asset")
+        self.assertEqual(row["caption"], "Discarded non-photo asset.")
+
+    def test_build_result_row_rejects_floorplan_assets_from_filename_heuristic(self) -> None:
+        image_record = GeminiImageRecord(
+            file="004_floorplan.jpg",
+            source_url="https://example.com/brochures/asset.jpg",
+            source_index=4,
+            local_path=Path("004_floorplan.jpg"),
+            relative_path="raw/004_floorplan.jpg",
+        )
+
+        row = build_result_row(
+            image_record,
+            {
+                "area": "living_room",
+                "confidence": 96,
+                "showcase_score": 80,
+                "space_id": "main_living_space",
+                "highlights": ["timber flooring", "feature fireplace"],
+                "caption": "Bright open-plan living room",
+                "reject_asset": False,
+                "reject_reason": None,
+            },
+        )
+
+        self.assertTrue(row["rejected"])
+        self.assertEqual(row["rejected_reason"], "floorplan")
+
     def test_choose_selected_rows_respects_reserved_file_and_area_limits(self) -> None:
         results = [
             {
@@ -414,8 +477,127 @@ class GeminiSelectionRuleTests(unittest.TestCase):
             len(selected_rows),
         )
 
+    def test_choose_selected_rows_ignores_rejected_floorplan_assets(self) -> None:
+        results = [
+            {
+                "file": "floorplan.jpg",
+                "area": "other",
+                "confidence": 100,
+                "showcase_score": 0,
+                "space_id": "discarded_non_photo_asset",
+                "highlights": [],
+                "caption": "Discarded non-photo asset.",
+                "rejected": True,
+                "rejected_reason": "floorplan",
+            },
+            {
+                "file": "living-1.jpg",
+                "area": "living_room",
+                "confidence": 90,
+                "showcase_score": 95,
+                "space_id": "living_main",
+                "highlights": [],
+                "caption": "Living",
+            },
+        ]
+
+        selected_rows = choose_selected_rows(results, max_images=2)
+
+        self.assertEqual([row["file"] for row in selected_rows], ["living-1.jpg"])
+
 
 class GeminiSelectionWorkflowTests(unittest.TestCase):
+    def test_classify_property_images_excludes_floorplan_from_selected_images(self) -> None:
+        property_item = build_property()
+
+        class FakeGeminiClient:
+            def __init__(self, *args, **kwargs) -> None:
+                self.model = "gemini-fake"
+
+            def classify_image(self, image_path: Path, prompt_text: str) -> dict[str, object]:
+                if image_path.name == "001_floorplan.jpg":
+                    return {
+                        "area": "other",
+                        "confidence": 100,
+                        "showcase_score": 0,
+                        "space_id": "discarded_non_photo_asset",
+                        "highlights": [],
+                        "caption": "Discarded non-photo asset",
+                        "reject_asset": True,
+                        "reject_reason": "floorplan",
+                    }
+                if image_path.name == "002_living.jpg":
+                    return {
+                        "area": "living_room",
+                        "confidence": 95,
+                        "showcase_score": 91,
+                        "space_id": "living_main",
+                        "highlights": ["timber flooring", "feature fireplace"],
+                        "caption": "Living room",
+                        "reject_asset": False,
+                        "reject_reason": None,
+                    }
+                return {
+                    "area": "kitchen",
+                    "confidence": 89,
+                    "showcase_score": 84,
+                    "space_id": "kitchen_main",
+                    "highlights": ["shaker units", "breakfast counter"],
+                    "caption": "Kitchen",
+                    "reject_asset": False,
+                    "reject_reason": None,
+                }
+
+            def close(self) -> None:
+                return None
+
+        with workspace_temp_dir() as temp_dir:
+            floorplan_path = temp_dir / "001_floorplan.jpg"
+            living_path = temp_dir / "002_living.jpg"
+            kitchen_path = temp_dir / "003_kitchen.jpg"
+            for path in (floorplan_path, living_path, kitchen_path):
+                path.write_bytes(b"image")
+
+            output_path = temp_dir / GEMINI_SELECTION_AUDIT_FILENAME
+            outcome = classify_property_images(
+                property_item,
+                [
+                    GeminiImageRecord(
+                        file="001_floorplan.jpg",
+                        source_url="https://example.com/floorplan.jpg",
+                        source_index=1,
+                        local_path=floorplan_path,
+                        relative_path="raw/001_floorplan.jpg",
+                    ),
+                    GeminiImageRecord(
+                        file="002_living.jpg",
+                        source_url="https://example.com/02.jpg",
+                        source_index=2,
+                        local_path=living_path,
+                        relative_path="raw/002_living.jpg",
+                    ),
+                    GeminiImageRecord(
+                        file="003_kitchen.jpg",
+                        source_url="https://example.com/03.jpg",
+                        source_index=3,
+                        local_path=kitchen_path,
+                        relative_path="raw/003_kitchen.jpg",
+                    ),
+                ],
+                output_path=output_path,
+                downloads_dir="raw",
+                photos_to_select=3,
+                client=FakeGeminiClient(),
+            )
+
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+        floorplan_row = next(row for row in payload["results"] if row["file"] == "001_floorplan.jpg")
+        self.assertTrue(floorplan_row["rejected"])
+        self.assertEqual(floorplan_row["rejected_reason"], "floorplan")
+        self.assertNotIn("001_floorplan.jpg", [row["file"] for row in payload["selected_images"]])
+        self.assertEqual(tuple(path.name for path in outcome.selected_photo_paths), ("002_living.jpg", "003_kitchen.jpg"))
+
     def test_classify_property_images_writes_audit_and_keeps_reserved_image_first(self) -> None:
         property_item = build_property()
 
