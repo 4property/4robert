@@ -9,7 +9,11 @@ import shutil
 import struct
 import zlib
 from pathlib import Path
+<<<<<<< HEAD
 from urllib.parse import parse_qsl, unquote, urlparse
+=======
+from urllib.parse import parse_qs, urlparse
+>>>>>>> 9603156 (fix format things and improve logs)
 from urllib.request import Request, urlopen
 
 <<<<<<< HEAD:services/reel_rendering/runtime.py
@@ -252,12 +256,17 @@ def download_primary_image(primary_image_url: str, destination: Path) -> Path:
 
 
 def _normalize_image_basename(image_reference: str | None) -> str | None:
+<<<<<<< HEAD
     normalized_reference = str(image_reference or "").strip()
     if not normalized_reference:
         return None
 
     basename = _resolve_remote_image_name(normalized_reference).strip().lower()
     return basename or None
+=======
+    basename = _resolve_remote_image_basename(image_reference)
+    return basename.lower() if basename else None
+>>>>>>> 9603156 (fix format things and improve logs)
 
 
 def _is_duplicate_agent_and_agency_image(property_data: PropertyRenderData) -> bool:
@@ -671,12 +680,24 @@ def _resolve_cached_branding_destination(
 
 
 def _resolve_remote_image_suffix(image_url: str) -> str:
+<<<<<<< HEAD
     suffix = _normalize_remote_image_suffix(Path(_resolve_remote_image_name(image_url)).suffix)
     if suffix is not None:
+=======
+    basename = _resolve_remote_image_basename(image_url)
+    suffix = Path(basename or "").suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        return suffix
+
+    parsed_path = urlparse(image_url).path
+    suffix = Path(parsed_path).suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+>>>>>>> 9603156 (fix format things and improve logs)
         return suffix
     return ".png"
 
 
+<<<<<<< HEAD
 def _resolve_remote_image_name(image_url: str) -> str:
     parsed_url = urlparse(image_url)
     query_pairs = parse_qsl(parsed_url.query, keep_blank_values=False)
@@ -849,6 +870,49 @@ def _find_existing_remote_image(destination: Path) -> Path | None:
         ):
             return candidate
     return None
+=======
+def _has_explicit_unsupported_image_suffix(image_url: str) -> bool:
+    if _resolve_remote_image_suffix(image_url) in IMAGE_EXTENSIONS:
+        return False
+
+    parsed_path = urlparse(image_url).path
+    suffix = Path(parsed_path).suffix.lower()
+    return bool(suffix) and suffix not in IMAGE_EXTENSIONS
+>>>>>>> 9603156 (fix format things and improve logs)
+
+
+def _resolve_remote_image_basename(image_reference: str | None) -> str | None:
+    normalized_reference = str(image_reference or "").strip()
+    if not normalized_reference:
+        return None
+
+    parsed_reference = urlparse(normalized_reference)
+    for candidate in _iter_remote_image_name_candidates(parsed_reference, normalized_reference):
+        basename = Path(candidate).name.strip()
+        if basename and Path(basename).suffix.lower() in IMAGE_EXTENSIONS:
+            return basename
+
+    fallback_basename = Path(parsed_reference.path or normalized_reference).name.strip()
+    return fallback_basename or None
+
+
+def _iter_remote_image_name_candidates(parsed_reference, original_reference: str) -> list[str]:
+    candidates: list[str] = []
+    if parsed_reference.path:
+        candidates.append(parsed_reference.path)
+
+    for values in parse_qs(parsed_reference.query, keep_blank_values=False).values():
+        for value in values:
+            cleaned_value = str(value).strip()
+            if not cleaned_value:
+                continue
+            parsed_value = urlparse(cleaned_value)
+            candidate_path = parsed_value.path or cleaned_value
+            candidates.append(candidate_path)
+
+    if original_reference not in candidates:
+        candidates.append(original_reference)
+    return candidates
 
 
 def _write_transparent_placeholder(destination: Path) -> Path:

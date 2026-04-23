@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
-from pathlib import Path
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from collections.abc import Mapping
-from typing import Any, Final
+from datetime import date, datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Callable, Final
 
 from core.errors import PipelineError, extract_error_details
 
@@ -58,7 +59,7 @@ _TITLE_COLORS: Final[dict[str, str]] = {
 _AUDIT_LOGGER_NAME: Final[str] = "cpihed.audit"
 _RICH_TAG_PATTERN: Final[re.Pattern[str]] = re.compile(r"\[/?[^\[\]]+\]")
 _PERSISTENT_LOG_FORMAT: Final[str] = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
-_PERSISTENT_LOG_DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
+_PERSISTENT_LOG_DATE_FORMAT: Final[str] = "%d/%m/%Y %H:%M:%S"
 
 
 @dataclass(slots=True)
@@ -89,6 +90,64 @@ class PlainTextFormatter(logging.Formatter):
         sanitized_record.msg = _strip_rich_markup(record.getMessage())
         sanitized_record.args = ()
         return super().format(sanitized_record)
+
+
+class DailyDirectoryRotatingFileHandler(RotatingFileHandler):
+    def __init__(
+        self,
+        log_root_dir: Path,
+        filename: str,
+        *,
+        maxBytes: int,
+        backupCount: int,
+        encoding: str = "utf-8",
+        current_date_provider: Callable[[], date] | None = None,
+    ) -> None:
+        self._log_root_dir = Path(log_root_dir).expanduser().resolve()
+        self._filename = filename
+        self._current_date_provider = current_date_provider or _current_log_date
+        self._current_log_date: date | None = None
+
+        initial_path = self._resolve_current_log_path()
+        initial_path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(
+            initial_path,
+            maxBytes=maxBytes,
+            backupCount=backupCount,
+            encoding=encoding,
+        )
+        self._current_log_date = self._current_date_provider()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._ensure_current_stream()
+        super().emit(record)
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        self._ensure_current_stream()
+        return super().shouldRollover(record)
+
+    def _ensure_current_stream(self) -> None:
+        active_date = self._current_date_provider()
+        if active_date == self._current_log_date:
+            return
+
+        if self.stream is not None:
+            self.stream.flush()
+            self.stream.close()
+            self.stream = None
+
+        next_path = self._resolve_log_path_for_date(active_date)
+        next_path.parent.mkdir(parents=True, exist_ok=True)
+        self.baseFilename = os.fspath(next_path)
+        if not self.delay:
+            self.stream = self._open()
+        self._current_log_date = active_date
+
+    def _resolve_current_log_path(self) -> Path:
+        return self._resolve_log_path_for_date(self._current_date_provider())
+
+    def _resolve_log_path_for_date(self, log_date: date) -> Path:
+        return resolve_dated_log_directory(self._log_root_dir, log_date=log_date) / self._filename
 
 
 def get_rich_console() -> Console | None:
@@ -161,6 +220,22 @@ def resolve_log_directory(
     return Path(workspace_dir).expanduser().resolve() / persistent_log_directory
 
 
+def resolve_dated_log_directory(
+    log_root_dir: str | Path,
+    *,
+    log_date: date | None = None,
+) -> Path:
+    resolved_date = log_date or _current_log_date()
+    root_dir = Path(log_root_dir).expanduser().resolve()
+    month_dir = resolved_date.strftime("%m-%Y")
+    day_dir = resolved_date.strftime("%d-%m-%Y")
+    return root_dir / month_dir / day_dir
+
+
+def _current_log_date() -> date:
+    return datetime.now().astimezone().date()
+
+
 def configure_logging(
     level: str,
     *,
@@ -204,8 +279,9 @@ def configure_logging(
         )
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        application_handler = RotatingFileHandler(
-            log_dir / "application.log",
+        application_handler = DailyDirectoryRotatingFileHandler(
+            log_dir,
+            "application.log",
             maxBytes=persistent_log_max_bytes,
             backupCount=persistent_log_backup_count,
             encoding="utf-8",
@@ -219,8 +295,9 @@ def configure_logging(
         )
         handlers.append(application_handler)
 
-        error_handler = RotatingFileHandler(
-            log_dir / "errors.log",
+        error_handler = DailyDirectoryRotatingFileHandler(
+            log_dir,
+            "errors.log",
             maxBytes=persistent_log_max_bytes,
             backupCount=persistent_log_backup_count,
             encoding="utf-8",
@@ -234,15 +311,14 @@ def configure_logging(
         )
         handlers.append(error_handler)
 
-        warning_error_daily_handler = TimedRotatingFileHandler(
-            log_dir / "warnings-errors.log",
-            when="midnight",
-            interval=1,
+        warning_error_daily_handler = DailyDirectoryRotatingFileHandler(
+            log_dir,
+            "warnings-errors.log",
+            maxBytes=persistent_log_max_bytes,
             backupCount=persistent_log_backup_count,
             encoding="utf-8",
         )
         warning_error_daily_handler.setLevel(logging.WARNING)
-        warning_error_daily_handler.suffix = "%Y-%m-%d"
         warning_error_daily_handler.setFormatter(
             PlainTextFormatter(
                 _PERSISTENT_LOG_FORMAT,
@@ -297,8 +373,9 @@ def _configure_audit_logger(
     if log_dir is None:
         return
 
-    audit_handler = RotatingFileHandler(
-        log_dir / "audit.jsonl",
+    audit_handler = DailyDirectoryRotatingFileHandler(
+        log_dir,
+        "audit.jsonl",
         maxBytes=persistent_log_max_bytes,
         backupCount=persistent_log_backup_count,
         encoding="utf-8",
@@ -535,6 +612,7 @@ def _rich_markup_enabled() -> bool:
 
 
 __all__ = [
+    "DailyDirectoryRotatingFileHandler",
     "LoggedProcess",
     "create_progress",
     "configure_logging",
@@ -546,5 +624,6 @@ __all__ = [
     "format_duration",
     "format_message_line",
     "get_rich_console",
+    "resolve_dated_log_directory",
     "resolve_log_directory",
 ]

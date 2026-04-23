@@ -345,8 +345,9 @@ def _decorate_webhook_operation(
                         "error": "Failed to accept webhook delivery.",
                         "code": "WEBHOOK_ACCEPTANCE_FAILED",
                         "hint": (
-                            "Check errors.log, warnings-errors.log, and audit.jsonl for the request_id and "
-                            "underlying acceptance failure."
+                            "Check the dated log folders under logs/MM-YYYY/DD-MM-YYYY for errors.log, "
+                            "warnings-errors.log, and audit.jsonl with the request_id and underlying "
+                            "acceptance failure."
                         ),
                     },
                 }
