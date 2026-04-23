@@ -9,7 +9,7 @@ import shutil
 import struct
 import zlib
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 from settings import GEMINI_SELECTION_AUDIT_FILENAME
@@ -193,13 +193,8 @@ def download_primary_image(primary_image_url: str, destination: Path) -> Path:
 
 
 def _normalize_image_basename(image_reference: str | None) -> str | None:
-    normalized_reference = str(image_reference or "").strip()
-    if not normalized_reference:
-        return None
-
-    parsed_reference = urlparse(normalized_reference)
-    basename = Path(parsed_reference.path or normalized_reference).name.strip().lower()
-    return basename or None
+    basename = _resolve_remote_image_basename(image_reference)
+    return basename.lower() if basename else None
 
 
 def _is_duplicate_agent_and_agency_image(property_data: PropertyRenderData) -> bool:
@@ -619,6 +614,11 @@ def _resolve_cached_branding_destination(
 
 
 def _resolve_remote_image_suffix(image_url: str) -> str:
+    basename = _resolve_remote_image_basename(image_url)
+    suffix = Path(basename or "").suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        return suffix
+
     parsed_path = urlparse(image_url).path
     suffix = Path(parsed_path).suffix.lower()
     if suffix in IMAGE_EXTENSIONS:
@@ -627,9 +627,46 @@ def _resolve_remote_image_suffix(image_url: str) -> str:
 
 
 def _has_explicit_unsupported_image_suffix(image_url: str) -> bool:
+    if _resolve_remote_image_suffix(image_url) in IMAGE_EXTENSIONS:
+        return False
+
     parsed_path = urlparse(image_url).path
     suffix = Path(parsed_path).suffix.lower()
     return bool(suffix) and suffix not in IMAGE_EXTENSIONS
+
+
+def _resolve_remote_image_basename(image_reference: str | None) -> str | None:
+    normalized_reference = str(image_reference or "").strip()
+    if not normalized_reference:
+        return None
+
+    parsed_reference = urlparse(normalized_reference)
+    for candidate in _iter_remote_image_name_candidates(parsed_reference, normalized_reference):
+        basename = Path(candidate).name.strip()
+        if basename and Path(basename).suffix.lower() in IMAGE_EXTENSIONS:
+            return basename
+
+    fallback_basename = Path(parsed_reference.path or normalized_reference).name.strip()
+    return fallback_basename or None
+
+
+def _iter_remote_image_name_candidates(parsed_reference, original_reference: str) -> list[str]:
+    candidates: list[str] = []
+    if parsed_reference.path:
+        candidates.append(parsed_reference.path)
+
+    for values in parse_qs(parsed_reference.query, keep_blank_values=False).values():
+        for value in values:
+            cleaned_value = str(value).strip()
+            if not cleaned_value:
+                continue
+            parsed_value = urlparse(cleaned_value)
+            candidate_path = parsed_value.path or cleaned_value
+            candidates.append(candidate_path)
+
+    if original_reference not in candidates:
+        candidates.append(original_reference)
+    return candidates
 
 
 def _write_transparent_placeholder(destination: Path) -> Path:

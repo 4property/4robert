@@ -25,6 +25,7 @@ from services.media.reel_rendering.models import (
     PropertyRenderData,
     PropertyReelTemplate,
 )
+from services.media.reel_rendering.formatting import format_property_size, format_property_size_header
 from services.media.reel_rendering.poster import (
     _build_poster_filter_script,
     _resolve_poster_photo_box,
@@ -321,6 +322,10 @@ class ReelConfigurationTests(unittest.TestCase):
 
 
 class OverlayLayoutTests(unittest.TestCase):
+    def test_format_property_size_keeps_only_square_meters_when_square_feet_are_present(self) -> None:
+        self.assertEqual(format_property_size("188 sq.m. (2,024 sq.ft.)"), "188 m²")
+        self.assertEqual(format_property_size_header("188 sq.m. (2,024 sq.ft.)"), "188m²")
+
     def test_bottom_panel_grows_and_keeps_agent_logo_and_text_within_bounds(self) -> None:
         property_data = _FFmpegTestCase._build_property_data(
             selected_dir=Path("selected_photos"),
