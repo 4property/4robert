@@ -1,200 +1,77 @@
-# CPIHED Architecture
+# Architecture
 
-## Overview
+## Flow
 
-CPIHED is a multi-site property media workflow triggered by WordPress webhooks.
+1. WordPress posts to `POST /webhooks/wordpress/property`.
+2. Transport validates the request, writes a webhook audit row, and enqueues a job.
+3. The dispatcher leases jobs and serializes work by `site_id + property_id` so the same property is never processed concurrently.
+4. The pipeline runs five stages: ingest → plan → prepare assets → render reel + poster → publish.
+5. Publish persists a media revision and emits an outbox event; social delivery runs through GoHighLevel.
 
-1. A property webhook is accepted at `POST /webhooks/wordpress/property`.
-2. The transport layer validates the request, records an audit event, and enqueues durable work in SQLite.
-3. The dispatcher processes jobs with keyed serialization by `site_id + property_id` so the same property is not processed concurrently by multiple workers.
-4. `PropertyMediaPipeline` executes five stable stages:
-   1. ingestion and normalization
-   2. campaign planning
-   3. asset preparation
-   4. reel rendering and companion poster generation
-   5. local publish and external social delivery
-5. Local publish persists a durable media revision and emits an outbox event.
-6. Social delivery publishes through GoHighLevel to the configured platforms, recording `published`, `partial`, `failed`, or `skipped` outcomes per property.
+`for_sale` / `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, `let` use a short status reel with a single moving image.
 
-The current primary media output is always a reel video with a companion poster image. `for_sale` and `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, and `let` use a short status reel with a single moving primary image.
+## Workflow states
 
-## Workflow State
+`property_pipeline_state` tracks the latest state per property:
 
-`property_pipeline_state` keeps the latest delivery state for each property. The runtime uses these states today:
+`ingested`, `assets_prepared`, `rendered`, `awaiting_review`, `published`, `partial`, `failed`, `skipped`.
 
-- `ingested`
-- `assets_prepared`
-- `rendered`
-- `awaiting_review`
-- `published`
-- `partial`
-- `failed`
-- `skipped`
+`awaiting_review` is the handoff point for a future preview/approval flow. The outbox already emits the events; review itself is optional.
 
-`awaiting_review` is the durable handoff point for a future preview-and-approval flow. The code emits outbox events for that path, but review remains optional and disabled by default.
+## Modules
 
-## Main Modules
+### Transport — `services/transport/http/`
 
-### Transport
+`server.py`, `operations.py`, `security.py`. Validates headers and signatures, accepts the webhook, writes audit rows, enqueues jobs, and exposes `/health/live` and `/health/ready`. Readiness is capability-based: core processing can be ready while optional features remain unconfigured.
 
-Files:
+### Dispatch & queue — `application/dispatch/`, `repositories/stores/job_queue_store.py`
 
-- `services/webhook_transport/server.py`
-- `services/webhook_transport/operations.py`
+PostgreSQL-backed durable queue with lease-based claims, retry backoff for transient failures, and keyed serialization. Worker count can exceed 1 without breaking property-level ordering.
 
-Responsibilities:
+### Pipeline — `application/pipeline/`
 
-- validate headers, payload shape, and optional security signature
-- accept the current webhook header format
-- create webhook audit rows
-- enqueue durable jobs
-- expose liveness and readiness endpoints
+`media_pipeline.py` orchestrates the stages. `media_services.py` wires asset preparation, rendering, and publishing. `content_generation.py` produces deterministic captions behind a boundary so an AI implementation can be swapped in later. `application/admin/` exposes management endpoints for WordPress sources.
 
-Readiness is capability-based. Core webhook processing can be ready even if optional AI, notification, or review capabilities are not configured.
+### Rendering — `services/media/reel_rendering/`
 
-### Durable Queue and Dispatch
+Builds the reel manifest, computes overlay layout in Python before ffmpeg, renders text that auto-fits / wraps / clamps, omits missing optional fields, and persists the resolved layout in the manifest for audit. ffmpeg paints a layout that's already resolved.
 
-Files:
+### Social delivery — `services/publishing/social_delivery/`
 
-- `application/dispatching.py`
-- `repositories/property_job_repository.py`
+Uploads media to GoHighLevel, picks one location user and account per platform, publishes sequentially, and applies per-platform validation. GBP posts use the poster image. The job succeeds if at least one platform publishes; only total failure across all requested platforms fails the job.
 
-Responsibilities:
+### Site storage — `services/media/site_storage.py`
 
-- durable SQLite-backed queue
-- lease-based worker claims
-- retry scheduling for transient external failures
-- keyed serialization for the same property across multiple workers
+Resolves per-site paths under `property_media/<site>/`, `property_media_raw/<site>/`, `generated_media/<site>/reels/`, `generated_media/<site>/posters/`.
 
-This replaces the earlier single-worker-only safety model. Worker count can be greater than `1` without allowing concurrent processing of the same property.
+## Persistence
 
-### Application Workflow
+PostgreSQL tables (`repositories/postgres/models/`):
 
-Files:
+- `agencies`, `wordpress_sources` — tenancy
+- `properties`, `property_images` — normalized payloads and image metadata
+- `property_pipeline_state` — latest workflow + delivery state and current revision id
+- `webhook_events` — transport audit
+- `job_queue` — durable background work
+- `media_revisions` — immutable render history
+- `outbox_events` — domain events for downstream consumers
+- `scripted_video_artifacts` — scripted render outputs
 
-- `application/property_video_pipeline.py`
-- `application/media_services.py`
-- `application/content_generation.py`
-- `application/media_planning.py`
+`media_revisions` separates revision history from mutable current state, which is the foundation for preview, approval, and republish flows.
 
-Responsibilities:
+## Errors and logging
 
-- map raw property status into the business lifecycle
-- decide render profile and asset strategy
-- generate deterministic copy through the `ContentGenerator` boundary
-- prepare curated or primary-only assets
-- render the reel and its companion poster
-- publish locally and externally
+`core/errors.py`, `core/logging.py`. Errors carry `stage`, `code`, `retryable`, `context`, and `external_trace_id`. Console output stays rich for development; the structured fields make stage failures, publish errors, and layout clamps diagnosable in production.
 
-The deterministic copy generator is the default implementation today. It is intentionally isolated so future AI-generated captions, narration scripts, or overlay copy can be added without rewriting the renderer or social publisher.
+## Outbox events
 
-### Rendering
+`media_rendered`, `review_requested`, `publish_completed`, `publish_failed`, `publish_skipped`. Intended consumers: notifications, review workflows, analytics, async AI generation.
 
-Files:
+## Deployment
 
-- `services/reel_rendering/*`
+- FastAPI behind a reverse proxy with TLS.
+- PostgreSQL with the Alembic schema applied.
+- One or more workers depending on throughput.
+- Forward stdout/stderr to centralized logs.
 
-Responsibilities:
-
-- build the reel manifest
-- compute a Python-side overlay layout before ffmpeg
-- render text blocks that auto-fit, wrap, or clamp safely
-- omit optional fields when they are missing
-- persist the resolved overlay layout in the manifest for audit and preview use
-
-The layout engine is the authority for text fitting. ffmpeg now paints a resolved layout rather than making ad hoc overflow decisions inline.
-
-### Social Delivery
-
-Files:
-
-- `services/social_delivery/*`
-
-Responsibilities:
-
-- upload media to GoHighLevel
-- select one location user and one account per platform
-- publish sequentially across the configured platforms
-- apply per-platform validation policies
-- publish Google Business Profile posts as poster-image posts with GoHighLevel GBP post details
-- treat missing accounts or unsupported platforms as partial/skipped results rather than fatal pipeline errors
-
-The job succeeds if at least one platform publishes successfully. Only total failure across all requested platforms fails the job.
-
-Google Business Profile is intentionally treated as an operational prerequisite rather than an in-app OAuth flow today. The GBP must already be connected to the target HighLevel sub-account in Social Planner / GBP Optimization before webhook-driven publishing begins. For future automation, HighLevel documents the sequence as:
-
-- start Google OAuth
-- get Google business locations
-- set the Google business location for the sub-account
-
-## Persistence Model
-
-SQLite stores the full operational state:
-
-- `properties`: normalized property payloads
-- `property_images`: downloaded/selected image metadata
-- `property_pipeline_state`: latest render and publish state, workflow state, and current revision id
-- `webhook_events`: transport audit trail
-- `job_queue`: durable background jobs
-- `media_revisions`: immutable render revisions
-- `outbox_events`: durable domain events for future notification/review consumers
-
-`media_revisions` separates revision history from the mutable current state. That is the foundation for future preview, approval, and republish workflows.
-
-## Filesystem Layout
-
-Site-scoped directories are resolved in `services/webhook_transport/site_storage.py`.
-
-Current roots:
-
-- `property_media/<site>/`
-- `property_media_raw/<site>/`
-- `generated_media/<site>/reels/`
-- `generated_media/<site>/posters/`
-
-`generated_media/<site>/reels/` and `generated_media/<site>/posters/` are the canonical durable output locations for property media.
-
-## Logging and Error Model
-
-Files:
-
-- `core/errors.py`
-- `core/logging.py`
-
-Errors now carry structured fields:
-
-- `stage`
-- `code`
-- `retryable`
-- `context`
-- `external_trace_id`
-
-Rich console output remains for development, but the log content itself now includes enough structured detail to diagnose stage failures, publish API failures, and layout clamp events in deployment.
-
-## Outbox and Future Extensions
-
-The outbox currently records events such as:
-
-- `media_rendered`
-- `review_requested`
-- `publish_completed`
-- `publish_failed`
-- `publish_skipped`
-
-That outbox is the intended integration point for:
-
-- email notifications
-- preview/review workflows
-- analytics or audit sinks
-- future asynchronous AI content generation
-
-## Deployment Notes
-
-Recommended production model:
-
-- run FastAPI behind a reverse proxy with HTTPS and rate limiting
-- keep SQLite on durable local storage
-- run with one or more workers depending on throughput needs
-- forward stdout/stderr to centralized logging
-
-Optional capabilities such as AI copy, AI narration, notifications, and review can be enabled incrementally without blocking the core webhook workflow.
+Rocky Linux specifics: [`deploy/rocky-linux/README.md`](deploy/rocky-linux/README.md).

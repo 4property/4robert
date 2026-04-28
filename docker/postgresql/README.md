@@ -1,10 +1,10 @@
-PostgreSQL local development now uses the root-level `compose.yml`.
+# PostgreSQL (local dev)
 
-Usage:
+Use the root `compose.yml`:
 
-```powershell
+```bash
 docker compose up -d postgres
 docker compose down
 ```
 
-The database data lives in the named Docker volume `postgres_data`, not inside the repository.
+Data lives in the `postgres_data` named volume, not in the repo.
