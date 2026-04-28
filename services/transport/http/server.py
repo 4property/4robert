@@ -473,6 +473,15 @@ class WordPressWebhookApplication:
         with self.unit_of_work_factory() as unit_of_work:
             return unit_of_work.gohighlevel_token_store.get_by_location_id(location_id)
 
+    def list_gohighlevel_tokens(self):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.gohighlevel_token_store.list_tokens()
+
+    def delete_gohighlevel_token(self, *, location_id: str) -> bool:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.gohighlevel_token_store.delete_by_location_id(location_id)
+
     def require_gohighlevel_access_token(self, *, location_id: str) -> str:
         with self.unit_of_work_factory() as unit_of_work:
             return unit_of_work.gohighlevel_token_store.require_access_token(location_id)
@@ -733,6 +742,56 @@ def create_fastapi_app(
             content={
                 "status": "saved",
                 "token": token_record.to_public_dict(),
+            },
+        )
+
+    @app.get("/mvp/gohighlevel/tokens", tags=["MVP"])
+    async def list_mvp_gohighlevel_tokens(request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        token_records = runtime.list_gohighlevel_tokens()
+        items = [record.to_public_dict() for record in token_records]
+        return JSONResponse(
+            status_code=200,
+            content={
+                "count": len(items),
+                "items": items,
+            },
+        )
+
+    @app.delete("/mvp/gohighlevel/token/{location_id}", tags=["MVP"])
+    async def delete_mvp_gohighlevel_token(
+        location_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        try:
+            deleted = runtime.delete_gohighlevel_token(location_id=location_id)
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        if not deleted:
+            return _json_error(
+                404,
+                "No GoHighLevel token is saved for this location.",
+                code="GHL_TOKEN_NOT_FOUND",
+                details={"location_id": location_id},
+            )
+        log_persistent_event(
+            "mvp.gohighlevel_token_deleted",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            location_id=location_id,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "deleted",
+                "location_id": location_id,
             },
         )
 
