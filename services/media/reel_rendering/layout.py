@@ -20,6 +20,8 @@ from services.media.reel_rendering.formatting import (
 )
 from services.media.reel_rendering.models import PropertyReelData, PropertyReelSlide, PropertyReelTemplate
 
+_SINGLE_LINE_TEXT_BLOCKS = frozenset({"price", "agent_phone", "agent_email", "agency_psra"})
+
 
 @dataclass(frozen=True, slots=True)
 class LayoutWarning:
@@ -163,10 +165,43 @@ class _MeasuredTextBlock:
     warning: LayoutWarning | None = None
 
 
-def _wrap_width_from_pixels(*, usable_width: int, font_size: int, min_chars: int) -> int:
+def _wrap_width_from_pixels(
+    *,
+    usable_width: int,
+    font_size: int,
+    min_chars: int,
+    char_width_floor: float = 12.0,
+) -> int:
     usable_width = max(120, usable_width)
-    average_character_width = max(12.0, font_size * 0.58)
+    average_character_width = max(char_width_floor, font_size * 0.58)
     return max(min_chars, round(usable_width / average_character_width))
+
+
+def _estimate_line_width_pixels(
+    line: str,
+    *,
+    font_size: int,
+    char_width_floor: float,
+) -> int:
+    average_character_width = max(char_width_floor, font_size * 0.58)
+    return round(len(line) * average_character_width)
+
+
+def _lines_fit_within_width(
+    lines: tuple[str, ...],
+    *,
+    usable_width: int,
+    font_size: int,
+    char_width_floor: float,
+) -> bool:
+    return all(
+        _estimate_line_width_pixels(
+            line,
+            font_size=font_size,
+            char_width_floor=char_width_floor,
+        ) <= usable_width
+        for line in lines
+    )
 
 
 def _resolve_top_panel_height_range(settings: PropertyReelTemplate) -> tuple[int, int]:
@@ -215,6 +250,7 @@ def _measure_text_block(
     max_font_size: int,
     min_font_size: int,
     min_chars: int,
+    char_width_floor: float = 12.0,
 ) -> _MeasuredTextBlock | None:
     normalized_text = clean_text(text)
     if not normalized_text:
@@ -225,11 +261,28 @@ def _measure_text_block(
             usable_width=usable_width,
             font_size=font_size,
             min_chars=min_chars,
+            char_width_floor=char_width_floor,
         )
         wrapped = fit_wrapped_lines(normalized_text, width=width_chars, max_lines=max_lines)
+        if not _lines_fit_within_width(
+            wrapped.lines,
+            usable_width=usable_width,
+            font_size=font_size,
+            char_width_floor=char_width_floor,
+        ) and width_chars > 1:
+            wrapped = fit_wrapped_lines(
+                normalized_text,
+                width=max(1, width_chars - 1),
+                max_lines=max_lines,
+            )
         line_gap = font_size + max(8, round(font_size * 0.2))
         box_height = font_size + ((len(wrapped.lines) - 1) * line_gap if wrapped.lines else 0)
-        if not wrapped.clamped:
+        if not wrapped.clamped and _lines_fit_within_width(
+            wrapped.lines,
+            usable_width=usable_width,
+            font_size=font_size,
+            char_width_floor=char_width_floor,
+        ):
             return _MeasuredTextBlock(
                 block=block,
                 text=normalized_text,
@@ -247,8 +300,20 @@ def _measure_text_block(
         usable_width=usable_width,
         font_size=min_size,
         min_chars=min_chars,
+        char_width_floor=char_width_floor,
     )
     wrapped = fit_wrapped_lines(normalized_text, width=width_chars, max_lines=max_lines)
+    if not _lines_fit_within_width(
+        wrapped.lines,
+        usable_width=usable_width,
+        font_size=min_size,
+        char_width_floor=char_width_floor,
+    ) and wrapped.lines:
+        wrapped = fit_wrapped_lines(
+            normalized_text,
+            width=max(min_chars, width_chars - 1),
+            max_lines=max_lines,
+        )
     line_gap = min_size + max(8, round(min_size * 0.2))
     box_height = min_size + ((len(wrapped.lines) - 1) * line_gap if wrapped.lines else 0)
     warning = LayoutWarning(
@@ -268,6 +333,42 @@ def _measure_text_block(
         max_lines=max_lines,
         clamped=True,
         warning=warning,
+    )
+
+
+def _measure_text_block_with_single_line_preference(
+    *,
+    block: str,
+    text: str | None,
+    usable_width: int,
+    preferred_min_chars: int,
+    fallback_max_lines: int,
+    max_font_size: int,
+    min_font_size: int,
+    fallback_min_chars: int,
+    char_width_floor: float = 12.0,
+) -> _MeasuredTextBlock | None:
+    single_line_block = _measure_text_block(
+        block=block,
+        text=text,
+        usable_width=usable_width,
+        max_lines=1,
+        max_font_size=max_font_size,
+        min_font_size=min_font_size,
+        min_chars=preferred_min_chars,
+        char_width_floor=char_width_floor,
+    )
+    if single_line_block is not None and not single_line_block.clamped:
+        return single_line_block
+    return _measure_text_block(
+        block=block,
+        text=text,
+        usable_width=usable_width,
+        max_lines=fallback_max_lines,
+        max_font_size=max_font_size,
+        min_font_size=min_font_size,
+        min_chars=fallback_min_chars,
+        char_width_floor=char_width_floor,
     )
 
 
@@ -428,7 +529,25 @@ def _measure_address_blocks(
         )
         address_lines = () if wrapped_address is None else wrapped_address.lines
         clamped = metadata_clamped or (False if wrapped_address is None else wrapped_address.clamped)
-        if not clamped:
+        address_fits = _lines_fit_within_width(
+            address_lines,
+            usable_width=usable_width,
+            font_size=address_font_size,
+            char_width_floor=12.0,
+        )
+        viewing_times_fit = _lines_fit_within_width(
+            viewing_times_lines,
+            usable_width=usable_width,
+            font_size=metadata_font_size,
+            char_width_floor=12.0,
+        )
+        details_fit = _lines_fit_within_width(
+            details_lines,
+            usable_width=usable_width,
+            font_size=metadata_font_size,
+            char_width_floor=12.0,
+        )
+        if not clamped and address_fits and viewing_times_fit and details_fit:
             return _build_measured_address_blocks(
                 address_text=normalized_address,
                 viewing_times_text=normalized_viewing_times,
@@ -518,6 +637,7 @@ def build_overlay_layout(
     has_ber_badge: bool,
     has_agency_logo: bool = False,
     cover_caption: str | None = None,
+    single_line_contact_email: bool = False,
 ) -> OverlayLayout:
     width = settings.width
     height = settings.height
@@ -543,11 +663,12 @@ def build_overlay_layout(
 
     top_blocks: list[_MeasuredTextBlock] = []
     for measured_block in (
-        _measure_text_block(
+        _measure_text_block_with_single_line_preference(
             block="status",
             text=build_status_ribbon_text(property_data),
             usable_width=header_text_width,
-            max_lines=2,
+            preferred_min_chars=6,
+            fallback_max_lines=2,
             max_font_size=resolve_font_size_bounds(
                 "status",
                 frame_height=height,
@@ -558,13 +679,13 @@ def build_overlay_layout(
                 frame_height=height,
                 subtitle_font_size=settings.subtitle_font_size,
             )[1],
-            min_chars=8,
+            fallback_min_chars=8,
         ),
         _measure_text_block(
             block="price",
             text=build_display_price(property_data),
             usable_width=header_text_width,
-            max_lines=2,
+            max_lines=1,
             max_font_size=resolve_font_size_bounds(
                 "price",
                 frame_height=height,
@@ -702,18 +823,34 @@ def build_overlay_layout(
                 block=block_name,
                 text=block_text,
                 usable_width=text_width,
-                max_lines=2,
+                max_lines=1 if block_name in _SINGLE_LINE_TEXT_BLOCKS else 2,
                 max_font_size=resolve_font_size_bounds(
                     block_name,
                     frame_height=height,
                     subtitle_font_size=settings.subtitle_font_size,
                 )[0],
-                min_font_size=resolve_font_size_bounds(
-                    block_name,
-                    frame_height=height,
-                    subtitle_font_size=settings.subtitle_font_size,
-                )[1],
+                min_font_size=(
+                    min(
+                        resolve_font_size_bounds(
+                            block_name,
+                            frame_height=height,
+                            subtitle_font_size=settings.subtitle_font_size,
+                        )[0],
+                        14,
+                    )
+                    if block_name == "agent_email" and single_line_contact_email
+                    else resolve_font_size_bounds(
+                        block_name,
+                        frame_height=height,
+                        subtitle_font_size=settings.subtitle_font_size,
+                    )[1]
+                ),
                 min_chars=16,
+                char_width_floor=(
+                    8.0
+                    if block_name == "agent_email" and single_line_contact_email
+                    else 12.0
+                ),
             )
             for block_name, block_text in zip(
                 ("agent_phone", "agent_email", "agency_psra"),
@@ -844,7 +981,7 @@ def build_overlay_layout(
                     frame_height=height,
                     subtitle_font_size=settings.subtitle_font_size,
                 )[1],
-                min_chars=18,
+                min_chars=14,
             )
             if measured_caption is None:
                 continue

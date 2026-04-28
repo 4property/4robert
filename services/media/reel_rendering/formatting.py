@@ -39,12 +39,12 @@ _PROPERTY_SIZE_WITH_UNIT_PATTERN = re.compile(
 
 OVERLAY_FONT_SIZE_RULES: dict[str, tuple[float, int, float, int]] = {
     "status": (0.050, 68, 0.026, 34),
-    "price": (0.046, 62, 0.024, 32),
+    "price": (0.046, 62, 0.020, 24),
     "address": (0.024, 32, 0.0, 22),
-    "agent_name": (0.026, 38, 0.017, 24),
-    "agent_phone": (0.020, 29, 0.0, 19),
-    "agent_email": (0.020, 29, 0.0, 19),
-    "agency_psra": (0.020, 29, 0.0, 19),
+    "agent_name": (0.026, 38, 0.014, 20),
+    "agent_phone": (0.020, 29, 0.0, 16),
+    "agent_email": (0.020, 29, 0.0, 16),
+    "agency_psra": (0.020, 29, 0.0, 16),
 }
 
 

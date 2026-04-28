@@ -25,7 +25,11 @@ from services.media.reel_rendering.models import (
     PropertyRenderData,
     PropertyReelTemplate,
 )
-from services.media.reel_rendering.formatting import format_property_size, format_property_size_header
+from services.media.reel_rendering.formatting import (
+    format_property_size,
+    format_property_size_header,
+    resolve_font_size_bounds,
+)
 from services.media.reel_rendering.poster import (
     _build_poster_filter_script,
     _resolve_poster_photo_box,
@@ -322,6 +326,79 @@ class ReelConfigurationTests(unittest.TestCase):
 
 
 class OverlayLayoutTests(unittest.TestCase):
+    @staticmethod
+    def _estimate_line_width(line: str, *, font_size: int, char_width_floor: float = 12.0) -> int:
+        return round(len(line) * max(char_width_floor, font_size * 0.58))
+
+    def test_overlay_layout_keeps_extreme_text_blocks_within_estimated_widths(self) -> None:
+        property_data = _FFmpegTestCase._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(Path("selected_photos/primary_image.png"),),
+            price="12345678901234567890",
+            property_status="Available Now With Extended Marketing Copy",
+            banner_text="FOR SALE WITH EXCEPTIONALLY LONG STATUS COPY",
+            price_display_text="EUR 1,234,567,890 per calendar month including unusually long qualifier",
+        )
+        property_data.title = (
+            "110 Extremely Long Example Road With Additional Descriptor, "
+            "Somewhere Very Specific, Dublin 14, County Dublin"
+        )
+        property_data.agent_name = "Jane Alexandra ExtremelyLongSurname Example"
+        property_data.agent_number = "+353 1 234 5678 EXT 9999 SALES HOTLINE"
+        property_data.agent_email = (
+            "very.long.agent.email.address@extremely-long-branch-name-property.example.ie"
+        )
+        property_data.viewing_times = (
+            "Viewing strictly by appointment only on Saturday 10am to 4pm and Sunday 12pm to 5pm",
+        )
+        property_data.property_size = "188 sq.m. (2,024 sq.ft.)"
+        property_data.bedrooms = 12
+        property_data.bathrooms = 8
+        property_data.ber_rating = "A1"
+        property_data.agency_psra = "PSRA 1234 with additional compliance text"
+        slide = PropertyReelSlide(
+            image_path=Path("selected_photos/primary_image.png"),
+            caption=(
+                "A remarkably bright and spacious family residence with an exceptionally long "
+                "subtitle intended to stress the fitting logic across the lower overlay."
+            ),
+        )
+        template = PropertyReelTemplate(
+            width=320,
+            height=480,
+            subtitle_font_size=28,
+        )
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(slide,),
+            slide_duration=template.seconds_per_slide,
+            has_ber_badge=True,
+            has_agency_logo=True,
+            cover_caption=None,
+        )
+
+        for block in overlay_layout.text_blocks:
+            self.assertTrue(block.lines, block.block)
+            self.assertLessEqual(
+                max(
+                    self._estimate_line_width(line, font_size=block.font_size)
+                    for line in block.lines
+                ),
+                block.max_width,
+                block.block,
+            )
+
+        for segment in overlay_layout.subtitle_segments:
+            self.assertTrue(segment.lines)
+            self.assertLessEqual(
+                max(
+                    self._estimate_line_width(line, font_size=segment.font_size)
+                    for line in segment.lines
+                ),
+                segment.max_width,
+            )
     def test_format_property_size_keeps_only_square_meters_when_square_feet_are_present(self) -> None:
         self.assertEqual(format_property_size("188 sq.m. (2,024 sq.ft.)"), "188 m²")
         self.assertEqual(format_property_size_header("188 sq.m. (2,024 sq.ft.)"), "188m²")
@@ -965,6 +1042,44 @@ class ReelRenderIntegrationTests(_FFmpegTestCase):
 
 
 class PosterRenderIntegrationTests(_FFmpegTestCase):
+    def test_poster_layout_keeps_long_agent_email_on_one_line(self) -> None:
+        property_data = self._build_property_data(
+            selected_dir=Path("selected_photos"),
+            selected_paths=(Path("selected_photos/primary_image.png"),),
+        )
+        property_data.agent_email = "very.long.agent.email.address@extremely-long-branch-name-property.example.ie"
+        template = PropertyReelTemplate(
+            width=720,
+            height=1280,
+            max_slide_count=1,
+            include_intro=False,
+            intro_duration_seconds=0.0,
+        )
+
+        overlay_layout = build_overlay_layout(
+            property_data,
+            template,
+            slides=(),
+            slide_duration=None,
+            has_ber_badge=False,
+            has_agency_logo=True,
+            cover_caption=None,
+            single_line_contact_email=True,
+        )
+        email_block = next(
+            block for block in overlay_layout.text_blocks if block.block == "agent_email"
+        )
+
+        self.assertEqual(len(email_block.lines), 1)
+        self.assertLess(
+            email_block.font_size,
+            resolve_font_size_bounds(
+                "agent_email",
+                frame_height=template.height,
+                subtitle_font_size=template.subtitle_font_size,
+            )[0],
+        )
+
     def test_poster_photo_box_is_full_bleed_within_poster_bounds(self) -> None:
         property_data = self._build_property_data(
             selected_dir=Path("selected_photos"),

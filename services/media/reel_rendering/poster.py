@@ -263,6 +263,7 @@ def _build_poster_filter_script(
         has_ber_badge=include_ber_icon,
         has_agency_logo=include_agency_logo,
         cover_caption=None,
+        single_line_contact_email=True,
     )
     photo_box = _resolve_poster_photo_box(settings, overlay_layout)
     agent_image_width, agent_image_height = (
