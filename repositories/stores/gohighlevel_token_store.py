@@ -139,6 +139,41 @@ class GoHighLevelTokenStore(PostgresRepositoryBase):
             return None
         return _row_to_token_record(row)
 
+    def list_tokens(self) -> tuple[GoHighLevelTokenRecord, ...]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                location_id,
+                user_id,
+                access_token,
+                refresh_token,
+                expires_at,
+                created_at,
+                updated_at
+            FROM gohighlevel_tokens
+            ORDER BY updated_at DESC, location_id ASC
+            """
+        ).fetchall()
+        return tuple(_row_to_token_record(row) for row in rows)
+
+    def delete_by_location_id(self, location_id: str) -> bool:
+        normalized_location_id = str(location_id or "").strip()
+        if not normalized_location_id:
+            raise ValidationError(
+                "The location_id is required.",
+                code="GHL_LOCATION_ID_REQUIRED",
+                context={"field": "location_id"},
+            )
+        row = self.connection.execute(
+            """
+            DELETE FROM gohighlevel_tokens
+            WHERE location_id = :location_id
+            RETURNING location_id
+            """,
+            {"location_id": normalized_location_id},
+        ).fetchone()
+        return row is not None
+
     def require_access_token(self, location_id: str) -> str:
         record = self.get_by_location_id(location_id)
         if record is None or not record.access_token.strip():

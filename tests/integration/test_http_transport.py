@@ -200,6 +200,44 @@ class HttpTransportIntegrationTests(unittest.TestCase):
                 assert job is not None
                 self.assertEqual(job.gohighlevel_access_token, "token-1")
 
+    def test_mvp_admin_can_list_and_delete_gohighlevel_tokens(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                client = self._build_client(workspace_dir, database.url)
+
+                save_response = client.post(
+                    "/mvp/gohighlevel/token",
+                    json={
+                        "location_id": "loc-admin",
+                        "user_id": "admin-user",
+                        "access_token": "token-admin",
+                    },
+                )
+                self.assertEqual(save_response.status_code, 200)
+
+                list_response = client.get("/mvp/gohighlevel/tokens")
+                self.assertEqual(list_response.status_code, 200)
+                self.assertEqual(list_response.json()["count"], 1)
+                self.assertEqual(
+                    list_response.json()["items"][0]["location_id"],
+                    "loc-admin",
+                )
+                self.assertNotIn("access_token", list_response.json()["items"][0])
+
+                delete_response = client.delete("/mvp/gohighlevel/token/loc-admin")
+                self.assertEqual(delete_response.status_code, 200)
+                self.assertEqual(delete_response.json()["status"], "deleted")
+
+                session_response = client.post(
+                    "/mvp/gohighlevel/session",
+                    json={
+                        "location_id": "loc-admin",
+                        "user_id": "admin-user",
+                    },
+                )
+                self.assertEqual(session_response.status_code, 200)
+                self.assertFalse(session_response.json()["connected"])
+
     def test_webhook_without_access_token_header_requires_saved_mvp_token(self) -> None:
         with temporary_workspace() as workspace_dir:
             with temporary_postgres_schema(DATABASE_URL) as database:
