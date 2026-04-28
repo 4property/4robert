@@ -154,6 +154,71 @@ class HttpTransportIntegrationTests(unittest.TestCase):
                 self.assertEqual(event.site_id, seeded.site_id)
                 self.assertEqual(job.site_id, seeded.site_id)
 
+    def test_mvp_token_store_allows_webhook_without_access_token_header(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                seeded = seed_tenant(database.url, site_id="site-a")
+                client = self._build_client(workspace_dir, database.url)
+
+                save_response = client.post(
+                    "/mvp/gohighlevel/token",
+                    json={
+                        "location_id": "loc-1",
+                        "user_id": "user-1",
+                        "access_token": "token-1",
+                    },
+                )
+                self.assertEqual(save_response.status_code, 200)
+                self.assertTrue(save_response.json()["token"]["has_access_token"])
+
+                session_response = client.post(
+                    "/mvp/gohighlevel/session",
+                    json={
+                        "location_id": "loc-1",
+                        "user_id": "user-1",
+                    },
+                )
+                self.assertEqual(session_response.status_code, 200)
+                self.assertTrue(session_response.json()["connected"])
+
+                response = client.post(
+                    "/webhooks/wordpress/property",
+                    json={"id": 173757, "slug": "sample-property"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-WordPress-Site-ID": seeded.site_id,
+                        "X-GoHighLevel-Location-ID": "loc-1",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 202)
+                payload = response.json()
+                with PropertyJobRepository(database.url) as repository:
+                    job = repository.get_job(payload["job_id"])
+
+                self.assertIsNotNone(job)
+                assert job is not None
+                self.assertEqual(job.gohighlevel_access_token, "token-1")
+
+    def test_webhook_without_access_token_header_requires_saved_mvp_token(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                seeded = seed_tenant(database.url, site_id="site-a")
+                client = self._build_client(workspace_dir, database.url)
+
+                response = client.post(
+                    "/webhooks/wordpress/property",
+                    json={"id": 173757, "slug": "sample-property"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-WordPress-Site-ID": seeded.site_id,
+                        "X-GoHighLevel-Location-ID": "loc-1",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.json()["code"], "GHL_TOKEN_NOT_FOUND")
+
     def test_webhook_acceptance_still_enqueues_when_dispatcher_reports_paused(self) -> None:
         with temporary_workspace() as workspace_dir:
             with temporary_postgres_schema(DATABASE_URL) as database:

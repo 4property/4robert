@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -31,7 +32,10 @@ from settings import (
     ADMIN_API_ENABLED,
     ADMIN_API_TOKEN,
     DATABASE_URL,
+    GO_HIGH_LEVEL_API_VERSION,
+    GO_HIGH_LEVEL_BASE_URL,
     LOG_LEVEL,
+    OUTBOUND_HTTP_TIMEOUT_SECONDS,
     PERSISTENT_LOG_BACKUP_COUNT,
     PERSISTENT_LOG_DIRECTORY,
     PERSISTENT_LOG_MAX_BYTES,
@@ -78,6 +82,8 @@ from services.transport.http.operations import build_readiness_report, run_start
 from services.transport.http.openapi_docs import OpenApiDocsConfig, install_openapi_examples
 from services.transport.http.uvicorn_protocols import VerboseAutoHTTPProtocol
 from services.transport.http.security import build_raw_payload_hash, is_signature_valid, is_timestamp_fresh
+from services.publishing.social_delivery.gohighlevel_client import GoHighLevelClient
+from services.publishing.social_delivery.gohighlevel_social_service import GoHighLevelSocialService
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +98,15 @@ _SENSITIVE_HEADER_NAMES = frozenset(
         "x-ghl-token",
         "x-gohighlevel-access-token",
         "x-wordpress-signature",
+    }
+)
+_SENSITIVE_BODY_FIELDS = frozenset(
+    {
+        "access_token",
+        "refresh_token",
+        "token",
+        "client_secret",
+        "authorization",
     }
 )
 
@@ -117,6 +132,29 @@ class _AdminWordPressSourceUpsertPayload(BaseModel):
     normalized_host: str | None = None
     source_status: str | None = None
     webhook_secret: str | None = None
+
+
+class _MvpGoHighLevelTokenPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    location_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    access_token: str = Field(min_length=1)
+    refresh_token: str | None = ""
+    expires_at: str | None = ""
+
+
+class _MvpGoHighLevelSessionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    location_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+
+
+class _MvpGoHighLevelLocationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    location_id: str = Field(min_length=1)
 
 
 class WordPressWebhookApplication:
@@ -412,6 +450,49 @@ class WordPressWebhookApplication:
             publish_context=publish_context,
         )
 
+    def upsert_gohighlevel_token(
+        self,
+        *,
+        location_id: str,
+        user_id: str,
+        access_token: str,
+        refresh_token: str = "",
+        expires_at: str = "",
+    ):
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.gohighlevel_token_store.upsert_token(
+                location_id=location_id,
+                user_id=user_id,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+            )
+
+    def get_gohighlevel_token(self, *, location_id: str):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.gohighlevel_token_store.get_by_location_id(location_id)
+
+    def require_gohighlevel_access_token(self, *, location_id: str) -> str:
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.gohighlevel_token_store.require_access_token(location_id)
+
+    def test_gohighlevel_connection(self, *, location_id: str):
+        access_token = self.require_gohighlevel_access_token(location_id=location_id)
+        client = GoHighLevelClient(
+            base_url=GO_HIGH_LEVEL_BASE_URL,
+            api_version=GO_HIGH_LEVEL_API_VERSION,
+            timeout_seconds=OUTBOUND_HTTP_TIMEOUT_SECONDS,
+        )
+        try:
+            social_service = GoHighLevelSocialService(client=client)
+            return social_service.list_accounts(
+                location_id=location_id,
+                access_token=access_token,
+            )
+        finally:
+            client.close()
+
     def render_scripted_video(
         self,
         *,
@@ -513,6 +594,12 @@ def create_fastapi_app(
             TrustedHostMiddleware,
             allowed_hosts=list(allowed_hosts),
         )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.runtime = application
     install_openapi_examples(
         app,
@@ -600,6 +687,133 @@ def create_fastapi_app(
     @app.get("/health/ready")
     async def health_ready(request: Request) -> JSONResponse:
         return await _health_ready_response(request)
+
+    @app.post("/mvp/gohighlevel/token", tags=["MVP"])
+    async def upsert_mvp_gohighlevel_token(
+        payload: _MvpGoHighLevelTokenPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        try:
+            token_record = runtime.upsert_gohighlevel_token(
+                location_id=payload.location_id,
+                user_id=payload.user_id,
+                access_token=payload.access_token,
+                refresh_token=payload.refresh_token or "",
+                expires_at=payload.expires_at or "",
+            )
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "GHL_TOKEN_SAVE_FAILED"),
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+
+        log_persistent_event(
+            "mvp.gohighlevel_token_saved",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            location_id=token_record.location_id,
+            user_id=token_record.user_id,
+            has_access_token=bool(token_record.access_token.strip()),
+            has_refresh_token=bool(token_record.refresh_token.strip()),
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "saved",
+                "token": token_record.to_public_dict(),
+            },
+        )
+
+    @app.post("/mvp/gohighlevel/session", tags=["MVP"])
+    async def create_mvp_gohighlevel_session(
+        payload: _MvpGoHighLevelSessionPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        token_record = runtime.get_gohighlevel_token(location_id=payload.location_id)
+        connected = token_record is not None and bool(token_record.access_token.strip())
+        log_persistent_event(
+            "mvp.gohighlevel_session_checked",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            location_id=payload.location_id,
+            user_id=payload.user_id,
+            connected=connected,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "location_id": payload.location_id,
+                "user_id": payload.user_id,
+                "connected": connected,
+                "has_token": connected,
+            },
+        )
+
+    @app.post("/mvp/gohighlevel/test", tags=["MVP"])
+    async def test_mvp_gohighlevel_connection(
+        payload: _MvpGoHighLevelLocationPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        try:
+            accounts = runtime.test_gohighlevel_connection(location_id=payload.location_id)
+        except ResourceNotFoundError as error:
+            return _json_error(
+                404,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                502,
+                str(error),
+                code=getattr(error, "code", "GHL_CONNECTION_TEST_FAILED"),
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+
+        account_payload = [
+            {
+                "id": account.id,
+                "name": account.name,
+                "platform": account.platform,
+                "account_type": account.account_type,
+                "is_expired": account.is_expired,
+            }
+            for account in accounts
+        ]
+        log_persistent_event(
+            "mvp.gohighlevel_connection_tested",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            location_id=payload.location_id,
+            account_count=len(account_payload),
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "location_id": payload.location_id,
+                "account_count": len(account_payload),
+                "accounts": account_payload,
+            },
+        )
 
     @app.get(
         f"{application.admin_access_policy.base_path}/wordpress-sources",
@@ -834,17 +1048,15 @@ def create_fastapi_app(
         )
         timestamp = request.headers.get(runtime.timestamp_header)
         signature = request.headers.get(runtime.signature_header)
-        if not location_id or not access_token:
+        if not location_id:
             missing_headers = []
             if not location_id:
                 missing_headers.append(runtime.gohighlevel_location_id_header)
-            if not access_token:
-                missing_headers.append(runtime.gohighlevel_access_token_header)
             return _json_error(
                 400,
                 "Missing required GoHighLevel webhook headers.",
                 code="MISSING_GHL_HEADERS",
-                hint="Send the GoHighLevel location and access token headers on every webhook request.",
+                hint="Send the GoHighLevel location header on every webhook request.",
                 details={"missing_headers": missing_headers},
             )
 
@@ -919,7 +1131,7 @@ def create_fastapi_app(
         is_authenticated, auth_message, auth_hint = runtime.authenticate_with_details(
             site_id=site_id,
             location_id=location_id,
-            access_token=access_token,
+            access_token=access_token or "",
             timestamp=timestamp or "",
             signature=signature or "",
             raw_body=raw_body,
@@ -975,6 +1187,9 @@ def create_fastapi_app(
             )
 
         try:
+            resolved_access_token = access_token or runtime.require_gohighlevel_access_token(
+                location_id=location_id
+            )
             accepted_delivery = runtime.accept_webhook_delivery(
                 site_id=site_id,
                 property_id=property_id,
@@ -983,7 +1198,7 @@ def create_fastapi_app(
                 publish_context=SocialPublishContext(
                     provider="gohighlevel",
                     location_id=location_id,
-                    access_token=access_token,
+                    access_token=resolved_access_token,
                     platforms=tuple(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
                 ),
             )
@@ -999,7 +1214,7 @@ def create_fastapi_app(
                 persistent_event_type="webhook.acceptance_rejected",
                 tone="warning",
             )
-            status_code = 404 if error.code == "UNKNOWN_WORDPRESS_SITE" else 400
+            status_code = 404 if error.code in {"UNKNOWN_WORDPRESS_SITE", "GHL_TOKEN_NOT_FOUND"} else 400
             return _json_error(
                 status_code,
                 str(error),
@@ -1325,7 +1540,28 @@ def _sanitize_headers_for_logging(headers: dict[str, str] | Any) -> dict[str, st
 def _decode_body_for_logging(raw_body: bytes | None) -> str | None:
     if not raw_body:
         return None
-    return raw_body.decode("utf-8", errors="replace")
+    raw_text = raw_body.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return raw_text
+    redacted = _redact_sensitive_json_values(parsed)
+    return json.dumps(redacted, ensure_ascii=False)
+
+
+def _redact_sensitive_json_values(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: (
+                "<redacted>"
+                if str(key).strip().lower() in _SENSITIVE_BODY_FIELDS
+                else _redact_sensitive_json_values(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_json_values(item) for item in value]
+    return value
 
 
 def _extract_response_body(response: object) -> bytes | None:

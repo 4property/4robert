@@ -25,6 +25,7 @@ ACTIVE_TABLES = frozenset(
         "property_images",
         "property_pipeline_state",
         "webhook_events",
+        "gohighlevel_tokens",
         "job_queue",
         "media_revisions",
         "outbox_events",

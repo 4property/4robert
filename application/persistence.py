@@ -4,6 +4,7 @@ from typing import Protocol
 
 from domain.properties.model import Property
 from repositories.stores.agency_store import AgencyRecord
+from repositories.stores.gohighlevel_token_store import GoHighLevelTokenRecord
 from repositories.stores.wordpress_source_store import WordPressSourceDetailsRecord, WordPressSourceRecord
 from repositories.stores.media_revision_store import MediaRevisionRecord
 from repositories.stores.outbox_event_store import OutboxEventRecord
@@ -341,6 +342,25 @@ class AgencyStore(Protocol):
         ...
 
 
+class GoHighLevelTokenStore(Protocol):
+    def upsert_token(
+        self,
+        *,
+        location_id: str,
+        user_id: str,
+        access_token: str,
+        refresh_token: str = "",
+        expires_at: str = "",
+    ) -> GoHighLevelTokenRecord:
+        ...
+
+    def get_by_location_id(self, location_id: str) -> GoHighLevelTokenRecord | None:
+        ...
+
+    def require_access_token(self, location_id: str) -> str:
+        ...
+
+
 class UnitOfWork(Protocol):
     property_repository: PropertyRepository
     pipeline_state_repository: PropertyPipelineStateRepository
@@ -351,6 +371,7 @@ class UnitOfWork(Protocol):
     scripted_video_store: ScriptedVideoArtifactStore
     wordpress_source_store: WordPressSourceStore
     agency_store: AgencyStore
+    gohighlevel_token_store: GoHighLevelTokenStore
 
     def begin_immediate(self) -> None:
         ...
@@ -364,6 +385,7 @@ class UnitOfWork(Protocol):
 
 __all__ = [
     "AgencyStore",
+    "GoHighLevelTokenStore",
     "JobQueueStore",
     "MediaRevisionStore",
     "OutboxEventStore",
