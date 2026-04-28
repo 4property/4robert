@@ -4,6 +4,7 @@ from pathlib import Path
 
 from application.persistence import UnitOfWork
 from repositories.stores.agency_store import AgencyStore
+from repositories.stores.gohighlevel_token_store import GoHighLevelTokenStore
 from repositories.stores.media_revision_store import MediaRevisionRepository
 from repositories.stores.outbox_event_store import OutboxEventRepository
 from repositories.stores.job_queue_store import PropertyJobRepository
@@ -30,6 +31,7 @@ class DatabaseUnitOfWork:
         self.scripted_video_store = None
         self.wordpress_source_store = None
         self.agency_store = None
+        self.gohighlevel_token_store = None
 
     def begin_immediate(self) -> None:
         if self.session is None:
@@ -78,6 +80,10 @@ class DatabaseUnitOfWork:
             self.database_locator,
             connection=self.connection,
         )
+        self.gohighlevel_token_store = GoHighLevelTokenStore(
+            self.database_locator,
+            connection=self.connection,
+        )
         self.property_repository.__enter__()
         self.pipeline_state_repository.__enter__()
         self.media_revision_store.__enter__()
@@ -87,10 +93,13 @@ class DatabaseUnitOfWork:
         self.scripted_video_store.__enter__()
         self.wordpress_source_store.__enter__()
         self.agency_store.__enter__()
+        self.gohighlevel_token_store.__enter__()
         self.session.commit()
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
+        if self.gohighlevel_token_store is not None:
+            self.gohighlevel_token_store.__exit__(exc_type, exc, exc_tb)
         if self.agency_store is not None:
             self.agency_store.__exit__(exc_type, exc, exc_tb)
         if self.wordpress_source_store is not None:

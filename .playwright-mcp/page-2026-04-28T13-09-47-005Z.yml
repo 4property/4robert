@@ -1,0 +1,554 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: "4"
+      - generic [ref=e7]: 4Reels
+      - img "CKP Estate Agents" [ref=e9]
+      - generic [ref=e10]: CKP Estate Agents
+    - generic [ref=e11]:
+      - link "Reels" [ref=e12] [cursor=pointer]:
+        - /url: /reels
+      - link "Music" [ref=e13] [cursor=pointer]:
+        - /url: /music
+      - link "Social" [ref=e14] [cursor=pointer]:
+        - /url: /social
+      - link "Brand" [ref=e15] [cursor=pointer]:
+        - /url: /brand
+      - link "Defaults" [ref=e16] [cursor=pointer]:
+        - /url: /defaults
+      - link "Automation" [ref=e17] [cursor=pointer]:
+        - /url: /automation
+      - link "Admin" [ref=e18] [cursor=pointer]:
+        - /url: /admin
+      - button "Settings" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+    - generic [ref=e23]:
+      - generic [ref=e24]:
+        - img [ref=e25]
+        - textbox "Search reels, properties…" [ref=e28]
+        - generic [ref=e29]: ⌘K
+      - button "Theme" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - button "Notification settings" [ref=e33] [cursor=pointer]:
+        - img [ref=e34]
+      - button "Help" [ref=e37] [cursor=pointer]:
+        - img [ref=e38]
+      - generic [ref=e42]: GU
+  - generic [ref=e43]:
+    - generic [ref=e44]:
+      - generic [ref=e45]: GHL token saved
+      - generic [ref=e47]: Location loc_test
+      - generic [ref=e48]: User user_test
+    - generic [ref=e49]:
+      - generic [ref=e727]:
+        - img [ref=e728]
+        - text: 2 social accounts available
+      - button "Test backend" [ref=e50] [cursor=pointer]:
+        - img [ref=e730]
+        - text: Test backend
+  - generic [ref=e54]:
+    - generic [ref=e55]:
+      - generic [ref=e56]:
+        - heading "Reels 10 total" [level=1] [ref=e57]:
+          - text: Reels
+          - generic [ref=e58]: 10 total
+        - paragraph [ref=e59]: Automatically generated from your listings. Review, edit or let them publish on their own.
+      - generic [ref=e60]:
+        - button "Export" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+          - text: Export
+        - button "New reel" [ref=e64] [cursor=pointer]:
+          - img [ref=e65]
+          - text: New reel
+    - generic [ref=e67]:
+      - generic [ref=e68]:
+        - generic [ref=e69]: Reels this month
+        - generic [ref=e70]:
+          - generic [ref=e71]: "142"
+          - generic [ref=e72]: "+18"
+      - generic [ref=e73]:
+        - generic [ref=e74]: Published
+        - generic [ref=e75]:
+          - generic [ref=e76]: "5"
+          - generic [ref=e77]: "+4"
+      - generic [ref=e78]:
+        - generic [ref=e79]: Needs approval
+        - generic [ref=e81]: "3"
+      - generic [ref=e82]:
+        - generic [ref=e83]: Rejected
+        - generic [ref=e85]: "2"
+    - generic [ref=e86]:
+      - button "All 10" [ref=e87] [cursor=pointer]:
+        - img [ref=e88]
+        - text: All
+        - generic [ref=e90]: "10"
+      - button "Needs approval 3" [ref=e91] [cursor=pointer]:
+        - img [ref=e92]
+        - text: Needs approval
+        - generic [ref=e95]: "3"
+      - button "Published 5" [ref=e96] [cursor=pointer]:
+        - img [ref=e97]
+        - text: Published
+        - generic [ref=e99]: "5"
+      - button "Rejected 2" [ref=e100] [cursor=pointer]:
+        - img [ref=e101]
+        - text: Rejected
+        - generic [ref=e103]: "2"
+    - generic [ref=e104]:
+      - generic [ref=e105]:
+        - generic [ref=e106]:
+          - img [ref=e107]
+          - textbox "Search by title or address" [ref=e110]
+        - button "Advanced filters" [ref=e111] [cursor=pointer]:
+          - img [ref=e112]
+          - text: Advanced filters
+        - button "Sort" [ref=e114] [cursor=pointer]:
+          - img [ref=e115]
+          - text: Sort
+      - generic [ref=e117]:
+        - button "Grid" [ref=e118] [cursor=pointer]
+        - button "List" [ref=e119] [cursor=pointer]
+    - generic [ref=e120]:
+      - generic [ref=e121] [cursor=pointer]:
+        - generic [ref=e122]:
+          - img "2-bed apt · Cranford Court" [ref=e124]
+          - generic [ref=e125]:
+            - generic [ref=e126]: Needs approval
+            - generic [ref=e128]:
+              - img [ref=e129]
+              - text: 0:36
+          - generic [ref=e132]:
+            - generic [ref=e134]: For sale
+            - generic [ref=e135]:
+              - generic "Instagram Reels" [ref=e136]:
+                - img [ref=e137]
+              - generic "TikTok" [ref=e141]:
+                - img [ref=e142]
+              - generic "YouTube Shorts" [ref=e145]:
+                - img [ref=e146]
+              - generic "Facebook Reels" [ref=e149]:
+                - img [ref=e150]
+        - generic [ref=e152]:
+          - generic [ref=e153]:
+            - generic [ref=e154]:
+              - generic [ref=e155]: 2-bed apt · Cranford Court
+              - generic [ref=e156]: Cranford Court, Stillorgan Road, Dublin 4
+            - generic [ref=e157]: €385,000
+          - generic [ref=e158]:
+            - generic [ref=e159]:
+              - button "Approve" [ref=e160]:
+                - img [ref=e161]
+                - text: Approve
+              - button "Reject" [ref=e163]
+            - generic [ref=e164]: 09:14
+          - generic [ref=e165]:
+            - generic [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]:
+                  - img [ref=e169]
+                  - text: 1.8k
+                - generic [ref=e172]:
+                  - img [ref=e173]
+                  - text: "23"
+                - generic [ref=e176]:
+                  - img [ref=e177]
+                  - text: 1.2%
+              - generic "Instagram Reels" [ref=e180]:
+                - img [ref=e181]
+            - generic [ref=e185]:
+              - generic [ref=e186]:
+                - generic [ref=e187]:
+                  - generic [ref=e188]: "23"
+                  - generic [ref=e189]: clicks · 7d
+                - generic [ref=e190]:
+                  - button "7d" [ref=e191]
+                  - button "30d" [ref=e192]
+              - img [ref=e193]
+      - generic [ref=e197] [cursor=pointer]:
+        - generic [ref=e198]:
+          - img "Luxury penthouse · Docklands" [ref=e200]
+          - generic [ref=e201]:
+            - generic [ref=e202]: Published
+            - generic [ref=e204]:
+              - img [ref=e205]
+              - text: 0:42
+          - generic [ref=e208]:
+            - generic [ref=e210]: For sale
+            - generic [ref=e211]:
+              - generic "Instagram Reels" [ref=e212]:
+                - img [ref=e213]
+              - generic "TikTok" [ref=e217]:
+                - img [ref=e218]
+              - generic "YouTube Shorts" [ref=e221]:
+                - img [ref=e222]
+              - generic "Facebook Reels" [ref=e225]:
+                - img [ref=e226]
+              - generic "Google Business" [ref=e228]:
+                - img [ref=e229]
+        - generic [ref=e234]:
+          - generic [ref=e235]:
+            - generic [ref=e236]:
+              - generic [ref=e237]: Luxury penthouse · Docklands
+              - generic [ref=e238]: Unit 22, Grand Canal Quay, Dublin 2
+            - generic [ref=e239]: €1,450,000
+          - generic [ref=e240]:
+            - generic [ref=e241]:
+              - img [ref=e242]
+              - text: Live on 5 networks
+            - generic [ref=e244]: 08:02
+          - generic [ref=e245]:
+            - generic [ref=e246]:
+              - generic [ref=e247]:
+                - generic [ref=e248]:
+                  - img [ref=e249]
+                  - text: 24k
+                - generic [ref=e252]:
+                  - img [ref=e253]
+                  - text: "412"
+                - generic [ref=e256]:
+                  - img [ref=e257]
+                  - text: 1.7%
+              - generic "Instagram Reels" [ref=e260]:
+                - img [ref=e261]
+            - generic [ref=e265]:
+              - generic [ref=e266]:
+                - generic [ref=e267]:
+                  - generic [ref=e268]: "412"
+                  - generic [ref=e269]: clicks · 7d
+                - generic [ref=e270]:
+                  - button "7d" [ref=e271]
+                  - button "30d" [ref=e272]
+              - img [ref=e273]
+      - generic [ref=e277] [cursor=pointer]:
+        - generic [ref=e278]:
+          - img "2-bed apt · Stoneybatter" [ref=e280]
+          - generic [ref=e281]:
+            - generic [ref=e282]: Needs approval
+            - generic [ref=e284]:
+              - img [ref=e285]
+              - text: 0:28
+          - generic [ref=e288]:
+            - generic [ref=e290]: To let
+            - generic [ref=e291]:
+              - generic "Instagram Reels" [ref=e292]:
+                - img [ref=e293]
+              - generic "TikTok" [ref=e297]:
+                - img [ref=e298]
+        - generic [ref=e301]:
+          - generic [ref=e302]:
+            - generic [ref=e303]:
+              - generic [ref=e304]: 2-bed apt · Stoneybatter
+              - generic [ref=e305]: 4A Manor St, Stoneybatter, Dublin 7
+            - generic [ref=e306]: €2,350 /mo
+          - generic [ref=e307]:
+            - generic [ref=e308]:
+              - button "Approve" [ref=e309]:
+                - img [ref=e310]
+                - text: Approve
+              - button "Reject" [ref=e312]
+            - generic [ref=e313]: 07:45
+          - generic [ref=e314]:
+            - generic [ref=e315]:
+              - generic [ref=e316]:
+                - generic [ref=e317]:
+                  - img [ref=e318]
+                  - text: 6.9k
+                - generic [ref=e321]:
+                  - img [ref=e322]
+                  - text: "148"
+                - generic [ref=e325]:
+                  - img [ref=e326]
+                  - text: 2.1%
+              - generic "TikTok" [ref=e329]:
+                - img [ref=e330]
+            - generic [ref=e333]:
+              - generic [ref=e334]:
+                - generic [ref=e335]:
+                  - generic [ref=e336]: "148"
+                  - generic [ref=e337]: clicks · 7d
+                - generic [ref=e338]:
+                  - button "7d" [ref=e339]
+                  - button "30d" [ref=e340]
+              - img [ref=e341]
+      - generic [ref=e345] [cursor=pointer]:
+        - generic [ref=e346]:
+          - img "4-bed detached · Dalkey" [ref=e348]
+          - generic [ref=e349]:
+            - generic [ref=e350]: Rejected
+            - generic [ref=e352]:
+              - img [ref=e353]
+              - text: 0:40
+          - generic [ref=e358]: For sale
+        - generic [ref=e359]:
+          - generic [ref=e360]:
+            - generic [ref=e361]:
+              - generic [ref=e362]: 4-bed detached · Dalkey
+              - generic [ref=e363]: Sorrento Road, Dalkey, Co. Dublin
+            - generic [ref=e364]: €2,200,000
+          - generic [ref=e365]:
+            - generic [ref=e366]:
+              - img [ref=e367]
+              - text: Not published
+            - generic [ref=e369]: 07:12
+          - generic [ref=e370]:
+            - img [ref=e371]
+            - text: No tracker data yet
+      - generic [ref=e374] [cursor=pointer]:
+        - generic [ref=e375]:
+          - img "Studio · Temple Bar" [ref=e377]
+          - generic [ref=e378]:
+            - generic [ref=e379]: Published
+            - generic [ref=e381]:
+              - img [ref=e382]
+              - text: 0:24
+          - generic [ref=e385]:
+            - generic [ref=e387]: To let
+            - generic [ref=e388]:
+              - generic "Instagram Reels" [ref=e389]:
+                - img [ref=e390]
+              - generic "TikTok" [ref=e394]:
+                - img [ref=e395]
+              - generic "Facebook Reels" [ref=e398]:
+                - img [ref=e399]
+        - generic [ref=e401]:
+          - generic [ref=e402]:
+            - generic [ref=e403]:
+              - generic [ref=e404]: Studio · Temple Bar
+              - generic [ref=e405]: Fleet St, Temple Bar, Dublin 2
+            - generic [ref=e406]: €1,650 /mo
+          - generic [ref=e407]:
+            - generic [ref=e408]:
+              - img [ref=e409]
+              - text: Live on 3 networks
+            - generic [ref=e411]: 18:22
+          - generic [ref=e412]:
+            - generic [ref=e413]:
+              - generic [ref=e414]:
+                - generic [ref=e415]:
+                  - img [ref=e416]
+                  - text: 8.4k
+                - generic [ref=e419]:
+                  - img [ref=e420]
+                  - text: "196"
+                - generic [ref=e423]:
+                  - img [ref=e424]
+                  - text: 2.3%
+              - generic "TikTok" [ref=e427]:
+                - img [ref=e428]
+            - generic [ref=e431]:
+              - generic [ref=e432]:
+                - generic [ref=e433]:
+                  - generic [ref=e434]: "196"
+                  - generic [ref=e435]: clicks · 7d
+                - generic [ref=e436]:
+                  - button "7d" [ref=e437]
+                  - button "30d" [ref=e438]
+              - img [ref=e439]
+      - generic [ref=e443] [cursor=pointer]:
+        - generic [ref=e444]:
+          - img "3-bed terrace · Phibsborough" [ref=e446]
+          - generic [ref=e447]:
+            - generic [ref=e448]: Published
+            - generic [ref=e450]:
+              - img [ref=e451]
+              - text: 0:38
+          - generic [ref=e454]:
+            - generic [ref=e456]: Sale agreed
+            - generic [ref=e457]:
+              - generic "Instagram Reels" [ref=e458]:
+                - img [ref=e459]
+              - generic "Facebook Reels" [ref=e463]:
+                - img [ref=e464]
+              - generic "Google Business" [ref=e466]:
+                - img [ref=e467]
+        - generic [ref=e472]:
+          - generic [ref=e473]:
+            - generic [ref=e474]:
+              - generic [ref=e475]: 3-bed terrace · Phibsborough
+              - generic [ref=e476]: Connaught St, Phibsborough, Dublin 7
+            - generic [ref=e477]: Sale Agreed
+          - generic [ref=e478]:
+            - generic [ref=e479]:
+              - img [ref=e480]
+              - text: Live on 3 networks
+            - generic [ref=e482]: 14:05
+          - generic [ref=e483]:
+            - generic [ref=e484]:
+              - generic [ref=e485]:
+                - generic [ref=e486]:
+                  - img [ref=e487]
+                  - text: 11k
+                - generic [ref=e490]:
+                  - img [ref=e491]
+                  - text: "87"
+                - generic [ref=e494]:
+                  - img [ref=e495]
+                  - text: 0.8%
+              - generic "Facebook Reels" [ref=e498]:
+                - img [ref=e499]
+            - generic [ref=e501]:
+              - generic [ref=e502]:
+                - generic [ref=e503]:
+                  - generic [ref=e504]: "87"
+                  - generic [ref=e505]: clicks · 7d
+                - generic [ref=e506]:
+                  - button "7d" [ref=e507]
+                  - button "30d" [ref=e508]
+              - img [ref=e509]
+      - generic [ref=e513] [cursor=pointer]:
+        - generic [ref=e514]:
+          - img "5-bed · Howth sea view" [ref=e516]
+          - generic [ref=e517]:
+            - generic [ref=e518]: Needs approval
+            - generic [ref=e520]:
+              - img [ref=e521]
+              - text: 0:48
+          - generic [ref=e524]:
+            - generic [ref=e526]: For sale
+            - generic [ref=e527]:
+              - generic "Instagram Reels" [ref=e528]:
+                - img [ref=e529]
+              - generic "TikTok" [ref=e533]:
+                - img [ref=e534]
+              - generic "YouTube Shorts" [ref=e537]:
+                - img [ref=e538]
+              - generic "Facebook Reels" [ref=e541]:
+                - img [ref=e542]
+              - generic "LinkedIn" [ref=e544]:
+                - img [ref=e545]
+        - generic [ref=e548]:
+          - generic [ref=e549]:
+            - generic [ref=e550]:
+              - generic [ref=e551]: 5-bed · Howth sea view
+              - generic [ref=e552]: Balscadden Rd, Howth, Co. Dublin
+            - generic [ref=e553]: €3,100,000
+          - generic [ref=e554]:
+            - generic [ref=e555]:
+              - button "Approve" [ref=e556]:
+                - img [ref=e557]
+                - text: Approve
+              - button "Reject" [ref=e559]
+            - generic [ref=e560]: 11:30
+          - generic [ref=e561]:
+            - img [ref=e562]
+            - text: No tracker data yet
+      - generic [ref=e565] [cursor=pointer]:
+        - generic [ref=e566]:
+          - img "1-bed · Smithfield" [ref=e568]
+          - generic [ref=e569]:
+            - generic [ref=e570]: Published
+            - generic [ref=e572]:
+              - img [ref=e573]
+              - text: 0:22
+          - generic [ref=e576]:
+            - generic [ref=e578]: Let agreed
+            - generic "Instagram Reels" [ref=e580]:
+              - img [ref=e581]
+        - generic [ref=e585]:
+          - generic [ref=e586]:
+            - generic [ref=e587]:
+              - generic [ref=e588]: 1-bed · Smithfield
+              - generic [ref=e589]: Smithfield Market, Dublin 7
+            - generic [ref=e590]: Let Agreed
+          - generic [ref=e591]:
+            - generic [ref=e592]:
+              - img [ref=e593]
+              - text: Live on 1 network
+            - generic [ref=e595]: 09:48
+          - generic [ref=e596]:
+            - generic [ref=e597]:
+              - generic [ref=e598]:
+                - generic [ref=e599]:
+                  - img [ref=e600]
+                  - text: 2.1k
+                - generic [ref=e603]:
+                  - img [ref=e604]
+                  - text: "38"
+                - generic [ref=e607]:
+                  - img [ref=e608]
+                  - text: 1.8%
+              - generic "Instagram Reels" [ref=e611]:
+                - img [ref=e612]
+            - generic [ref=e616]:
+              - generic [ref=e617]:
+                - generic [ref=e618]:
+                  - generic [ref=e619]: "38"
+                  - generic [ref=e620]: clicks · 7d
+                - generic [ref=e621]:
+                  - button "7d" [ref=e622]
+                  - button "30d" [ref=e623]
+              - img [ref=e624]
+      - generic [ref=e628] [cursor=pointer]:
+        - generic [ref=e629]:
+          - img "3-bed bungalow · Malahide" [ref=e631]
+          - generic [ref=e632]:
+            - generic [ref=e633]: Published
+            - generic [ref=e635]:
+              - img [ref=e636]
+              - text: 0:34
+          - generic [ref=e639]:
+            - generic [ref=e641]: Sold
+            - generic [ref=e642]:
+              - generic "Instagram Reels" [ref=e643]:
+                - img [ref=e644]
+              - generic "Facebook Reels" [ref=e648]:
+                - img [ref=e649]
+              - generic "Google Business" [ref=e651]:
+                - img [ref=e652]
+        - generic [ref=e657]:
+          - generic [ref=e658]:
+            - generic [ref=e659]:
+              - generic [ref=e660]: 3-bed bungalow · Malahide
+              - generic [ref=e661]: Seabury Dr, Malahide, Co. Dublin
+            - generic [ref=e662]: SOLD
+          - generic [ref=e663]:
+            - generic [ref=e664]:
+              - img [ref=e665]
+              - text: Live on 3 networks
+            - generic [ref=e667]: 16:10
+          - generic [ref=e668]:
+            - generic [ref=e669]:
+              - generic [ref=e670]:
+                - generic [ref=e671]:
+                  - img [ref=e672]
+                  - text: 16k
+                - generic [ref=e675]:
+                  - img [ref=e676]
+                  - text: "271"
+                - generic [ref=e679]:
+                  - img [ref=e680]
+                  - text: 1.7%
+              - generic "Facebook Reels" [ref=e683]:
+                - img [ref=e684]
+            - generic [ref=e686]:
+              - generic [ref=e687]:
+                - generic [ref=e688]:
+                  - generic [ref=e689]: "271"
+                  - generic [ref=e690]: clicks · 7d
+                - generic [ref=e691]:
+                  - button "7d" [ref=e692]
+                  - button "30d" [ref=e693]
+              - img [ref=e694]
+      - generic [ref=e698] [cursor=pointer]:
+        - generic [ref=e699]:
+          - img "Commercial unit · IFSC" [ref=e701]
+          - generic [ref=e702]:
+            - generic [ref=e703]: Rejected
+            - generic [ref=e705]:
+              - img [ref=e706]
+              - text: 0:30
+          - generic [ref=e711]: To let
+        - generic [ref=e712]:
+          - generic [ref=e713]:
+            - generic [ref=e714]:
+              - generic [ref=e715]: Commercial unit · IFSC
+              - generic [ref=e716]: Mayor St Lower, IFSC, Dublin 1
+            - generic [ref=e717]: €4,500 /mo
+          - generic [ref=e718]:
+            - generic [ref=e719]:
+              - img [ref=e720]
+              - text: Not published
+            - generic [ref=e722]: 13:25
+          - generic [ref=e723]:
+            - img [ref=e724]
+            - text: No tracker data yet
