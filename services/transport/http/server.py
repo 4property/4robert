@@ -600,6 +600,13 @@ class WordPressWebhookApplication:
         with self.unit_of_work_factory() as unit_of_work:
             return unit_of_work.wordpress_source_store.list_sources_for_agency(agency_id)
 
+    def list_agency_reels(self, *, agency_id: str, limit: int = 50):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.property_repository.list_recent_for_agency(
+                agency_id=agency_id,
+                limit=limit,
+            )
+
     def delete_wordpress_source(self, *, wordpress_source_id: str) -> bool:
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
@@ -1668,6 +1675,139 @@ def create_fastapi_app(
             content={"status": "saved", "reel_profile": record.to_public_dict()},
         )
 
+    # ── Admin: agency content surfaces ──────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reels",
+        tags=["Admin"],
+    )
+    async def list_admin_agency_reels(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        agency = runtime.get_agency(agency_id=agency_id)
+        if agency is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        try:
+            limit = int(request.query_params.get("limit") or 50)
+        except ValueError:
+            limit = 50
+        items = runtime.list_agency_reels(agency_id=agency_id, limit=limit)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "items": [_serialize_agency_reel(item) for item in items],
+                "count": len(items),
+            },
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/social-accounts",
+        tags=["Admin"],
+    )
+    async def list_admin_agency_social_accounts(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        record = runtime.get_ghl_connection_by_agency(agency_id=agency_id)
+        if record is None or not record.access_token.strip():
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": False,
+                    "agency_id": agency_id,
+                    "connected": False,
+                    "items": [],
+                    "count": 0,
+                    "reason": "GHL_CONNECTION_NOT_FOUND",
+                },
+            )
+        try:
+            accounts = runtime.test_gohighlevel_connection(
+                location_id=record.location_id,
+                access_token=record.access_token,
+            )
+        except ApplicationError as error:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": False,
+                    "agency_id": agency_id,
+                    "connected": True,
+                    "location_id": record.location_id,
+                    "items": [],
+                    "count": 0,
+                    "reason": getattr(error, "code", "GHL_CONNECTION_TEST_FAILED"),
+                    "error": str(error),
+                },
+            )
+        items = [
+            {
+                "id": account.id,
+                "name": account.name,
+                "platform": account.platform,
+                "account_type": account.account_type,
+                "is_expired": account.is_expired,
+            }
+            for account in accounts
+        ]
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "agency_id": agency_id,
+                "connected": True,
+                "location_id": record.location_id,
+                "count": len(items),
+                "items": items,
+            },
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/music-tracks",
+        tags=["Admin"],
+    )
+    async def list_admin_agency_music_tracks(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        # The music library backing table is not implemented yet; the API surface
+        # is wired so the frontend can render an empty state instead of mock data.
+        return JSONResponse(
+            status_code=200,
+            content={
+                "items": [],
+                "count": 0,
+                "agency_id": agency_id,
+                "implemented": False,
+                "message": "Music library is not yet backed by a database table.",
+            },
+        )
+
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -2317,6 +2457,37 @@ def _json_error(
     if details:
         payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
+
+
+def _serialize_agency_reel(item: object) -> dict[str, object]:
+    return {
+        "site_id": getattr(item, "site_id", ""),
+        "source_property_id": getattr(item, "source_property_id", 0),
+        "slug": getattr(item, "slug", ""),
+        "title": getattr(item, "title", None),
+        "link": getattr(item, "link", None),
+        "price": getattr(item, "price", None),
+        "property_status": getattr(item, "property_status", None),
+        "property_type_label": getattr(item, "property_type_label", None),
+        "property_area_label": getattr(item, "property_area_label", None),
+        "property_county_label": getattr(item, "property_county_label", None),
+        "bedrooms": getattr(item, "bedrooms", None),
+        "bathrooms": getattr(item, "bathrooms", None),
+        "featured_image_url": getattr(item, "featured_image_url", None),
+        "agent_name": getattr(item, "agent_name", None),
+        "workflow_state": getattr(item, "workflow_state", ""),
+        "publish_status": getattr(item, "publish_status", ""),
+        "render_status": getattr(item, "render_status", ""),
+        "last_published_location_id": getattr(item, "last_published_location_id", ""),
+        "current_revision_id": getattr(item, "current_revision_id", ""),
+        "pipeline_updated_at": getattr(item, "pipeline_updated_at", ""),
+        "pipeline_created_at": getattr(item, "pipeline_created_at", ""),
+        "fetched_at": getattr(item, "fetched_at", ""),
+        "revision_media_path": getattr(item, "revision_media_path", ""),
+        "revision_metadata_path": getattr(item, "revision_metadata_path", ""),
+        "revision_artifact_kind": getattr(item, "revision_artifact_kind", ""),
+        "revision_created_at": getattr(item, "revision_created_at", ""),
+    }
 
 
 def _serialize_agency(agency: object) -> dict[str, object]:
