@@ -1606,6 +1606,25 @@ class CompositeMediaPublisher:
         agency_review_required = bool(
             getattr(context.publish_context, "approval_required", False)
         )
+        logger.info(
+            format_console_block(
+                "Publish Gating Decision",
+                format_detail_line("Site ID", context.site_id),
+                format_detail_line("Property ID", context.property.id),
+                format_detail_line(
+                    "Agency approval_required",
+                    "Yes" if agency_review_required else "No",
+                ),
+                format_detail_line(
+                    "REVIEW_WORKFLOW_ENABLED env",
+                    "Yes" if REVIEW_WORKFLOW_ENABLED else "No",
+                ),
+                format_detail_line(
+                    "Will hold for review",
+                    "Yes" if (agency_review_required or REVIEW_WORKFLOW_ENABLED) else "No",
+                ),
+            )
+        )
         if agency_review_required or REVIEW_WORKFLOW_ENABLED:
             self._persist_workflow_transition(
                 context,

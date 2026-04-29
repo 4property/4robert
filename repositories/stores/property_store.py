@@ -186,6 +186,36 @@ class PropertyStore(PostgresRepositoryBase):
         super().__init__(database_locator, connection=connection)
         self.base_dir = Path(base_dir).expanduser().resolve()
 
+    def get_property_raw_payload(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+    ) -> str | None:
+        """Returns the original WordPress JSON payload used to create the property.
+
+        Stored verbatim in `properties.raw_json` when the webhook is processed.
+        Used by the Approve flow to re-enqueue a publish job without needing
+        WordPress to repost the listing.
+        """
+        normalized_site_id = str(site_id or "").strip().lower()
+        row = self.connection.execute(
+            f"""
+            SELECT raw_json
+            FROM {PROPERTY_TABLE_NAME}
+            WHERE site_id = :site_id
+                AND source_property_id = :source_property_id
+            """,
+            {
+                "site_id": normalized_site_id,
+                "source_property_id": int(source_property_id),
+            },
+        ).fetchone()
+        if row is None:
+            return None
+        raw_value = str(row["raw_json"] or "").strip()
+        return raw_value or None
+
     def list_property_images(
         self,
         *,

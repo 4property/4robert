@@ -1127,6 +1127,80 @@ class WordPressWebhookApplication:
             return None
         return candidate_path
 
+    def enqueue_reel_publish(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+    ):
+        """Re-enqueue a publish job for an existing reel.
+
+        Used by the Approve endpoint: we synthesize a fresh job from the
+        stored WordPress payload, force `approval_required=False` on the
+        publish context so the pipeline doesn't park it back in
+        `awaiting_review`, and let the dispatcher pick it up. Because the
+        rendered media is already on disk the pipeline will detect that no
+        re-render is needed and fall straight through to
+        `publish_existing_media`.
+        """
+        normalized_site_id = str(site_id or "").strip().lower()
+        # 1. Load the stored WordPress payload.
+        with self.unit_of_work_factory() as unit_of_work:
+            raw_payload = unit_of_work.property_repository.get_property_raw_payload(
+                site_id=normalized_site_id,
+                source_property_id=int(source_property_id),
+            )
+        if not raw_payload:
+            return None
+
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+
+        # 2. Build the publish context using the agency's saved GHL connection
+        #    and reel profile, but *force* approval_required to False —
+        #    that's what "Approve" means.
+        ghl_connection = self.get_ghl_connection_by_agency(agency_id=agency_id)
+        if ghl_connection is None or not ghl_connection.access_token.strip():
+            return None
+        reel_profile = self.get_reel_profile(agency_id=agency_id)
+        resolved_platforms = tuple(
+            reel_profile.platforms
+            if reel_profile is not None and reel_profile.platforms
+            else SOCIAL_PUBLISHING_DEFAULT_PLATFORMS
+        )
+        social_templates: tuple[tuple[str, str], ...] = ()
+        if reel_profile is not None and isinstance(reel_profile.extra_settings, dict):
+            raw_templates = reel_profile.extra_settings.get("social_templates")
+            if isinstance(raw_templates, dict):
+                social_templates = tuple(
+                    (str(key).strip().lower(), str(value))
+                    for key, value in raw_templates.items()
+                    if str(key).strip()
+                )
+        publish_context = SocialPublishContext(
+            provider="gohighlevel",
+            location_id=ghl_connection.location_id,
+            access_token=ghl_connection.access_token,
+            platforms=resolved_platforms,
+            approval_required=False,
+            social_templates=social_templates,
+        )
+
+        # 3. Hash and enqueue.
+        raw_payload_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+        return self.acceptance_service.accept_delivery(
+            site_id=normalized_site_id,
+            property_id=int(source_property_id),
+            raw_payload_hash=raw_payload_hash,
+            payload=payload,
+            publish_context=publish_context,
+        )
+
     def list_reel_property_images(
         self,
         *,
@@ -3235,10 +3309,15 @@ def create_fastapi_app(
         tags=["Admin · Content"],
         summary="Approve a reel that is awaiting review",
         description=(
-            "Marks the reel's pipeline state as `approved` and the "
-            "publish status as `published`. The actual social posting "
-            "happens through GoHighLevel via the regular pipeline; this "
-            "endpoint only flips the workflow gate."
+            "Two-step action.\n\n"
+            "1. The reel's pipeline row is moved to `workflow_state='approved'` "
+            "so the editor reflects the new gate immediately.\n"
+            "2. A fresh publish job is enqueued from the stored WordPress "
+            "payload, with `approval_required=False` forced on the "
+            "`SocialPublishContext`. The dispatcher picks it up; the "
+            "pipeline detects the rendered MP4 already exists and falls "
+            "straight through to `publish_existing_media`, posting to "
+            "GoHighLevel without re-rendering."
         ),
     )
     async def approve_admin_agency_reel(
@@ -3263,7 +3342,7 @@ def create_fastapi_app(
             site_id=site_id,
             source_property_id=source_property_id,
             workflow_state="approved",
-            publish_status="published",
+            publish_status="pending_publish",
         )
         if updated is None:
             return _json_error(
@@ -3276,9 +3355,36 @@ def create_fastapi_app(
                     "source_property_id": source_property_id,
                 },
             )
+
+        accepted = runtime.enqueue_reel_publish(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if accepted is None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "status": "approved",
+                    "publish_enqueued": False,
+                    "reason": "PUBLISH_PREREQUISITES_MISSING",
+                    "hint": (
+                        "The reel was marked as approved, but no publish job "
+                        "was queued because either the original WordPress "
+                        "payload or the agency's GHL connection is missing."
+                    ),
+                    "reel": _serialize_agency_reel(updated),
+                },
+            )
         return JSONResponse(
             status_code=200,
-            content={"status": "approved", "reel": _serialize_agency_reel(updated)},
+            content={
+                "status": "approved",
+                "publish_enqueued": True,
+                "event_id": accepted.event_id,
+                "job_id": accepted.job_id,
+                "reel": _serialize_agency_reel(updated),
+            },
         )
 
     @app.post(
