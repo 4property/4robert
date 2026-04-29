@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 APPLICATION_ROOT = Path(__file__).resolve().parents[2]
 if str(APPLICATION_ROOT) not in sys.path:
@@ -40,6 +45,33 @@ class _RecordingDispatcher:
         return self.accepting_jobs
 
 
+def _encrypt_cryptojs_payload(
+    payload: dict[str, object],
+    *,
+    shared_secret: str,
+    salt: bytes = b"12345678",
+) -> str:
+    key, iv = _derive_cryptojs_key_and_iv(
+        password=shared_secret.encode("utf-8"),
+        salt=salt,
+    )
+    padder = padding.PKCS7(128).padder()
+    plaintext = json.dumps(payload).encode("utf-8")
+    padded_plaintext = padder.update(plaintext) + padder.finalize()
+    encryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    ciphertext = encryptor.update(padded_plaintext) + encryptor.finalize()
+    return base64.b64encode(b"Salted__" + salt + ciphertext).decode("ascii")
+
+
+def _derive_cryptojs_key_and_iv(*, password: bytes, salt: bytes) -> tuple[bytes, bytes]:
+    derived = b""
+    previous = b""
+    while len(derived) < 48:
+        previous = hashlib.md5(previous + password + salt).digest()  # noqa: S324
+        derived += previous
+    return derived[:32], derived[32:48]
+
+
 class HttpTransportIntegrationTests(unittest.TestCase):
     def _build_client(
         self,
@@ -50,6 +82,7 @@ class HttpTransportIntegrationTests(unittest.TestCase):
         readiness: dict[str, object] | None = None,
         admin_api_token: str = "test-admin-token",
         admin_api_disable_auth_for_testing: bool = False,
+        gohighlevel_app_shared_secret: str = "",
         webhook_auto_provision_unknown_sites_for_testing: bool = False,
     ) -> TestClient:
         active_dispatcher = dispatcher or _RecordingDispatcher()
@@ -63,6 +96,7 @@ class HttpTransportIntegrationTests(unittest.TestCase):
             admin_api_enabled=True,
             admin_api_token=admin_api_token,
             admin_api_disable_auth_for_testing=admin_api_disable_auth_for_testing,
+            gohighlevel_app_shared_secret=gohighlevel_app_shared_secret,
             webhook_auto_provision_unknown_sites_for_testing=webhook_auto_provision_unknown_sites_for_testing,
         )
         runtime.start = lambda: None
@@ -237,6 +271,55 @@ class HttpTransportIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(session_response.status_code, 200)
                 self.assertFalse(session_response.json()["connected"])
+
+    def test_mvp_gohighlevel_context_decrypts_custom_page_payload(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                shared_secret = "test-shared-secret"
+                client = self._build_client(
+                    workspace_dir,
+                    database.url,
+                    gohighlevel_app_shared_secret=shared_secret,
+                )
+                encrypted_payload = _encrypt_cryptojs_payload(
+                    {
+                        "userId": "user-1",
+                        "companyId": "agency-1",
+                        "role": "admin",
+                        "type": "agency",
+                        "activeLocation": "loc-1",
+                        "userName": "Jane Admin",
+                        "email": "jane@example.test",
+                    },
+                    shared_secret=shared_secret,
+                )
+
+                response = client.post(
+                    "/mvp/gohighlevel/context",
+                    json={"encryptedData": encrypted_payload},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["location_id"], "loc-1")
+                self.assertEqual(payload["user_id"], "user-1")
+                self.assertEqual(payload["user_name"], "Jane Admin")
+                self.assertEqual(payload["email"], "jane@example.test")
+                self.assertEqual(payload["source"], "ghl-sso-decrypted")
+
+    def test_mvp_gohighlevel_context_requires_shared_secret(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            with temporary_postgres_schema(DATABASE_URL) as database:
+                client = self._build_client(workspace_dir, database.url)
+
+                response = client.post(
+                    "/mvp/gohighlevel/context",
+                    json={"encryptedData": "not-real"},
+                )
+
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.json()["code"], "GHL_CONTEXT_DECRYPT_FAILED")
 
     def test_webhook_without_access_token_header_requires_saved_mvp_token(self) -> None:
         with temporary_workspace() as workspace_dir:

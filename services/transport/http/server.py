@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import secrets
@@ -13,7 +15,9 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from application.admin import UpsertWordPressSourceRequest, WordPressSourceAdminService
@@ -33,6 +37,7 @@ from settings import (
     ADMIN_API_TOKEN,
     DATABASE_URL,
     GO_HIGH_LEVEL_API_VERSION,
+    GO_HIGH_LEVEL_APP_SHARED_SECRET,
     GO_HIGH_LEVEL_BASE_URL,
     LOG_LEVEL,
     OUTBOUND_HTTP_TIMEOUT_SECONDS,
@@ -105,6 +110,8 @@ _SENSITIVE_BODY_FIELDS = frozenset(
         "access_token",
         "refresh_token",
         "token",
+        "encrypted_data",
+        "encryptedData",
         "client_secret",
         "authorization",
     }
@@ -157,6 +164,15 @@ class _MvpGoHighLevelLocationPayload(BaseModel):
     location_id: str = Field(min_length=1)
 
 
+class _MvpGoHighLevelContextPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
+
+    encrypted_data: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("encrypted_data", "encryptedData"),
+    )
+
+
 class WordPressWebhookApplication:
     def __init__(
         self,
@@ -180,6 +196,7 @@ class WordPressWebhookApplication:
         admin_api_base_path: str = ADMIN_API_BASE_PATH,
         admin_api_token: str = ADMIN_API_TOKEN,
         admin_api_disable_auth_for_testing: bool = ADMIN_API_DISABLE_AUTH_FOR_TESTING,
+        gohighlevel_app_shared_secret: str = GO_HIGH_LEVEL_APP_SHARED_SECRET,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -229,6 +246,7 @@ class WordPressWebhookApplication:
             bearer_token=str(admin_api_token or ""),
             disable_auth_for_testing=bool(admin_api_disable_auth_for_testing),
         )
+        self.gohighlevel_app_shared_secret = str(gohighlevel_app_shared_secret or "")
         self.shutdown_timeout_seconds = shutdown_timeout_seconds
         self.timestamp_tolerance_seconds = timestamp_tolerance_seconds
         self.max_payload_bytes = max_payload_bytes
@@ -502,6 +520,12 @@ class WordPressWebhookApplication:
         finally:
             client.close()
 
+    def decrypt_gohighlevel_user_context(self, *, encrypted_data: str) -> dict[str, Any]:
+        return _decrypt_gohighlevel_user_context(
+            encrypted_data=encrypted_data,
+            shared_secret=self.gohighlevel_app_shared_secret,
+        )
+
     def render_scripted_video(
         self,
         *,
@@ -533,6 +557,7 @@ class WordPressWebhookServer:
         admin_api_base_path: str = ADMIN_API_BASE_PATH,
         admin_api_token: str = ADMIN_API_TOKEN,
         admin_api_disable_auth_for_testing: bool = ADMIN_API_DISABLE_AUTH_FOR_TESTING,
+        gohighlevel_app_shared_secret: str = GO_HIGH_LEVEL_APP_SHARED_SECRET,
         shutdown_timeout_seconds: int = WEBHOOK_SHUTDOWN_TIMEOUT_SECONDS,
         timestamp_tolerance_seconds: int = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
         max_payload_bytes: int = WEBHOOK_MAX_PAYLOAD_BYTES,
@@ -563,6 +588,7 @@ class WordPressWebhookServer:
             admin_api_base_path=admin_api_base_path,
             admin_api_token=admin_api_token,
             admin_api_disable_auth_for_testing=admin_api_disable_auth_for_testing,
+            gohighlevel_app_shared_secret=gohighlevel_app_shared_secret,
             shutdown_timeout_seconds=shutdown_timeout_seconds,
             timestamp_tolerance_seconds=timestamp_tolerance_seconds,
             max_payload_bytes=max_payload_bytes,
@@ -792,6 +818,67 @@ def create_fastapi_app(
             content={
                 "status": "deleted",
                 "location_id": location_id,
+            },
+        )
+
+    @app.post("/mvp/gohighlevel/context", tags=["MVP"])
+    async def resolve_mvp_gohighlevel_context(
+        payload: _MvpGoHighLevelContextPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        try:
+            user_data = runtime.decrypt_gohighlevel_user_context(
+                encrypted_data=payload.encrypted_data,
+            )
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                503,
+                str(error),
+                code=getattr(error, "code", "GHL_CONTEXT_DECRYPT_FAILED"),
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+
+        resolved_context = _extract_gohighlevel_user_context_fields(user_data)
+        if not resolved_context["location_id"]:
+            return _json_error(
+                400,
+                "The decrypted GoHighLevel context does not include activeLocation.",
+                code="GHL_CONTEXT_LOCATION_MISSING",
+                hint=(
+                    "Open the app from a sub-account/location custom page. Agency context "
+                    "does not include activeLocation."
+                ),
+                details={
+                    "context_type": resolved_context["type"],
+                    "has_user_id": bool(resolved_context["user_id"]),
+                },
+            )
+
+        log_persistent_event(
+            "mvp.gohighlevel_context_resolved",
+            request_id=_get_request_id(request),
+            client=_format_client(request),
+            location_id=resolved_context["location_id"],
+            user_id=resolved_context["user_id"],
+            context_type=resolved_context["type"],
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "source": "ghl-sso-decrypted",
+                **resolved_context,
+                "user_data": user_data,
             },
         )
 
@@ -1579,6 +1666,102 @@ def run_wordpress_webhook_server(
         log_config=None,
         server_header=False,
     )
+
+
+def _decrypt_gohighlevel_user_context(
+    *,
+    encrypted_data: str,
+    shared_secret: str,
+) -> dict[str, Any]:
+    normalized_secret = str(shared_secret or "").strip()
+    if not normalized_secret:
+        raise ApplicationError(
+            "GoHighLevel app shared secret is not configured.",
+            hint=(
+                "Set GO_HIGH_LEVEL_APP_SHARED_SECRET to the Marketplace app Shared Secret "
+                "from Advanced Settings > Auth, then restart the backend."
+            ),
+        )
+
+    try:
+        encrypted_bytes = base64.b64decode(str(encrypted_data).strip(), validate=True)
+    except Exception as exc:
+        raise ValidationError(
+            "The GoHighLevel user context payload is not valid base64.",
+            code="GHL_CONTEXT_INVALID_BASE64",
+            hint="Send the raw payload returned by REQUEST_USER_DATA_RESPONSE as encryptedData.",
+            cause=exc,
+        ) from exc
+
+    if len(encrypted_bytes) <= 16 or not encrypted_bytes.startswith(b"Salted__"):
+        raise ValidationError(
+            "The GoHighLevel user context payload is not in the expected encrypted format.",
+            code="GHL_CONTEXT_INVALID_FORMAT",
+            hint="Send the encrypted string returned by HighLevel postMessage, not a parsed object.",
+        )
+
+    salt = encrypted_bytes[8:16]
+    ciphertext = encrypted_bytes[16:]
+    key, iv = _derive_cryptojs_key_and_iv(
+        password=normalized_secret.encode("utf-8"),
+        salt=salt,
+    )
+
+    try:
+        decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+        unpadder = padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+        parsed = json.loads(plaintext.decode("utf-8"))
+    except Exception as exc:
+        raise ValidationError(
+            "Failed to decrypt the GoHighLevel user context payload.",
+            code="GHL_CONTEXT_DECRYPT_FAILED",
+            hint=(
+                "Verify GO_HIGH_LEVEL_APP_SHARED_SECRET matches the Shared Secret on the "
+                "same Marketplace app/version that renders the custom page."
+            ),
+            cause=exc,
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ValidationError(
+            "The decrypted GoHighLevel user context payload is not a JSON object.",
+            code="GHL_CONTEXT_INVALID_JSON",
+        )
+
+    return parsed
+
+
+def _derive_cryptojs_key_and_iv(*, password: bytes, salt: bytes) -> tuple[bytes, bytes]:
+    derived = b""
+    previous = b""
+    while len(derived) < 48:
+        previous = hashlib.md5(previous + password + salt).digest()  # noqa: S324
+        derived += previous
+    return derived[:32], derived[32:48]
+
+
+def _extract_gohighlevel_user_context_fields(user_data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "location_id": str(
+            user_data.get("activeLocation")
+            or user_data.get("locationId")
+            or user_data.get("location_id")
+            or ""
+        ).strip(),
+        "user_id": str(
+            user_data.get("userId")
+            or user_data.get("user_id")
+            or user_data.get("id")
+            or ""
+        ).strip(),
+        "user_name": str(user_data.get("userName") or user_data.get("user_name") or "").strip(),
+        "email": str(user_data.get("email") or "").strip(),
+        "company_id": str(user_data.get("companyId") or user_data.get("company_id") or "").strip(),
+        "type": str(user_data.get("type") or "").strip(),
+        "role": str(user_data.get("role") or "").strip(),
+    }
 
 
 def _get_runtime(request: Request) -> WordPressWebhookApplication:
