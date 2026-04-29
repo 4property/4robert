@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -127,31 +127,90 @@ class _AdminAccessPolicy:
 
 
 class _AdminWordPressSourceUpsertPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for the global `PUT /admin/wordpress-sources/{site_id}` upsert.
 
-    source_name: str = Field(min_length=1)
-    agency_id: str | None = None
-    agency_name: str | None = None
-    agency_slug: str | None = None
-    agency_timezone: str | None = None
-    agency_status: str | None = None
-    site_url: str | None = None
-    normalized_host: str | None = None
-    source_status: str | None = None
-    webhook_secret: str | None = None
+    The site_id is the value WordPress posts as `rest_domain` in the
+    webhook body. If `agency_id` is omitted the endpoint creates a
+    placeholder agency on the fly.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "source_name": "Janet Carroll",
+                "agency_id": "0c0a2c63-9d24-4f1f-8c2b-22b6a09e4b3e",
+                "site_url": "https://janetcarroll.ie",
+                "source_status": "active",
+            }
+        },
+    )
+
+    source_name: str = Field(
+        min_length=1,
+        description="Human-readable name of the WordPress site.",
+        examples=["Janet Carroll"],
+    )
+    agency_id: str | None = Field(
+        default=None,
+        description="UUID of the owning agency. Leave blank to auto-create.",
+    )
+    agency_name: str | None = Field(default=None, description="Used when auto-creating the agency.")
+    agency_slug: str | None = Field(default=None, description="Used when auto-creating the agency.")
+    agency_timezone: str | None = Field(default=None, examples=["Europe/Dublin"])
+    agency_status: str | None = Field(default=None, examples=["active"])
+    site_url: str | None = Field(
+        default=None,
+        description="Canonical site URL (used for display only).",
+        examples=["https://janetcarroll.ie"],
+    )
+    normalized_host: str | None = Field(
+        default=None,
+        description="Hostname stored verbatim. Defaults to the lowercased `site_id`.",
+    )
+    source_status: str | None = Field(default=None, examples=["active", "paused"])
+    webhook_secret: str | None = Field(
+        default=None,
+        description="Optional shared secret to require when WEBHOOK_DISABLE_SECURITY is off.",
+    )
 
 
 class _AdminAgencyCreatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `POST /admin/agencies`."""
 
-    name: str = Field(min_length=1)
-    slug: str | None = None
-    timezone: str | None = None
-    status: str | None = None
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "name": "CKP Estate Agents",
+                "slug": "ckp",
+                "timezone": "Europe/Dublin",
+                "status": "active",
+            }
+        },
+    )
+
+    name: str = Field(min_length=1, description="Display name of the agency.")
+    slug: str | None = Field(default=None, description="URL-safe identifier; derived from `name` if blank.")
+    timezone: str | None = Field(default=None, examples=["Europe/Dublin"])
+    status: str | None = Field(default=None, examples=["active"])
 
 
 class _AdminAgencyUpdatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `PATCH /admin/agencies/{id}`. Every field is optional."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "name": "CKP Estate Agents (Dublin)",
+                "status": "active",
+            }
+        },
+    )
 
     name: str | None = None
     slug: str | None = None
@@ -160,25 +219,78 @@ class _AdminAgencyUpdatePayload(BaseModel):
 
 
 class _AdminAgencySourceUpsertPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `POST /admin/agencies/{id}/sources`."""
 
-    site_id: str = Field(min_length=1)
-    source_name: str = Field(min_length=1)
-    site_url: str | None = None
-    normalized_host: str | None = None
-    source_status: str | None = None
-    webhook_secret: str | None = None
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "site_id": "janetcarroll.ie",
+                "source_name": "Janet Carroll",
+                "site_url": "https://janetcarroll.ie",
+                "source_status": "active",
+            }
+        },
+    )
+
+    site_id: str = Field(
+        min_length=1,
+        description=(
+            "Lowercased hostname. Must match the value WordPress sends in "
+            "the `rest_domain` body field when posting webhooks."
+        ),
+        examples=["janetcarroll.ie"],
+    )
+    source_name: str = Field(min_length=1, description="Display name shown in the admin.")
+    site_url: str | None = Field(default=None, examples=["https://janetcarroll.ie"])
+    normalized_host: str | None = Field(default=None, description="Defaults to `site_id` lowercased.")
+    source_status: str | None = Field(default=None, examples=["active", "paused"])
+    webhook_secret: str | None = Field(
+        default=None,
+        description="Optional per-site secret used to verify webhook signatures.",
+    )
 
 
 class _AdminGhlConnectionUpsertPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `PUT /admin/agencies/{id}/ghl-connection`.
 
-    location_id: str = Field(min_length=1)
-    user_id: str | None = None
-    access_token: str = Field(min_length=1)
-    refresh_token: str | None = ""
-    expires_at: str | None = ""
-    status: str | None = None
+    One agency owns exactly one GHL location. The webhook resolves these
+    fields from the agency, so the WordPress payload no longer carries
+    `location_id` or any token.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "location_id": "v8H1XNB3YCQmVHRhqDoM",
+                "user_id": "5lichOFpkqT72Jb7adil",
+                "access_token": "ghl-access-token-…",
+                "refresh_token": "ghl-refresh-token-…",
+                "expires_at": "2026-12-31T00:00:00Z",
+                "status": "active",
+            }
+        },
+    )
+
+    location_id: str = Field(
+        min_length=1,
+        description="GHL sub-account location id.",
+        examples=["v8H1XNB3YCQmVHRhqDoM"],
+    )
+    user_id: str | None = Field(default=None, description="GHL user id; defaults to `manual`.")
+    access_token: str = Field(
+        min_length=1,
+        description="OAuth access token. Stored verbatim; treat as a secret.",
+    )
+    refresh_token: str | None = Field(default="", description="OAuth refresh token (optional).")
+    expires_at: str | None = Field(
+        default="",
+        description="ISO-8601 expiry of the access token (optional).",
+    )
+    status: str | None = Field(default=None, examples=["active"])
 
 
 class _AdminReelProfileUpsertPayload(BaseModel):
@@ -192,19 +304,50 @@ class _AdminReelProfileUpsertPayload(BaseModel):
     edit a single concern.
     """
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "name": "Default",
+                "platforms": ["instagram", "tiktok", "facebook", "gbp"],
+                "duration_seconds": 30,
+                "music_id": "uplifting-corporate-1",
+                "intro_enabled": True,
+                "logo_position": "top-right",
+                "brand_primary_color": "#0F172A",
+                "brand_secondary_color": "#FFFFFF",
+                "caption_template": "{{property_title}} · {{price}}",
+                "approval_required": False,
+                "extra_settings": {
+                    "brand": {"font": "Inter", "tagline": "CKP Estate Agents"},
+                    "social_templates": {"instagram": "{{property_title}}\n{{price}}"},
+                },
+            }
+        },
+    )
 
-    name: str | None = None
-    platforms: list[str] | None = None
-    duration_seconds: int | None = None
+    name: str | None = Field(default=None, description="Profile name (default `Default`).")
+    platforms: list[str] | None = Field(
+        default=None,
+        description="Social platforms the reel should be published to.",
+    )
+    duration_seconds: int | None = Field(default=None, ge=5, le=180)
     music_id: str | None = None
     intro_enabled: bool | None = None
-    logo_position: str | None = None
-    brand_primary_color: str | None = None
-    brand_secondary_color: str | None = None
+    logo_position: str | None = Field(default=None, examples=["top-right"])
+    brand_primary_color: str | None = Field(default=None, examples=["#0F172A"])
+    brand_secondary_color: str | None = Field(default=None, examples=["#FFFFFF"])
     caption_template: str | None = None
     approval_required: bool | None = None
-    extra_settings: dict | None = None
+    extra_settings: dict | None = Field(
+        default=None,
+        description=(
+            "Free-form bag of extras. When supplied it REPLACES the "
+            "current `extra_settings_json` wholesale — use the per-section "
+            "endpoints for safe partial edits."
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -454,24 +597,60 @@ class SocialTemplatesUpsertPayload(BaseModel):
 
 
 class _MvpGoHighLevelSessionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `POST /mvp/gohighlevel/session`."""
 
-    location_id: str = Field(min_length=1)
-    user_id: str = Field(min_length=1)
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "location_id": "v8H1XNB3YCQmVHRhqDoM",
+                "user_id": "5lichOFpkqT72Jb7adil",
+            }
+        },
+    )
+
+    location_id: str = Field(
+        min_length=1,
+        description="The GHL sub-account location id the user opened the app from.",
+    )
+    user_id: str = Field(
+        min_length=1,
+        description="The GHL user id resolved from the iframe SSO payload (or fallback).",
+    )
 
 
 class _MvpGoHighLevelLocationPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    """Body for `POST /mvp/gohighlevel/test`."""
 
-    location_id: str = Field(min_length=1)
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={"example": {"location_id": "v8H1XNB3YCQmVHRhqDoM"}},
+    )
+
+    location_id: str = Field(
+        min_length=1,
+        description="GHL location id whose stored access token should be probed.",
+    )
 
 
 class _MvpGoHighLevelContextPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
+    """Body for `POST /mvp/gohighlevel/context`. The `encryptedData` (or
+    `encrypted_data`) string is the raw blob the parent HighLevel iframe
+    returned via postMessage."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        str_strip_whitespace=True,
+        json_schema_extra={"example": {"encryptedData": "U2FsdGVkX1+abc123…"}},
+    )
 
     encrypted_data: str = Field(
         min_length=1,
         validation_alias=AliasChoices("encrypted_data", "encryptedData"),
+        description="Encrypted user-context blob received from the GHL parent frame.",
     )
 
 
@@ -900,6 +1079,92 @@ class WordPressWebhookApplication:
                 agency_id=agency_id,
                 limit=limit,
             )
+
+    def get_agency_reel_detail(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+    ):
+        normalized_agency_id = str(agency_id or "").strip()
+        normalized_site_id = str(site_id or "").strip().lower()
+        with self.unit_of_work_factory() as unit_of_work:
+            for item in unit_of_work.property_repository.list_recent_for_agency(
+                agency_id=normalized_agency_id,
+                limit=500,
+            ):
+                if (
+                    item.site_id == normalized_site_id
+                    and int(item.source_property_id) == int(source_property_id)
+                ):
+                    return item
+        return None
+
+    def resolve_reel_video_path(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+    ) -> Path | None:
+        item = self.get_agency_reel_detail(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if item is None:
+            return None
+        # Prefer the immutable revision path; fall back to whatever the
+        # pipeline last wrote on disk.
+        candidate = item.revision_media_path or ""
+        if not candidate:
+            return None
+        candidate_path = Path(candidate)
+        if not candidate_path.is_absolute():
+            candidate_path = self.workspace_dir / candidate_path
+        if not candidate_path.exists() or not candidate_path.is_file():
+            return None
+        return candidate_path
+
+    def update_reel_workflow(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        workflow_state: str,
+        publish_status: str | None = None,
+    ):
+        normalized_site_id = str(site_id or "").strip().lower()
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            existing = unit_of_work.pipeline_state_repository.get_property_pipeline_state(
+                site_id=normalized_site_id,
+                source_property_id=int(source_property_id),
+            )
+            if existing is None:
+                return None
+            unit_of_work.pipeline_state_repository.update_workflow_state(
+                agency_id=agency_id,
+                wordpress_source_id=existing.wordpress_source_id,
+                site_id=normalized_site_id,
+                source_property_id=int(source_property_id),
+                workflow_state=workflow_state,
+            )
+            if publish_status is not None:
+                unit_of_work.pipeline_state_repository.update_social_publish_status(
+                    agency_id=agency_id,
+                    wordpress_source_id=existing.wordpress_source_id,
+                    site_id=normalized_site_id,
+                    source_property_id=int(source_property_id),
+                    status=publish_status,
+                )
+        return self.get_agency_reel_detail(
+            agency_id=agency_id,
+            site_id=normalized_site_id,
+            source_property_id=int(source_property_id),
+        )
 
     def delete_wordpress_source(self, *, wordpress_source_id: str) -> bool:
         with self.unit_of_work_factory() as unit_of_work:
@@ -2599,6 +2864,215 @@ def create_fastapi_app(
         )
 
     @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}",
+        tags=["Admin · Content"],
+        summary="Get one reel for the agency",
+        description=(
+            "Same shape as one item from `GET /admin/agencies/{id}/reels`, "
+            "but for a specific property. Used by the reel editor screen "
+            "to render the property metadata, the publish status and the "
+            "URL for the rendered video."
+        ),
+    )
+    async def get_admin_agency_reel(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        item = runtime.get_agency_reel_detail(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if item is None:
+            return _json_error(
+                404,
+                "The reel does not exist for this agency.",
+                code="ADMIN_REEL_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
+            )
+        video_path = runtime.resolve_reel_video_path(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        body = _serialize_agency_reel(item)
+        body["has_video"] = video_path is not None
+        body["video_url"] = (
+            f"{application.admin_access_policy.base_path}/agencies/"
+            f"{agency_id}/reels/{site_id}/{source_property_id}/video"
+            if video_path is not None
+            else None
+        )
+        return JSONResponse(status_code=200, content={"reel": body})
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/video",
+        tags=["Admin · Content"],
+        summary="Stream the rendered MP4 for a reel",
+        description=(
+            "Streams the most recent rendered MP4 for the reel. Honours "
+            "the `Range` header so HTML5 `<video>` players can seek and "
+            "lazy-load only the chunk being viewed — the full file is "
+            "never sent until the user actually plays through it. "
+            "Returns 404 (`ADMIN_REEL_NOT_FOUND`) if no rendered video "
+            "exists yet for this property."
+        ),
+        responses={
+            200: {"description": "Full MP4 body."},
+            206: {"description": "Range chunk (used by HTML5 video for seeking)."},
+            404: {"description": "No rendered video for this reel."},
+        },
+    )
+    async def stream_admin_agency_reel_video(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> Response:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        video_path = runtime.resolve_reel_video_path(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if video_path is None:
+            return _json_error(
+                404,
+                "No rendered video is available for this reel.",
+                code="ADMIN_REEL_VIDEO_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
+            )
+        return _build_range_response(request, video_path)
+
+    @app.post(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/approve",
+        tags=["Admin · Content"],
+        summary="Approve a reel that is awaiting review",
+        description=(
+            "Marks the reel's pipeline state as `approved` and the "
+            "publish status as `published`. The actual social posting "
+            "happens through GoHighLevel via the regular pipeline; this "
+            "endpoint only flips the workflow gate."
+        ),
+    )
+    async def approve_admin_agency_reel(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        updated = runtime.update_reel_workflow(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+            workflow_state="approved",
+            publish_status="published",
+        )
+        if updated is None:
+            return _json_error(
+                404,
+                "The reel does not exist for this agency.",
+                code="ADMIN_REEL_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "approved", "reel": _serialize_agency_reel(updated)},
+        )
+
+    @app.post(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/reject",
+        tags=["Admin · Content"],
+        summary="Reject a reel",
+        description=(
+            "Sets the reel's pipeline state to `rejected` and the publish "
+            "status to `rejected`, so it stays out of the publish queue."
+        ),
+    )
+    async def reject_admin_agency_reel(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        updated = runtime.update_reel_workflow(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+            workflow_state="rejected",
+            publish_status="rejected",
+        )
+        if updated is None:
+            return _json_error(
+                404,
+                "The reel does not exist for this agency.",
+                code="ADMIN_REEL_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "rejected", "reel": _serialize_agency_reel(updated)},
+        )
+
+    @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/social-accounts",
         tags=["Admin · Content"],
         summary="List social accounts linked to the agency's GHL location",
@@ -3387,6 +3861,86 @@ def _json_error(
     if details:
         payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
+
+
+_VIDEO_STREAM_CHUNK_SIZE = 1024 * 1024  # 1 MiB per buffered chunk
+
+
+def _build_range_response(request: Request, file_path: Path) -> Response:
+    """Send ``file_path`` honouring the ``Range`` request header.
+
+    HTML5 ``<video>`` players send a ``Range`` request to seek and to avoid
+    downloading the full file before starting playback. We respond with
+    206 Partial Content + the requested byte slice, or 200 with the full
+    body if no Range header is present.
+    """
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range") or request.headers.get("Range")
+    media_type = "video/mp4"
+
+    if range_header and range_header.startswith("bytes="):
+        try:
+            byte_range = range_header.removeprefix("bytes=").strip()
+            start_text, _, end_text = byte_range.partition("-")
+            start = int(start_text) if start_text else 0
+            end = int(end_text) if end_text else file_size - 1
+        except ValueError:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        if start < 0 or end >= file_size or start > end:
+            return Response(
+                status_code=416,
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        chunk_size = (end - start) + 1
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+            "Cache-Control": "private, max-age=300",
+        }
+
+        def iter_range():
+            with file_path.open("rb") as handle:
+                handle.seek(start)
+                remaining = chunk_size
+                while remaining > 0:
+                    read = handle.read(min(_VIDEO_STREAM_CHUNK_SIZE, remaining))
+                    if not read:
+                        break
+                    remaining -= len(read)
+                    yield read
+
+        return StreamingResponse(
+            iter_range(),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "Cache-Control": "private, max-age=300",
+    }
+
+    def iter_full():
+        with file_path.open("rb") as handle:
+            while True:
+                chunk = handle.read(_VIDEO_STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        iter_full(),
+        status_code=200,
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 _DEFAULT_BRAND_PRIMARY_COLOR = "#0F172A"
