@@ -59,6 +59,36 @@ class PropertySyncState:
 
 
 @dataclass(slots=True)
+class AgencyReelSummary:
+    site_id: str
+    source_property_id: int
+    slug: str
+    title: str | None
+    link: str | None
+    price: str | None
+    property_status: str | None
+    property_type_label: str | None
+    property_area_label: str | None
+    property_county_label: str | None
+    bedrooms: int | None
+    bathrooms: int | None
+    featured_image_url: str | None
+    agent_name: str | None
+    workflow_state: str
+    publish_status: str
+    render_status: str
+    last_published_location_id: str
+    pipeline_updated_at: str
+    pipeline_created_at: str
+    fetched_at: str
+    current_revision_id: str
+    revision_media_path: str
+    revision_metadata_path: str
+    revision_artifact_kind: str
+    revision_created_at: str
+
+
+@dataclass(slots=True)
 class PropertyReelRecord:
     site_id: str
     property_id: int
@@ -155,6 +185,97 @@ class PropertyStore(PostgresRepositoryBase):
     ) -> None:
         super().__init__(database_locator, connection=connection)
         self.base_dir = Path(base_dir).expanduser().resolve()
+
+    def list_recent_for_agency(
+        self,
+        *,
+        agency_id: str,
+        limit: int = 50,
+    ) -> tuple["AgencyReelSummary", ...]:
+        normalized_agency_id = str(agency_id or "").strip()
+        if not normalized_agency_id:
+            return ()
+        rows = self.connection.execute(
+            f"""
+            SELECT
+                p.site_id,
+                p.source_property_id,
+                p.slug,
+                p.title,
+                p.link,
+                p.price,
+                p.property_status,
+                p.property_type_label,
+                p.property_area_label,
+                p.property_county_label,
+                p.bedrooms,
+                p.bathrooms,
+                p.featured_image_url,
+                p.agent_name,
+                p.fetched_at,
+                pps.workflow_state,
+                pps.publish_status,
+                pps.render_status,
+                pps.last_published_location_id,
+                pps.current_revision_id,
+                pps.created_at AS pipeline_created_at,
+                pps.updated_at AS pipeline_updated_at,
+                mr.media_path AS revision_media_path,
+                mr.metadata_path AS revision_metadata_path,
+                mr.artifact_kind AS revision_artifact_kind,
+                mr.created_at AS revision_created_at
+            FROM {PROPERTY_TABLE_NAME} AS p
+            LEFT JOIN {PIPELINE_STATE_TABLE_NAME} AS pps
+                ON pps.site_id = p.site_id
+                AND pps.source_property_id = p.source_property_id
+            LEFT JOIN LATERAL (
+                SELECT *
+                FROM media_revisions m
+                WHERE m.site_id = p.site_id
+                AND m.source_property_id = p.source_property_id
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) AS mr ON TRUE
+            WHERE p.agency_id = :agency_id
+            ORDER BY pps.updated_at DESC NULLS LAST, p.fetched_at DESC NULLS LAST
+            LIMIT :limit
+            """,
+            {
+                "agency_id": normalized_agency_id,
+                "limit": int(max(1, min(limit, 500))),
+            },
+        ).fetchall()
+        return tuple(
+            AgencyReelSummary(
+                site_id=str(row["site_id"] or ""),
+                source_property_id=int(row["source_property_id"] or 0),
+                slug=str(row["slug"] or ""),
+                title=row["title"],
+                link=row["link"],
+                price=row["price"],
+                property_status=row["property_status"],
+                property_type_label=row["property_type_label"],
+                property_area_label=row["property_area_label"],
+                property_county_label=row["property_county_label"],
+                bedrooms=row["bedrooms"],
+                bathrooms=row["bathrooms"],
+                featured_image_url=row["featured_image_url"],
+                agent_name=row["agent_name"],
+                workflow_state=str(row["workflow_state"] or ""),
+                publish_status=str(row["publish_status"] or ""),
+                render_status=str(row["render_status"] or ""),
+                last_published_location_id=str(row["last_published_location_id"] or ""),
+                pipeline_updated_at=str(row["pipeline_updated_at"] or ""),
+                pipeline_created_at=str(row["pipeline_created_at"] or ""),
+                fetched_at=str(row["fetched_at"] or ""),
+                current_revision_id=str(row["current_revision_id"] or ""),
+                revision_media_path=str(row["revision_media_path"] or ""),
+                revision_metadata_path=str(row["revision_metadata_path"] or ""),
+                revision_artifact_kind=str(row["revision_artifact_kind"] or ""),
+                revision_created_at=str(row["revision_created_at"] or ""),
+            )
+            for row in rows
+        )
 
     def _upsert_property_record(self, record: dict[str, Any]) -> int:
         columns = list(record.keys())
@@ -473,6 +594,7 @@ class PropertyStore(PostgresRepositoryBase):
 
 
 __all__ = [
+    "AgencyReelSummary",
     "PIPELINE_STATE_TABLE_NAME",
     "PROPERTY_IMAGES_TABLE_NAME",
     "PROPERTY_TABLE_NAME",
