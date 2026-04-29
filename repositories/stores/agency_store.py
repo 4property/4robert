@@ -169,5 +169,47 @@ class AgencyStore(PostgresRepositoryBase):
             },
         )
 
+    def list_agencies(self) -> tuple[AgencyRecord, ...]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                id,
+                name,
+                slug,
+                timezone,
+                status,
+                created_at,
+                updated_at
+            FROM agencies
+            ORDER BY name ASC
+            """
+        ).fetchall()
+        return tuple(
+            AgencyRecord(
+                agency_id=str(row["id"]),
+                name=str(row["name"] or ""),
+                slug=str(row["slug"] or ""),
+                timezone=str(row["timezone"] or ""),
+                status=str(row["status"] or ""),
+                created_at=_timestamp_to_text(row["created_at"]),
+                updated_at=_timestamp_to_text(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    def delete_agency(self, agency_id: str) -> bool:
+        normalized_agency_id = str(agency_id or "").strip()
+        if not normalized_agency_id:
+            return False
+        row = self.connection.execute(
+            """
+            DELETE FROM agencies
+            WHERE id = :agency_id
+            RETURNING id
+            """,
+            {"agency_id": normalized_agency_id},
+        ).fetchone()
+        return row is not None
+
 
 __all__ = ["AgencyRecord", "AgencyStore"]

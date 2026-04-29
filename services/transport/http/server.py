@@ -141,14 +141,60 @@ class _AdminWordPressSourceUpsertPayload(BaseModel):
     webhook_secret: str | None = None
 
 
-class _MvpGoHighLevelTokenPayload(BaseModel):
+class _AdminAgencyCreatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1)
+    slug: str | None = None
+    timezone: str | None = None
+    status: str | None = None
+
+
+class _AdminAgencyUpdatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = None
+    slug: str | None = None
+    timezone: str | None = None
+    status: str | None = None
+
+
+class _AdminAgencySourceUpsertPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    site_id: str = Field(min_length=1)
+    source_name: str = Field(min_length=1)
+    site_url: str | None = None
+    normalized_host: str | None = None
+    source_status: str | None = None
+    webhook_secret: str | None = None
+
+
+class _AdminGhlConnectionUpsertPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     location_id: str = Field(min_length=1)
-    user_id: str = Field(min_length=1)
+    user_id: str | None = None
     access_token: str = Field(min_length=1)
     refresh_token: str | None = ""
     expires_at: str | None = ""
+    status: str | None = None
+
+
+class _AdminReelProfileUpsertPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = None
+    platforms: list[str] | None = None
+    duration_seconds: int | None = None
+    music_id: str | None = None
+    intro_enabled: bool | None = None
+    logo_position: str | None = None
+    brand_primary_color: str | None = None
+    brand_secondary_color: str | None = None
+    caption_template: str | None = None
+    approval_required: bool | None = None
+    extra_settings: dict | None = None
 
 
 class _MvpGoHighLevelSessionPayload(BaseModel):
@@ -468,44 +514,98 @@ class WordPressWebhookApplication:
             publish_context=publish_context,
         )
 
-    def upsert_gohighlevel_token(
+    def upsert_ghl_connection(
         self,
         *,
+        agency_id: str,
         location_id: str,
         user_id: str,
         access_token: str,
         refresh_token: str = "",
         expires_at: str = "",
+        status: str = "active",
     ):
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
-            return unit_of_work.gohighlevel_token_store.upsert_token(
+            return unit_of_work.ghl_connection_store.upsert_for_agency(
+                agency_id=agency_id,
                 location_id=location_id,
                 user_id=user_id,
                 access_token=access_token,
                 refresh_token=refresh_token,
                 expires_at=expires_at,
+                status=status,
             )
 
-    def get_gohighlevel_token(self, *, location_id: str):
+    def get_ghl_connection_by_agency(self, *, agency_id: str):
         with self.unit_of_work_factory() as unit_of_work:
-            return unit_of_work.gohighlevel_token_store.get_by_location_id(location_id)
+            return unit_of_work.ghl_connection_store.get_by_agency_id(agency_id)
 
-    def list_gohighlevel_tokens(self):
+    def get_ghl_connection_by_location(self, *, location_id: str):
         with self.unit_of_work_factory() as unit_of_work:
-            return unit_of_work.gohighlevel_token_store.list_tokens()
+            return unit_of_work.ghl_connection_store.get_by_location_id(location_id)
 
-    def delete_gohighlevel_token(self, *, location_id: str) -> bool:
+    def list_ghl_connections(self):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.ghl_connection_store.list_connections()
+
+    def delete_ghl_connection(self, *, agency_id: str) -> bool:
         with self.unit_of_work_factory() as unit_of_work:
             unit_of_work.begin_immediate()
-            return unit_of_work.gohighlevel_token_store.delete_by_location_id(location_id)
+            return unit_of_work.ghl_connection_store.delete_by_agency_id(agency_id)
 
-    def require_gohighlevel_access_token(self, *, location_id: str) -> str:
+    def require_ghl_connection_for_agency(self, *, agency_id: str):
         with self.unit_of_work_factory() as unit_of_work:
-            return unit_of_work.gohighlevel_token_store.require_access_token(location_id)
+            return unit_of_work.ghl_connection_store.require_for_agency(agency_id)
 
-    def test_gohighlevel_connection(self, *, location_id: str):
-        access_token = self.require_gohighlevel_access_token(location_id=location_id)
+    def get_reel_profile(self, *, agency_id: str):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.reel_profile_store.get_by_agency_id(agency_id)
+
+    def upsert_reel_profile(self, **kwargs):
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.reel_profile_store.upsert_for_agency(**kwargs)
+
+    def delete_reel_profile(self, *, agency_id: str) -> bool:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.reel_profile_store.delete_by_agency_id(agency_id)
+
+    def list_agencies(self):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.agency_store.list_agencies()
+
+    def get_agency(self, *, agency_id: str):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.agency_store.get_by_id(agency_id)
+
+    def create_agency(self, **kwargs) -> str:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            unit_of_work.agency_store.create_agency(**kwargs)
+        return kwargs["agency_id"]
+
+    def update_agency(self, **kwargs) -> None:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            unit_of_work.agency_store.update_agency(**kwargs)
+
+    def delete_agency(self, *, agency_id: str) -> bool:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.agency_store.delete_agency(agency_id)
+
+    def list_sources_for_agency(self, *, agency_id: str):
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.wordpress_source_store.list_sources_for_agency(agency_id)
+
+    def delete_wordpress_source(self, *, wordpress_source_id: str) -> bool:
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            return unit_of_work.wordpress_source_store.delete_source(wordpress_source_id)
+
+    def test_gohighlevel_connection(self, *, location_id: str, access_token: str):
         client = GoHighLevelClient(
             base_url=GO_HIGH_LEVEL_BASE_URL,
             api_version=GO_HIGH_LEVEL_API_VERSION,
@@ -723,102 +823,14 @@ def create_fastapi_app(
     async def health_ready(request: Request) -> JSONResponse:
         return await _health_ready_response(request)
 
-    @app.post("/mvp/gohighlevel/token", tags=["MVP"])
-    async def upsert_mvp_gohighlevel_token(
-        payload: _MvpGoHighLevelTokenPayload,
-        request: Request,
-    ) -> JSONResponse:
-        runtime = _get_runtime(request)
-        try:
-            token_record = runtime.upsert_gohighlevel_token(
-                location_id=payload.location_id,
-                user_id=payload.user_id,
-                access_token=payload.access_token,
-                refresh_token=payload.refresh_token or "",
-                expires_at=payload.expires_at or "",
-            )
-        except ValidationError as error:
-            return _json_error(
-                400,
-                str(error),
-                code=error.code,
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-        except ApplicationError as error:
-            return _json_error(
-                500,
-                str(error),
-                code=getattr(error, "code", "GHL_TOKEN_SAVE_FAILED"),
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-
-        log_persistent_event(
-            "mvp.gohighlevel_token_saved",
-            request_id=_get_request_id(request),
-            client=_format_client(request),
-            location_id=token_record.location_id,
-            user_id=token_record.user_id,
-            has_access_token=bool(token_record.access_token.strip()),
-            has_refresh_token=bool(token_record.refresh_token.strip()),
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "saved",
-                "token": token_record.to_public_dict(),
-            },
-        )
-
     @app.get("/mvp/gohighlevel/tokens", tags=["MVP"])
-    async def list_mvp_gohighlevel_tokens(request: Request) -> JSONResponse:
+    async def list_mvp_gohighlevel_connections(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
-        token_records = runtime.list_gohighlevel_tokens()
-        items = [record.to_public_dict() for record in token_records]
+        records = runtime.list_ghl_connections()
+        items = [record.to_public_dict() for record in records]
         return JSONResponse(
             status_code=200,
-            content={
-                "count": len(items),
-                "items": items,
-            },
-        )
-
-    @app.delete("/mvp/gohighlevel/token/{location_id}", tags=["MVP"])
-    async def delete_mvp_gohighlevel_token(
-        location_id: str,
-        request: Request,
-    ) -> JSONResponse:
-        runtime = _get_runtime(request)
-        try:
-            deleted = runtime.delete_gohighlevel_token(location_id=location_id)
-        except ValidationError as error:
-            return _json_error(
-                400,
-                str(error),
-                code=error.code,
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-        if not deleted:
-            return _json_error(
-                404,
-                "No GoHighLevel token is saved for this location.",
-                code="GHL_TOKEN_NOT_FOUND",
-                details={"location_id": location_id},
-            )
-        log_persistent_event(
-            "mvp.gohighlevel_token_deleted",
-            request_id=_get_request_id(request),
-            client=_format_client(request),
-            location_id=location_id,
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "deleted",
-                "location_id": location_id,
-            },
+            content={"count": len(items), "items": items},
         )
 
     @app.post("/mvp/gohighlevel/context", tags=["MVP"])
@@ -888,8 +900,8 @@ def create_fastapi_app(
         request: Request,
     ) -> JSONResponse:
         runtime = _get_runtime(request)
-        token_record = runtime.get_gohighlevel_token(location_id=payload.location_id)
-        connected = token_record is not None and bool(token_record.access_token.strip())
+        record = runtime.get_ghl_connection_by_location(location_id=payload.location_id)
+        connected = record is not None and bool(record.access_token.strip())
         log_persistent_event(
             "mvp.gohighlevel_session_checked",
             request_id=_get_request_id(request),
@@ -906,6 +918,7 @@ def create_fastapi_app(
                 "user_id": payload.user_id,
                 "connected": connected,
                 "has_token": connected,
+                "agency_id": record.agency_id if record is not None else None,
             },
         )
 
@@ -915,15 +928,19 @@ def create_fastapi_app(
         request: Request,
     ) -> JSONResponse:
         runtime = _get_runtime(request)
-        try:
-            accounts = runtime.test_gohighlevel_connection(location_id=payload.location_id)
-        except ResourceNotFoundError as error:
+        record = runtime.get_ghl_connection_by_location(location_id=payload.location_id)
+        if record is None or not record.access_token.strip():
             return _json_error(
                 404,
-                str(error),
-                code=error.code,
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
+                "No GoHighLevel connection is saved for this location.",
+                code="GHL_CONNECTION_NOT_FOUND",
+                hint="Configure a GoHighLevel connection for the agency that owns this location.",
+                details={"location_id": payload.location_id},
+            )
+        try:
+            accounts = runtime.test_gohighlevel_connection(
+                location_id=record.location_id,
+                access_token=record.access_token,
             )
         except ApplicationError as error:
             return _json_error(
@@ -1178,33 +1195,485 @@ def create_fastapi_app(
             },
         )
 
+    # ── Admin: agencies ─────────────────────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies",
+        tags=["Admin"],
+    )
+    async def list_admin_agencies(request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        agencies = runtime.list_agencies()
+        items = []
+        for agency in agencies:
+            sources = runtime.list_sources_for_agency(agency_id=agency.agency_id)
+            ghl = runtime.get_ghl_connection_by_agency(agency_id=agency.agency_id)
+            profile = runtime.get_reel_profile(agency_id=agency.agency_id)
+            items.append(_serialize_agency_summary(agency, sources, ghl, profile))
+        return JSONResponse(
+            status_code=200,
+            content={"items": items, "count": len(items)},
+        )
+
+    @app.post(
+        f"{application.admin_access_policy.base_path}/agencies",
+        tags=["Admin"],
+    )
+    async def create_admin_agency(
+        payload: _AdminAgencyCreatePayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        from uuid import uuid4 as _uuid4
+
+        slug = _slugify_admin(payload.slug or payload.name) or _slugify_admin(
+            f"agency-{_uuid4().hex[:8]}"
+        )
+        try:
+            agency_id = runtime.create_agency(
+                agency_id=str(_uuid4()),
+                name=payload.name,
+                slug=slug,
+                timezone=payload.timezone or "Europe/Dublin",
+                status=(payload.status or "active").lower(),
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "ADMIN_AGENCY_CREATE_FAILED"),
+                hint=error.hint,
+            )
+
+        agency = runtime.get_agency(agency_id=agency_id)
+        return JSONResponse(
+            status_code=201,
+            content={"status": "created", "agency": _serialize_agency(agency)},
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
+        tags=["Admin"],
+    )
+    async def get_admin_agency(agency_id: str, request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        agency = runtime.get_agency(agency_id=agency_id)
+        if agency is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        sources = runtime.list_sources_for_agency(agency_id=agency_id)
+        ghl = runtime.get_ghl_connection_by_agency(agency_id=agency_id)
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency": _serialize_agency(agency),
+                "sources": [_serialize_wordpress_source_details(source) for source in sources],
+                "ghl_connection": ghl.to_public_dict() if ghl is not None else None,
+                "reel_profile": profile.to_public_dict() if profile is not None else None,
+            },
+        )
+
+    @app.patch(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
+        tags=["Admin"],
+    )
+    async def update_admin_agency(
+        agency_id: str,
+        payload: _AdminAgencyUpdatePayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        agency = runtime.get_agency(agency_id=agency_id)
+        if agency is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        runtime.update_agency(
+            agency_id=agency_id,
+            name=payload.name if payload.name is not None else agency.name,
+            slug=(
+                _slugify_admin(payload.slug or payload.name or agency.slug)
+                if (payload.slug is not None or payload.name is not None)
+                else agency.slug
+            ),
+            timezone=payload.timezone if payload.timezone is not None else agency.timezone,
+            status=(payload.status or agency.status).lower(),
+        )
+        updated = runtime.get_agency(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={"status": "updated", "agency": _serialize_agency(updated)},
+        )
+
+    @app.delete(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
+        tags=["Admin"],
+    )
+    async def delete_admin_agency(agency_id: str, request: Request) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        deleted = runtime.delete_agency(agency_id=agency_id)
+        if not deleted:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "deleted", "agency_id": agency_id},
+        )
+
+    # ── Admin: sources for an agency ────────────────────────────────────
+    @app.post(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/sources",
+        tags=["Admin"],
+    )
+    async def upsert_admin_agency_source(
+        agency_id: str,
+        payload: _AdminAgencySourceUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        agency = runtime.get_agency(agency_id=agency_id)
+        if agency is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        try:
+            result = runtime.wordpress_source_admin_service.upsert_source(
+                UpsertWordPressSourceRequest(
+                    site_id=payload.site_id,
+                    source_name=payload.source_name,
+                    agency_id=agency_id,
+                    agency_name=agency.name,
+                    agency_slug=agency.slug,
+                    agency_timezone=agency.timezone,
+                    agency_status=agency.status,
+                    site_url=payload.site_url,
+                    normalized_host=payload.normalized_host,
+                    source_status=payload.source_status,
+                    webhook_secret=payload.webhook_secret,
+                    update_webhook_secret="webhook_secret"
+                    in payload.model_fields_set,
+                )
+            )
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "ADMIN_SOURCE_UPSERT_FAILED"),
+                hint=error.hint,
+            )
+
+        status_code = 201 if result.created_source else 200
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "created" if result.created_source else "updated",
+                "source": _serialize_wordpress_source_details(result.source),
+            },
+        )
+
+    @app.delete(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/sources/{{wordpress_source_id}}",
+        tags=["Admin"],
+    )
+    async def delete_admin_agency_source(
+        agency_id: str,
+        wordpress_source_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        deleted = runtime.delete_wordpress_source(wordpress_source_id=wordpress_source_id)
+        if not deleted:
+            return _json_error(
+                404,
+                "The wordpress source does not exist.",
+                code="ADMIN_SOURCE_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "wordpress_source_id": wordpress_source_id,
+                },
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "deleted",
+                "agency_id": agency_id,
+                "wordpress_source_id": wordpress_source_id,
+            },
+        )
+
+    # ── Admin: GHL connection per agency ────────────────────────────────
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection",
+        tags=["Admin"],
+    )
+    async def upsert_admin_agency_ghl_connection(
+        agency_id: str,
+        payload: _AdminGhlConnectionUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+
+        agency = runtime.get_agency(agency_id=agency_id)
+        if agency is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        try:
+            record = runtime.upsert_ghl_connection(
+                agency_id=agency_id,
+                location_id=payload.location_id,
+                user_id=payload.user_id or "manual",
+                access_token=payload.access_token,
+                refresh_token=payload.refresh_token or "",
+                expires_at=payload.expires_at or "",
+                status=(payload.status or "active").lower(),
+            )
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "GHL_CONNECTION_SAVE_FAILED"),
+                hint=error.hint,
+            )
+
+        return JSONResponse(
+            status_code=200,
+            content={"status": "saved", "ghl_connection": record.to_public_dict()},
+        )
+
+    @app.delete(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection",
+        tags=["Admin"],
+    )
+    async def delete_admin_agency_ghl_connection(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        deleted = runtime.delete_ghl_connection(agency_id=agency_id)
+        if not deleted:
+            return _json_error(
+                404,
+                "No GoHighLevel connection saved for this agency.",
+                code="GHL_CONNECTION_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "deleted", "agency_id": agency_id},
+        )
+
+    @app.post(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection/test",
+        tags=["Admin"],
+    )
+    async def test_admin_agency_ghl_connection(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        record = runtime.get_ghl_connection_by_agency(agency_id=agency_id)
+        if record is None or not record.access_token.strip():
+            return _json_error(
+                404,
+                "No GoHighLevel connection saved for this agency.",
+                code="GHL_CONNECTION_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        try:
+            accounts = runtime.test_gohighlevel_connection(
+                location_id=record.location_id,
+                access_token=record.access_token,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                502,
+                str(error),
+                code=getattr(error, "code", "GHL_CONNECTION_TEST_FAILED"),
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        accounts_payload = [
+            {
+                "id": account.id,
+                "name": account.name,
+                "platform": account.platform,
+                "account_type": account.account_type,
+                "is_expired": account.is_expired,
+            }
+            for account in accounts
+        ]
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "agency_id": agency_id,
+                "location_id": record.location_id,
+                "account_count": len(accounts_payload),
+                "accounts": accounts_payload,
+            },
+        )
+
+    # ── Admin: reel profile per agency ──────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reel-profile",
+        tags=["Admin"],
+    )
+    async def get_admin_agency_reel_profile(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={"reel_profile": profile.to_public_dict() if profile else None},
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reel-profile",
+        tags=["Admin"],
+    )
+    async def upsert_admin_agency_reel_profile(
+        agency_id: str,
+        payload: _AdminReelProfileUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        try:
+            record = runtime.upsert_reel_profile(
+                agency_id=agency_id,
+                name=payload.name,
+                platforms=payload.platforms,
+                duration_seconds=payload.duration_seconds,
+                music_id=payload.music_id,
+                intro_enabled=payload.intro_enabled,
+                logo_position=payload.logo_position,
+                brand_primary_color=payload.brand_primary_color,
+                brand_secondary_color=payload.brand_secondary_color,
+                caption_template=payload.caption_template,
+                approval_required=payload.approval_required,
+                extra_settings=payload.extra_settings,
+            )
+        except ValidationError as error:
+            return _json_error(
+                400,
+                str(error),
+                code=error.code,
+                hint=error.hint,
+                details={"context": error.context} if error.context else None,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "REEL_PROFILE_SAVE_FAILED"),
+                hint=error.hint,
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "saved", "reel_profile": record.to_public_dict()},
+        )
+
     @app.post(application.path)
     async def receive_property_webhook(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
         site_id = _get_header_value(request, runtime.site_id_header)
-        location_id = _get_header_value(
-            request,
-            runtime.gohighlevel_location_id_header,
-            *_ALTERNATE_GOHIGHLEVEL_LOCATION_ID_HEADERS,
-        )
-        access_token = _get_header_value(
-            request,
-            runtime.gohighlevel_access_token_header,
-            *_ALTERNATE_GOHIGHLEVEL_ACCESS_TOKEN_HEADERS,
-        )
         timestamp = request.headers.get(runtime.timestamp_header)
         signature = request.headers.get(runtime.signature_header)
-        if not location_id:
-            missing_headers = []
-            if not location_id:
-                missing_headers.append(runtime.gohighlevel_location_id_header)
-            return _json_error(
-                400,
-                "Missing required GoHighLevel webhook headers.",
-                code="MISSING_GHL_HEADERS",
-                hint="Send the GoHighLevel location header on every webhook request.",
-                details={"missing_headers": missing_headers},
-            )
 
         content_type = request.headers.get("Content-Type", "")
         if not content_type.lower().startswith("application/json"):
@@ -1276,8 +1745,8 @@ def create_fastapi_app(
 
         is_authenticated, auth_message, auth_hint = runtime.authenticate_with_details(
             site_id=site_id,
-            location_id=location_id,
-            access_token=access_token or "",
+            location_id="",
+            access_token="",
             timestamp=timestamp or "",
             signature=signature or "",
             raw_body=raw_body,
@@ -1295,7 +1764,6 @@ def create_fastapi_app(
             log_persistent_event(
                 "webhook.authentication_failed",
                 site_id=site_id,
-                location_id=location_id,
                 client=_format_client(request),
                 reason=auth_message or "Invalid webhook credentials.",
             )
@@ -1333,8 +1801,15 @@ def create_fastapi_app(
             )
 
         try:
-            resolved_access_token = access_token or runtime.require_gohighlevel_access_token(
-                location_id=location_id
+            tenant_context = runtime.acceptance_service.tenant_resolver.resolve(site_id=site_id)
+            ghl_connection = runtime.require_ghl_connection_for_agency(
+                agency_id=tenant_context.agency_id,
+            )
+            reel_profile = runtime.get_reel_profile(agency_id=tenant_context.agency_id)
+            resolved_platforms = tuple(
+                reel_profile.platforms
+                if reel_profile is not None and reel_profile.platforms
+                else SOCIAL_PUBLISHING_DEFAULT_PLATFORMS
             )
             accepted_delivery = runtime.accept_webhook_delivery(
                 site_id=site_id,
@@ -1343,9 +1818,9 @@ def create_fastapi_app(
                 payload=payload,
                 publish_context=SocialPublishContext(
                     provider="gohighlevel",
-                    location_id=location_id,
-                    access_token=resolved_access_token,
-                    platforms=tuple(SOCIAL_PUBLISHING_DEFAULT_PLATFORMS),
+                    location_id=ghl_connection.location_id,
+                    access_token=ghl_connection.access_token,
+                    platforms=resolved_platforms,
                 ),
             )
         except ResourceNotFoundError as error:
@@ -1844,6 +2319,49 @@ def _json_error(
     return JSONResponse(status_code=status_code, content=payload)
 
 
+def _serialize_agency(agency: object) -> dict[str, object]:
+    if agency is None:
+        return {}
+    return {
+        "agency_id": getattr(agency, "agency_id", ""),
+        "name": getattr(agency, "name", ""),
+        "slug": getattr(agency, "slug", ""),
+        "timezone": getattr(agency, "timezone", ""),
+        "status": getattr(agency, "status", ""),
+        "created_at": getattr(agency, "created_at", None),
+        "updated_at": getattr(agency, "updated_at", None),
+    }
+
+
+def _serialize_agency_summary(
+    agency: object,
+    sources: tuple,
+    ghl_connection: object | None,
+    reel_profile: object | None,
+) -> dict[str, object]:
+    return {
+        **_serialize_agency(agency),
+        "source_count": len(sources),
+        "sources": [_serialize_wordpress_source_details(source) for source in sources],
+        "ghl_connection": (
+            ghl_connection.to_public_dict() if ghl_connection is not None else None
+        ),
+        "reel_profile": (
+            reel_profile.to_public_dict() if reel_profile is not None else None
+        ),
+    }
+
+
+_ADMIN_SLUG_PATTERN = __import__("re").compile(r"[^a-z0-9]+")
+
+
+def _slugify_admin(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    return _ADMIN_SLUG_PATTERN.sub("-", raw).strip("-")
+
+
 def _serialize_wordpress_source_details(source: object) -> dict[str, object]:
     return {
         "wordpress_source_id": getattr(source, "wordpress_source_id"),
@@ -2253,9 +2771,13 @@ def _parse_json_object_payload(
 
 
 def _resolve_site_id(payload: dict[str, Any]) -> str | None:
+    rest_domain = payload.get("rest_domain")
+    if isinstance(rest_domain, str) and rest_domain.strip():
+        return _hostname_from_value(rest_domain)
+
     direct_site_id = payload.get("site_id")
     if isinstance(direct_site_id, str) and direct_site_id.strip():
-        return direct_site_id.strip().lower()
+        return _hostname_from_value(direct_site_id)
 
     link_candidates: list[str] = []
     link = payload.get("link")
@@ -2274,6 +2796,22 @@ def _resolve_site_id(payload: dict[str, Any]) -> str | None:
             return parsed.netloc.strip().lower()
 
     return None
+
+
+def _hostname_from_value(raw_value: str) -> str:
+    value = str(raw_value or "").strip().lower()
+    if "://" in value:
+        parsed = urlparse(value)
+        value = parsed.hostname or parsed.netloc or parsed.path or ""
+    else:
+        value = value.split("/", 1)[0]
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    if value.count(":") == 1:
+        host, port = value.rsplit(":", 1)
+        if port.isdigit():
+            value = host
+    return value.strip().lower()
 
 
 __all__ = [

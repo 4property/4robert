@@ -4,7 +4,8 @@ from typing import Protocol
 
 from domain.properties.model import Property
 from repositories.stores.agency_store import AgencyRecord
-from repositories.stores.gohighlevel_token_store import GoHighLevelTokenRecord
+from repositories.stores.ghl_connection_store import GoHighLevelConnectionRecord
+from repositories.stores.reel_profile_store import ReelProfileRecord
 from repositories.stores.wordpress_source_store import WordPressSourceDetailsRecord, WordPressSourceRecord
 from repositories.stores.media_revision_store import MediaRevisionRecord
 from repositories.stores.outbox_event_store import OutboxEventRecord
@@ -284,6 +285,11 @@ class WordPressSourceStore(Protocol):
     def list_sources(self) -> tuple[WordPressSourceDetailsRecord, ...]:
         ...
 
+    def list_sources_for_agency(
+        self, agency_id: str
+    ) -> tuple[WordPressSourceDetailsRecord, ...]:
+        ...
+
     def create_source(
         self,
         *,
@@ -311,12 +317,18 @@ class WordPressSourceStore(Protocol):
     ) -> None:
         ...
 
+    def delete_source(self, wordpress_source_id: str) -> bool:
+        ...
+
 
 class AgencyStore(Protocol):
     def get_by_id(self, agency_id: str) -> AgencyRecord | None:
         ...
 
     def get_by_slug(self, slug: str) -> AgencyRecord | None:
+        ...
+
+    def list_agencies(self) -> tuple[AgencyRecord, ...]:
         ...
 
     def create_agency(
@@ -341,29 +353,60 @@ class AgencyStore(Protocol):
     ) -> None:
         ...
 
+    def delete_agency(self, agency_id: str) -> bool:
+        ...
 
-class GoHighLevelTokenStore(Protocol):
-    def upsert_token(
+
+class GoHighLevelConnectionStore(Protocol):
+    def get_by_agency_id(self, agency_id: str) -> GoHighLevelConnectionRecord | None:
+        ...
+
+    def list_connections(self) -> tuple[GoHighLevelConnectionRecord, ...]:
+        ...
+
+    def upsert_for_agency(
         self,
         *,
+        agency_id: str,
         location_id: str,
         user_id: str,
         access_token: str,
         refresh_token: str = "",
         expires_at: str = "",
-    ) -> GoHighLevelTokenRecord:
+        status: str = "active",
+    ) -> GoHighLevelConnectionRecord:
         ...
 
-    def get_by_location_id(self, location_id: str) -> GoHighLevelTokenRecord | None:
+    def delete_by_agency_id(self, agency_id: str) -> bool:
         ...
 
-    def list_tokens(self) -> tuple[GoHighLevelTokenRecord, ...]:
+    def require_for_agency(self, agency_id: str) -> GoHighLevelConnectionRecord:
         ...
 
-    def delete_by_location_id(self, location_id: str) -> bool:
+
+class ReelProfileStore(Protocol):
+    def get_by_agency_id(self, agency_id: str) -> ReelProfileRecord | None:
         ...
 
-    def require_access_token(self, location_id: str) -> str:
+    def upsert_for_agency(
+        self,
+        *,
+        agency_id: str,
+        name: str | None = None,
+        platforms: list | tuple | None = None,
+        duration_seconds: int | None = None,
+        music_id: str | None = None,
+        intro_enabled: bool | None = None,
+        logo_position: str | None = None,
+        brand_primary_color: str | None = None,
+        brand_secondary_color: str | None = None,
+        caption_template: str | None = None,
+        approval_required: bool | None = None,
+        extra_settings: dict | None = None,
+    ) -> ReelProfileRecord:
+        ...
+
+    def delete_by_agency_id(self, agency_id: str) -> bool:
         ...
 
 
@@ -377,7 +420,8 @@ class UnitOfWork(Protocol):
     scripted_video_store: ScriptedVideoArtifactStore
     wordpress_source_store: WordPressSourceStore
     agency_store: AgencyStore
-    gohighlevel_token_store: GoHighLevelTokenStore
+    ghl_connection_store: GoHighLevelConnectionStore
+    reel_profile_store: ReelProfileStore
 
     def begin_immediate(self) -> None:
         ...
@@ -391,12 +435,13 @@ class UnitOfWork(Protocol):
 
 __all__ = [
     "AgencyStore",
-    "GoHighLevelTokenStore",
+    "GoHighLevelConnectionStore",
     "JobQueueStore",
     "MediaRevisionStore",
     "OutboxEventStore",
     "PropertyPipelineStateRepository",
     "PropertyRepository",
+    "ReelProfileStore",
     "ScriptedVideoArtifactStore",
     "UnitOfWork",
     "WebhookEventStore",

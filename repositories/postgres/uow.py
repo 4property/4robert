@@ -4,12 +4,13 @@ from pathlib import Path
 
 from application.persistence import UnitOfWork
 from repositories.stores.agency_store import AgencyStore
-from repositories.stores.gohighlevel_token_store import GoHighLevelTokenStore
+from repositories.stores.ghl_connection_store import GoHighLevelConnectionStore
 from repositories.stores.media_revision_store import MediaRevisionRepository
 from repositories.stores.outbox_event_store import OutboxEventRepository
 from repositories.stores.job_queue_store import PropertyJobRepository
 from repositories.stores.pipeline_state_store import PipelineStateStore
 from repositories.stores.property_store import PropertyStore
+from repositories.stores.reel_profile_store import ReelProfileStore
 from repositories.stores.scripted_video_artifact_store import ScriptedVideoArtifactRepository
 from repositories.stores.webhook_event_store import WebhookDeliveryRepository
 from repositories.stores.wordpress_source_store import WordPressSourceStore
@@ -31,7 +32,8 @@ class DatabaseUnitOfWork:
         self.scripted_video_store = None
         self.wordpress_source_store = None
         self.agency_store = None
-        self.gohighlevel_token_store = None
+        self.ghl_connection_store = None
+        self.reel_profile_store = None
 
     def begin_immediate(self) -> None:
         if self.session is None:
@@ -80,7 +82,11 @@ class DatabaseUnitOfWork:
             self.database_locator,
             connection=self.connection,
         )
-        self.gohighlevel_token_store = GoHighLevelTokenStore(
+        self.ghl_connection_store = GoHighLevelConnectionStore(
+            self.database_locator,
+            connection=self.connection,
+        )
+        self.reel_profile_store = ReelProfileStore(
             self.database_locator,
             connection=self.connection,
         )
@@ -93,13 +99,16 @@ class DatabaseUnitOfWork:
         self.scripted_video_store.__enter__()
         self.wordpress_source_store.__enter__()
         self.agency_store.__enter__()
-        self.gohighlevel_token_store.__enter__()
+        self.ghl_connection_store.__enter__()
+        self.reel_profile_store.__enter__()
         self.session.commit()
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> None:
-        if self.gohighlevel_token_store is not None:
-            self.gohighlevel_token_store.__exit__(exc_type, exc, exc_tb)
+        if self.reel_profile_store is not None:
+            self.reel_profile_store.__exit__(exc_type, exc, exc_tb)
+        if self.ghl_connection_store is not None:
+            self.ghl_connection_store.__exit__(exc_type, exc, exc_tb)
         if self.agency_store is not None:
             self.agency_store.__exit__(exc_type, exc, exc_tb)
         if self.wordpress_source_store is not None:
