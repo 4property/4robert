@@ -565,6 +565,9 @@ class DefaultPropertyInfoService:
                 property_item=property_item,
                 property_url=publish_target_url,
                 platforms=desired_platforms,
+                templates_by_platform=getattr(
+                    publish_context, "social_templates_map", {}
+                ),
             )
             publish_descriptions_by_platform = dict(generated_content.captions_by_platform)
             publish_titles_by_platform = dict(generated_content.titles_by_platform)
@@ -1597,14 +1600,26 @@ class CompositeMediaPublisher:
             )
             return published_media
 
-        if REVIEW_WORKFLOW_ENABLED:
+        # Per-agency setting wins over the global env flag. Either signal
+        # holds the reel in `awaiting_review` until a human approves it
+        # via the editor's Approve / Reject controls.
+        agency_review_required = bool(
+            getattr(context.publish_context, "approval_required", False)
+        )
+        if agency_review_required or REVIEW_WORKFLOW_ENABLED:
             self._persist_workflow_transition(
                 context,
                 published_media,
                 workflow_state="awaiting_review",
                 outbox_event_type="review_requested",
                 publish_status="pending_review",
-                details={"reason": "review_workflow_enabled"},
+                details={
+                    "reason": (
+                        "agency_approval_required"
+                        if agency_review_required
+                        else "review_workflow_enabled"
+                    ),
+                },
                 last_published_location_id=context.publish_context.location_id,
             )
             logger.info(

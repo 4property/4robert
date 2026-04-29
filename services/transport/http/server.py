@@ -1127,6 +1127,66 @@ class WordPressWebhookApplication:
             return None
         return candidate_path
 
+    def list_reel_property_images(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+    ) -> tuple[dict, ...]:
+        with self.unit_of_work_factory() as unit_of_work:
+            return unit_of_work.property_repository.list_property_images(
+                site_id=site_id,
+                source_property_id=source_property_id,
+            )
+
+    def resolve_property_image_path(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+        position: int,
+    ) -> Path | None:
+        for image in self.list_reel_property_images(
+            site_id=site_id,
+            source_property_id=source_property_id,
+        ):
+            if int(image.get("position", -1)) != int(position):
+                continue
+            local_path = str(image.get("local_path") or "").strip()
+            if not local_path:
+                return None
+            candidate = Path(local_path)
+            if not candidate.is_absolute():
+                candidate = self.workspace_dir / candidate
+            if candidate.exists() and candidate.is_file():
+                return candidate
+            return None
+        return None
+
+    def resolve_reel_manifest_path(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+    ) -> Path | None:
+        item = self.get_agency_reel_detail(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if item is None:
+            return None
+        candidate = item.revision_metadata_path or ""
+        if not candidate:
+            return None
+        candidate_path = Path(candidate)
+        if not candidate_path.is_absolute():
+            candidate_path = self.workspace_dir / candidate_path
+        if not candidate_path.exists() or not candidate_path.is_file():
+            return None
+        return candidate_path
+
     def update_reel_workflow(
         self,
         *,
@@ -2970,6 +3030,205 @@ def create_fastapi_app(
             )
         return _build_range_response(request, video_path)
 
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/images",
+        tags=["Admin · Content"],
+        summary="List the property images that fed the reel",
+        description=(
+            "Returns every image WordPress shipped for the property, in "
+            "the order they were ingested. Each entry includes the "
+            "original `image_url` (so the frontend can fetch from the "
+            "WordPress media library directly), and a stable backend path "
+            "via `file_url` for whichever images were downloaded locally. "
+            "Used by the reel editor's **Photos** tab."
+        ),
+    )
+    async def list_admin_agency_reel_images(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        images = runtime.list_reel_property_images(
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        items = []
+        for image in images:
+            local_available = bool(
+                runtime.resolve_property_image_path(
+                    site_id=site_id,
+                    source_property_id=source_property_id,
+                    position=int(image["position"]),
+                )
+            )
+            items.append(
+                {
+                    "position": int(image["position"]),
+                    "image_url": image["image_url"],
+                    "local_path": image["local_path"],
+                    "has_local_file": local_available,
+                    "file_url": (
+                        f"{application.admin_access_policy.base_path}/agencies/"
+                        f"{agency_id}/reels/{site_id}/{source_property_id}/images/"
+                        f"{int(image['position'])}/file"
+                        if local_available
+                        else None
+                    ),
+                }
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "site_id": site_id,
+                "source_property_id": int(source_property_id),
+                "items": items,
+                "count": len(items),
+            },
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/images/{{position}}/file",
+        tags=["Admin · Content"],
+        summary="Stream one of the property's downloaded image files",
+        description=(
+            "Serves the locally-cached property image at the given "
+            "position. Returns 404 if the image was never downloaded. "
+            "The frontend prefers this URL because it works even when "
+            "the source WordPress site is offline."
+        ),
+    )
+    async def stream_admin_agency_reel_image(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        position: int,
+        request: Request,
+    ) -> Response:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        path = runtime.resolve_property_image_path(
+            site_id=site_id,
+            source_property_id=source_property_id,
+            position=position,
+        )
+        if path is None:
+            return _json_error(
+                404,
+                "No locally-cached file for this image position.",
+                code="ADMIN_REEL_IMAGE_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                    "position": position,
+                },
+            )
+        media_type = _guess_image_mime_type(path)
+
+        def iter_file():
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return StreamingResponse(
+            iter_file(),
+            media_type=media_type,
+            headers={"Cache-Control": "private, max-age=600"},
+        )
+
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
+        f"/reels/{{site_id}}/{{source_property_id}}/manifest",
+        tags=["Admin · Content"],
+        summary="Get the rendered reel's manifest JSON",
+        description=(
+            "Returns the resolved render manifest for the most recent "
+            "revision: scenes, durations, music selection, brand overlay "
+            "placement, subtitle layout. The frontend uses this to drive "
+            "the slide / scrubber UI and (eventually) to compute "
+            "re-render deltas when the user adds an extra slide."
+        ),
+        responses={
+            200: {"description": "Manifest JSON wrapped in `{ manifest: … }`."},
+            404: {"description": "No manifest is available for this reel."},
+        },
+    )
+    async def get_admin_agency_reel_manifest(
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        manifest_path = runtime.resolve_reel_manifest_path(
+            agency_id=agency_id,
+            site_id=site_id,
+            source_property_id=source_property_id,
+        )
+        if manifest_path is None:
+            return _json_error(
+                404,
+                "No manifest available for this reel.",
+                code="ADMIN_REEL_MANIFEST_NOT_FOUND",
+                details={
+                    "agency_id": agency_id,
+                    "site_id": site_id,
+                    "source_property_id": source_property_id,
+                },
+            )
+        try:
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_text)
+        except (OSError, json.JSONDecodeError) as error:
+            return _json_error(
+                500,
+                "Failed to read manifest.",
+                code="ADMIN_REEL_MANIFEST_READ_FAILED",
+                details={"error": str(error)},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "site_id": site_id,
+                "source_property_id": int(source_property_id),
+                "manifest_path": str(manifest_path.relative_to(runtime.workspace_dir))
+                if manifest_path.is_relative_to(runtime.workspace_dir)
+                else str(manifest_path),
+                "manifest": manifest,
+            },
+        )
+
     @app.post(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}"
         f"/reels/{{site_id}}/{{source_property_id}}/approve",
@@ -3345,6 +3604,22 @@ def create_fastapi_app(
                 if reel_profile is not None and reel_profile.platforms
                 else SOCIAL_PUBLISHING_DEFAULT_PLATFORMS
             )
+            agency_approval_required = bool(
+                reel_profile.approval_required if reel_profile is not None else False
+            )
+            agency_social_templates: tuple[tuple[str, str], ...] = ()
+            if reel_profile is not None:
+                raw_templates = (
+                    reel_profile.extra_settings.get("social_templates")
+                    if isinstance(reel_profile.extra_settings, dict)
+                    else None
+                )
+                if isinstance(raw_templates, dict):
+                    agency_social_templates = tuple(
+                        (str(key).strip().lower(), str(value))
+                        for key, value in raw_templates.items()
+                        if str(key).strip()
+                    )
             accepted_delivery = runtime.accept_webhook_delivery(
                 site_id=site_id,
                 property_id=property_id,
@@ -3355,6 +3630,8 @@ def create_fastapi_app(
                     location_id=ghl_connection.location_id,
                     access_token=ghl_connection.access_token,
                     platforms=resolved_platforms,
+                    approval_required=agency_approval_required,
+                    social_templates=agency_social_templates,
                 ),
             )
         except ResourceNotFoundError as error:
@@ -3864,6 +4141,21 @@ def _json_error(
 
 
 _VIDEO_STREAM_CHUNK_SIZE = 1024 * 1024  # 1 MiB per buffered chunk
+
+
+def _guess_image_mime_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".png":
+        return "image/png"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".gif":
+        return "image/gif"
+    if suffix == ".avif":
+        return "image/avif"
+    return "application/octet-stream"
 
 
 def _build_range_response(request: Request, file_path: Path) -> Response:

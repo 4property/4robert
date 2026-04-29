@@ -186,6 +186,40 @@ class PropertyStore(PostgresRepositoryBase):
         super().__init__(database_locator, connection=connection)
         self.base_dir = Path(base_dir).expanduser().resolve()
 
+    def list_property_images(
+        self,
+        *,
+        site_id: str,
+        source_property_id: int,
+    ) -> tuple[dict, ...]:
+        normalized_site_id = str(site_id or "").strip().lower()
+        rows = self.connection.execute(
+            f"""
+            SELECT
+                pi.position,
+                pi.image_url,
+                pi.local_path
+            FROM {PROPERTY_TABLE_NAME} AS p
+            INNER JOIN {PROPERTY_IMAGES_TABLE_NAME} AS pi
+                ON pi.record_id = p.record_id
+            WHERE p.site_id = :site_id
+                AND p.source_property_id = :source_property_id
+            ORDER BY pi.position ASC
+            """,
+            {
+                "site_id": normalized_site_id,
+                "source_property_id": int(source_property_id),
+            },
+        ).fetchall()
+        return tuple(
+            {
+                "position": int(row["position"] or 0),
+                "image_url": str(row["image_url"] or ""),
+                "local_path": str(row["local_path"] or ""),
+            }
+            for row in rows
+        )
+
     def list_recent_for_agency(
         self,
         *,
