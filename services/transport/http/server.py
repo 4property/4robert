@@ -182,6 +182,16 @@ class _AdminGhlConnectionUpsertPayload(BaseModel):
 
 
 class _AdminReelProfileUpsertPayload(BaseModel):
+    """Raw, low-level reel-profile body. Used by the admin "Reel settings" tab.
+
+    Prefer the per-section endpoints
+    (:py:class:`BrandSettingsUpsertPayload`,
+    :py:class:`ReelDefaultsUpsertPayload`,
+    :py:class:`AutomationRulesUpsertPayload`,
+    :py:class:`SocialTemplatesUpsertPayload`) for any flow that only needs to
+    edit a single concern.
+    """
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str | None = None
@@ -195,6 +205,252 @@ class _AdminReelProfileUpsertPayload(BaseModel):
     caption_template: str | None = None
     approval_required: bool | None = None
     extra_settings: dict | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Per-section reel-profile payloads — one per concern, so Swagger and the
+#  frontend hooks both make it obvious which slice of the agency configuration
+#  each endpoint owns.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class BrandSettingsUpsertPayload(BaseModel):
+    """Brand identity used for every reel rendered for the agency.
+
+    Persisted to:
+      * top-level columns ``brand_primary_color``, ``brand_secondary_color``,
+        ``logo_position`` on ``reel_profiles``;
+      * the ``brand`` sub-object inside ``extra_settings_json`` for the rest.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "primary_color": "#0F172A",
+                "secondary_color": "#FFFFFF",
+                "logo_position": "top-right",
+                "font": "Inter",
+                "tagline": "CKP Estate Agents",
+                "watermark_enabled": True,
+                "outro_enabled": True,
+                "outro_headline": "Book a viewing",
+                "outro_sub": "ckpestateagents.ie · 01 234 5678",
+            }
+        },
+    )
+
+    primary_color: str | None = Field(
+        default=None,
+        description="Primary brand colour, used for accents and overlays. Hex string.",
+        examples=["#0F172A"],
+    )
+    secondary_color: str | None = Field(
+        default=None,
+        description="Secondary brand colour, used for backgrounds and outro cards.",
+        examples=["#FFFFFF"],
+    )
+    logo_position: str | None = Field(
+        default=None,
+        description="Watermark anchor on the rendered reel.",
+        examples=["top-left", "top-right", "bottom-left", "bottom-right"],
+    )
+    font: str | None = Field(
+        default=None,
+        description="Heading font used in the reel and the outro card.",
+        examples=["Inter"],
+    )
+    tagline: str | None = Field(
+        default=None,
+        description="Short text rendered next to the logo / watermark.",
+        examples=["CKP Estate Agents"],
+    )
+    watermark_enabled: bool | None = Field(
+        default=None,
+        description="When true, every reel shows the small brand watermark.",
+    )
+    outro_enabled: bool | None = Field(
+        default=None,
+        description="When true, every reel ends with the brand outro card.",
+    )
+    outro_headline: str | None = Field(
+        default=None,
+        description="Headline displayed on the outro card.",
+        examples=["Book a viewing"],
+    )
+    outro_sub: str | None = Field(
+        default=None,
+        description="Sub-line displayed under the outro headline.",
+        examples=["ckpestateagents.ie · 01 234 5678"],
+    )
+
+
+class ReelDefaultsUpsertPayload(BaseModel):
+    """Global rendering defaults applied to every new reel for the agency.
+
+    Persisted to:
+      * top-level columns ``intro_enabled`` and ``duration_seconds`` on
+        ``reel_profiles`` (mirrored from the corresponding fields in
+        ``settings``);
+      * the ``defaults`` sub-object inside ``extra_settings_json`` for the
+        full INITIAL_DEFAULTS-shaped object the frontend manages.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "intro_enabled": True,
+                "duration_seconds": 30,
+                "settings": {
+                    "currency": "EUR",
+                    "language": "en-IE",
+                    "aspect": "3:4",
+                    "resolution": "1080p",
+                    "fps": "30",
+                    "subFont": "Inter",
+                    "subSize": 44,
+                    "subBgStyle": "pill",
+                    "musicVolume": 65,
+                    "kenBurns": True,
+                    "introCard": True,
+                    "outroCard": True,
+                },
+            }
+        },
+    )
+
+    intro_enabled: bool | None = Field(
+        default=None,
+        description="Whether to render an intro card at the start of every reel.",
+    )
+    duration_seconds: int | None = Field(
+        default=None,
+        ge=5,
+        le=180,
+        description="Target reel duration in seconds when no override is given.",
+        examples=[30],
+    )
+    settings: dict | None = Field(
+        default=None,
+        description=(
+            "Full default-rendering object as managed by the frontend "
+            "Defaults tab — format & locale, subtitles, video & timing, "
+            "intro/outro, audio, captions. Stored verbatim under "
+            "``extra_settings.defaults``."
+        ),
+    )
+
+
+class AutomationRulesUpsertPayload(BaseModel):
+    """Automation rules: when the pipeline finishes a reel, do we publish it
+    automatically or wait for human review?
+
+    Persisted to:
+      * top-level ``approval_required`` (= ``publish_mode == 'review'``);
+      * top-level ``platforms`` (the list of social channels to publish to);
+      * the ``automation`` sub-object inside ``extra_settings_json`` for the
+        review-window / quiet-hours / captions / regen rules.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "publish_mode": "auto",
+                "platforms": ["instagram", "tiktok", "facebook", "gbp"],
+                "review_window_enabled": True,
+                "review_window_hours": 1,
+                "quiet_hours_enabled": True,
+                "skip_weekends": False,
+                "auto_captions": True,
+                "regen_on_update": False,
+                "review_emails": "marvin@ckpestateagents.ie",
+            }
+        },
+    )
+
+    publish_mode: str | None = Field(
+        default=None,
+        description=(
+            "``auto`` publishes as soon as the reel is rendered. "
+            "``review`` parks the reel in ``awaiting_review`` until a human "
+            "approves it."
+        ),
+        examples=["auto", "review"],
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description="Social platforms the reel should be published to.",
+        examples=[["instagram", "tiktok", "facebook", "gbp"]],
+    )
+    review_window_enabled: bool | None = Field(
+        default=None,
+        description="When true, auto-publish waits for a configurable window before posting.",
+    )
+    review_window_hours: int | None = Field(
+        default=None,
+        ge=0,
+        le=168,
+        description="Length of the auto-publish hold window, in hours.",
+        examples=[1],
+    )
+    quiet_hours_enabled: bool | None = Field(
+        default=None,
+        description="When true, auto-publish skips the agency's quiet hours.",
+    )
+    skip_weekends: bool | None = Field(
+        default=None,
+        description="When true, auto-publish skips Saturdays and Sundays.",
+    )
+    auto_captions: bool | None = Field(
+        default=None,
+        description="Auto-generate subtitles via the AI pipeline.",
+    )
+    regen_on_update: bool | None = Field(
+        default=None,
+        description="Regenerate the reel automatically when the property data upstream changes.",
+    )
+    review_emails: str | None = Field(
+        default=None,
+        description="Comma-separated list of emails to notify when a reel needs review.",
+        examples=["marvin@ckpestateagents.ie, sarah@ckpestateagents.ie"],
+    )
+
+
+class SocialTemplatesUpsertPayload(BaseModel):
+    """Per-network description templates used when publishing to GoHighLevel.
+
+    Persisted to ``extra_settings_json.social_templates``. Each key is a
+    platform identifier (``instagram``, ``tiktok``, ``facebook``, ``linkedin``,
+    ``youtube``, ``gbp``) and the value is the full Mustache-style template
+    rendered by the publisher.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "templates": {
+                    "instagram": "{{property_title}} · {{price}}\n{{short_description}}\n👉 {{booking_link}}",
+                    "tiktok": "Just listed in {{neighborhood}} — {{property_title}}\n{{price}} · {{bedrooms}} bed",
+                }
+            }
+        },
+    )
+
+    templates: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Mapping of platform identifier to template string. "
+            "Unknown keys are accepted so future platforms do not need a "
+            "schema bump."
+        ),
+    )
 
 
 class _MvpGoHighLevelSessionPayload(BaseModel):
@@ -572,6 +828,44 @@ class WordPressWebhookApplication:
             unit_of_work.begin_immediate()
             return unit_of_work.reel_profile_store.delete_by_agency_id(agency_id)
 
+    def apply_reel_profile_section(
+        self,
+        *,
+        agency_id: str,
+        top_level: dict[str, Any] | None = None,
+        extras_key: str | None = None,
+        extras_patch: dict[str, Any] | None = None,
+    ):
+        """Replace a single section of the agency's reel profile.
+
+        ``top_level`` keys are forwarded directly to the store's
+        ``upsert_for_agency`` method.
+
+        When ``extras_key`` is provided, the existing
+        ``extra_settings_json[extras_key]`` value is replaced wholesale by
+        ``extras_patch``. Other ``extra_settings`` siblings (other section
+        keys, free-form values written by the raw admin endpoint) are
+        preserved untouched, so two tabs saving in parallel cannot stomp
+        each other's slice.
+        """
+
+        with self.unit_of_work_factory() as unit_of_work:
+            unit_of_work.begin_immediate()
+            existing = unit_of_work.reel_profile_store.get_by_agency_id(agency_id)
+            current_extras = dict(existing.extra_settings) if existing else {}
+            next_extras: dict[str, Any] = current_extras
+            if extras_key is not None:
+                next_extras = {**current_extras, extras_key: extras_patch or {}}
+
+            kwargs: dict[str, Any] = {
+                "agency_id": agency_id,
+                "extra_settings": next_extras,
+            }
+            for field_name, value in (top_level or {}).items():
+                if value is not None:
+                    kwargs[field_name] = value
+            return unit_of_work.reel_profile_store.upsert_for_agency(**kwargs)
+
     def list_agencies(self):
         with self.unit_of_work_factory() as unit_of_work:
             return unit_of_work.agency_store.list_agencies()
@@ -830,7 +1124,16 @@ def create_fastapi_app(
     async def health_ready(request: Request) -> JSONResponse:
         return await _health_ready_response(request)
 
-    @app.get("/mvp/gohighlevel/tokens", tags=["MVP"])
+    @app.get(
+        "/mvp/gohighlevel/tokens",
+        tags=["Session · GoHighLevel"],
+        summary="List every saved GoHighLevel connection",
+        description=(
+            "Returns one row per agency that has a stored GHL connection, "
+            "with the access token redacted (only `has_access_token` is "
+            "exposed). Used as a quick global health check."
+        ),
+    )
     async def list_mvp_gohighlevel_connections(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
         records = runtime.list_ghl_connections()
@@ -840,7 +1143,18 @@ def create_fastapi_app(
             content={"count": len(items), "items": items},
         )
 
-    @app.post("/mvp/gohighlevel/context", tags=["MVP"])
+    @app.post(
+        "/mvp/gohighlevel/context",
+        tags=["Session · GoHighLevel"],
+        summary="Decrypt the GoHighLevel iframe SSO payload",
+        description=(
+            "When the app is embedded in a HighLevel custom page, the "
+            "parent frame returns an encrypted `userData` blob via "
+            "postMessage. The frontend forwards it to this endpoint, "
+            "which decrypts it with `GO_HIGH_LEVEL_APP_SHARED_SECRET` "
+            "and returns the resolved `location_id` and `user_id`."
+        ),
+    )
     async def resolve_mvp_gohighlevel_context(
         payload: _MvpGoHighLevelContextPayload,
         request: Request,
@@ -901,7 +1215,17 @@ def create_fastapi_app(
             },
         )
 
-    @app.post("/mvp/gohighlevel/session", tags=["MVP"])
+    @app.post(
+        "/mvp/gohighlevel/session",
+        tags=["Session · GoHighLevel"],
+        summary="Create or refresh the agency-bound session for a GHL location",
+        description=(
+            "Given the active `location_id` and `user_id`, returns whether "
+            "the location is connected (i.e. has a saved access token) "
+            "and the `agency_id` it is linked to. The frontend uses this "
+            "to bootstrap the active agency for the entire app."
+        ),
+    )
     async def create_mvp_gohighlevel_session(
         payload: _MvpGoHighLevelSessionPayload,
         request: Request,
@@ -929,7 +1253,17 @@ def create_fastapi_app(
             },
         )
 
-    @app.post("/mvp/gohighlevel/test", tags=["MVP"])
+    @app.post(
+        "/mvp/gohighlevel/test",
+        tags=["Session · GoHighLevel"],
+        summary="Probe a GHL location's saved token and list its social accounts",
+        description=(
+            "Identical to `POST /admin/agencies/{id}/ghl-connection/test` "
+            "but keyed by `location_id` rather than agency_id. Returns "
+            "`GHL_CONNECTION_NOT_FOUND` if no connection is saved for "
+            "this location."
+        ),
+    )
     async def test_mvp_gohighlevel_connection(
         payload: _MvpGoHighLevelLocationPayload,
         request: Request,
@@ -987,7 +1321,14 @@ def create_fastapi_app(
 
     @app.get(
         f"{application.admin_access_policy.base_path}/wordpress-sources",
-        tags=["Admin"],
+        tags=["Admin · Sources"],
+        summary="List every WordPress source across all agencies",
+        description=(
+            "Flat global view used by the legacy admin screen. The "
+            "agency-scoped sources endpoint "
+            "(`GET /admin/agencies/{id}` returns the same data filtered "
+            "to that agency) is preferred for new flows."
+        ),
     )
     async def list_admin_wordpress_sources(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -1013,7 +1354,14 @@ def create_fastapi_app(
 
     @app.get(
         f"{application.admin_access_policy.base_path}/wordpress-sources/{{site_id}}",
-        tags=["Admin"],
+        tags=["Admin · Sources"],
+        summary="Get a single WordPress source by site_id",
+        description=(
+            "Looks up a WordPress source by the `site_id` (the value the "
+            "`rest_domain` body field carries on the inbound webhook). "
+            "Returns 404 with code `ADMIN_SOURCE_NOT_FOUND` if no source "
+            "is registered for that site."
+        ),
     )
     async def get_admin_wordpress_source(site_id: str, request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -1065,7 +1413,14 @@ def create_fastapi_app(
 
     @app.put(
         f"{application.admin_access_policy.base_path}/wordpress-sources/{{site_id}}",
-        tags=["Admin"],
+        tags=["Admin · Sources"],
+        summary="Create or update a WordPress source by site_id",
+        description=(
+            "Upserts the WordPress source identified by `site_id`. Will "
+            "create the agency on the fly if `agency_id` is omitted; "
+            "agencies cannot be reassigned through this endpoint, use the "
+            "agency-scoped `POST /admin/agencies/{id}/sources` instead."
+        ),
     )
     async def upsert_admin_wordpress_source(
         site_id: str,
@@ -1205,7 +1560,13 @@ def create_fastapi_app(
     # ── Admin: agencies ─────────────────────────────────────────────────
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies",
-        tags=["Admin"],
+        tags=["Admin · Agencies"],
+        summary="List all agencies with their sources, GHL connection and reel profile",
+        description=(
+            "Returns one entry per agency, eagerly hydrated with a count "
+            "of WordPress sources, the GHL connection summary, and the "
+            "reel profile snapshot. Used by the admin landing screen."
+        ),
     )
     async def list_admin_agencies(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -1227,7 +1588,15 @@ def create_fastapi_app(
 
     @app.post(
         f"{application.admin_access_policy.base_path}/agencies",
-        tags=["Admin"],
+        tags=["Admin · Agencies"],
+        summary="Create a new agency",
+        description=(
+            "Creates an empty agency. The slug is derived from `name` if "
+            "not supplied. After creation the agency has no WordPress "
+            "sources and no GHL connection — those are configured "
+            "separately via `/admin/agencies/{id}/sources` and "
+            "`/admin/agencies/{id}/ghl-connection`."
+        ),
     )
     async def create_admin_agency(
         payload: _AdminAgencyCreatePayload,
@@ -1267,7 +1636,14 @@ def create_fastapi_app(
 
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
-        tags=["Admin"],
+        tags=["Admin · Agencies"],
+        summary="Get one agency with its sources, GHL connection and reel profile",
+        description=(
+            "Returns the agency record plus its WordPress sources, the "
+            "GHL connection (if configured) and the full reel profile "
+            "(if customised). Used by the admin drawer when an agency is "
+            "opened."
+        ),
     )
     async def get_admin_agency(agency_id: str, request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -1298,7 +1674,13 @@ def create_fastapi_app(
 
     @app.patch(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
-        tags=["Admin"],
+        tags=["Admin · Agencies"],
+        summary="Update agency name / slug / timezone / status",
+        description=(
+            "Partial update — fields not present in the body keep their "
+            "current value. Slug is re-derived from `name` if `name` "
+            "changes and no explicit `slug` is provided."
+        ),
     )
     async def update_admin_agency(
         agency_id: str,
@@ -1338,7 +1720,14 @@ def create_fastapi_app(
 
     @app.delete(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}",
-        tags=["Admin"],
+        tags=["Admin · Agencies"],
+        summary="Delete an agency",
+        description=(
+            "Cascades to the agency's WordPress sources, GHL connection, "
+            "and reel profile (the FK constraints use ON DELETE CASCADE). "
+            "Properties and historical media revisions for the agency are "
+            "kept for audit."
+        ),
     )
     async def delete_admin_agency(agency_id: str, request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
@@ -1361,7 +1750,14 @@ def create_fastapi_app(
     # ── Admin: sources for an agency ────────────────────────────────────
     @app.post(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/sources",
-        tags=["Admin"],
+        tags=["Admin · Sources"],
+        summary="Add or update a WordPress source for an agency",
+        description=(
+            "Upserts the WordPress source identified by `site_id` and "
+            "binds it to this agency. The `site_id` is the value the "
+            "WordPress webhook sends as `rest_domain` — the backend "
+            "resolves the agency from this field at webhook time."
+        ),
     )
     async def upsert_admin_agency_source(
         agency_id: str,
@@ -1427,7 +1823,13 @@ def create_fastapi_app(
 
     @app.delete(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/sources/{{wordpress_source_id}}",
-        tags=["Admin"],
+        tags=["Admin · Sources"],
+        summary="Remove a WordPress source from an agency",
+        description=(
+            "Deletes the WordPress source identified by "
+            "`wordpress_source_id`. Inbound webhooks for the deleted "
+            "site_id will start failing with `UNKNOWN_WORDPRESS_SITE`."
+        ),
     )
     async def delete_admin_agency_source(
         agency_id: str,
@@ -1462,7 +1864,14 @@ def create_fastapi_app(
     # ── Admin: GHL connection per agency ────────────────────────────────
     @app.put(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection",
-        tags=["Admin"],
+        tags=["Admin · GHL connection"],
+        summary="Save (or replace) the agency's GoHighLevel connection",
+        description=(
+            "Stores the `location_id` and `access_token` (plus optional "
+            "refresh token and expiry) for the agency's GHL sub-account. "
+            "The webhook resolves these from the agency, so the WordPress "
+            "payload no longer needs to include them."
+        ),
     )
     async def upsert_admin_agency_ghl_connection(
         agency_id: str,
@@ -1516,7 +1925,13 @@ def create_fastapi_app(
 
     @app.delete(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection",
-        tags=["Admin"],
+        tags=["Admin · GHL connection"],
+        summary="Remove the agency's GoHighLevel connection",
+        description=(
+            "Deletes the connection. Subsequent webhooks for this agency "
+            "will be rejected with `GHL_CONNECTION_NOT_FOUND` until a new "
+            "connection is saved."
+        ),
     )
     async def delete_admin_agency_ghl_connection(
         agency_id: str,
@@ -1541,7 +1956,14 @@ def create_fastapi_app(
 
     @app.post(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/ghl-connection/test",
-        tags=["Admin"],
+        tags=["Admin · GHL connection"],
+        summary="Test the agency's GoHighLevel connection",
+        description=(
+            "Calls the GHL accounts endpoint with the stored connection "
+            "and returns the list of social accounts the location has "
+            "linked. Useful to verify that the saved access token still "
+            "works."
+        ),
     )
     async def test_admin_agency_ghl_connection(
         agency_id: str,
@@ -1593,10 +2015,25 @@ def create_fastapi_app(
             },
         )
 
-    # ── Admin: reel profile per agency ──────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Reel profile (raw)
+    #
+    #  Low-level full-document view of the agency's reel profile. Used by the
+    #  admin drawer's "Reel settings" tab. Most flows should use the more
+    #  focused per-section endpoints below
+    #  (Brand / Defaults / Automation / Social templates).
+    # ─────────────────────────────────────────────────────────────────────
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reel-profile",
-        tags=["Admin"],
+        tags=["Admin · Reel profile (raw)"],
+        summary="Read the full reel profile for an agency",
+        description=(
+            "Returns every column of the agency's `reel_profiles` row, "
+            "including the entire `extra_settings_json` object. "
+            "Prefer the per-section endpoints — `/brand`, `/defaults`, "
+            "`/automation`, `/social-templates` — when you only need a "
+            "single concern, so concurrent saves do not stomp each other."
+        ),
     )
     async def get_admin_agency_reel_profile(
         agency_id: str,
@@ -1621,7 +2058,15 @@ def create_fastapi_app(
 
     @app.put(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reel-profile",
-        tags=["Admin"],
+        tags=["Admin · Reel profile (raw)"],
+        summary="Replace the full reel profile for an agency",
+        description=(
+            "Performs an upsert against every column of the agency's "
+            "`reel_profiles` row. Any field omitted from the body is "
+            "preserved. `extra_settings`, when present, replaces the "
+            "entire object — it does not merge per key. Use the per-section "
+            "endpoints if you only need to edit one slice."
+        ),
     )
     async def upsert_admin_agency_reel_profile(
         agency_id: str,
@@ -1675,10 +2120,453 @@ def create_fastapi_app(
             content={"status": "saved", "reel_profile": record.to_public_dict()},
         )
 
-    # ── Admin: agency content surfaces ──────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Brand
+    #
+    #  Edits the agency's brand identity. Persisted to the
+    #  `brand_primary_color`, `brand_secondary_color`, `logo_position`
+    #  columns plus `extra_settings.brand` for the rest.
+    # ─────────────────────────────────────────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/brand",
+        tags=["Admin · Brand"],
+        summary="Get the agency's brand identity",
+        description=(
+            "Returns the brand slice of the reel profile — the colours, "
+            "the watermark, the outro card, and the heading font. Used by "
+            "the agency-facing **Brand** tab."
+        ),
+    )
+    async def get_agency_brand_settings(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "brand": _serialize_brand_section(profile),
+            },
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/brand",
+        tags=["Admin · Brand"],
+        summary="Update the agency's brand identity",
+        description=(
+            "Replaces only the brand slice of the agency's reel profile. "
+            "`primary_color`, `secondary_color`, and `logo_position` are "
+            "stored as top-level columns; the rest is merged under "
+            "`extra_settings.brand`. Other sections of "
+            "`extra_settings` (defaults, automation, social_templates) are "
+            "left untouched."
+        ),
+    )
+    async def update_agency_brand_settings(
+        agency_id: str,
+        payload: BrandSettingsUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        existing = runtime.get_reel_profile(agency_id=agency_id)
+        existing_brand = (existing.extra_settings.get("brand") if existing else {}) or {}
+        merged_brand: dict[str, Any] = {**existing_brand}
+        for field_name in (
+            "font",
+            "tagline",
+            "watermark_enabled",
+            "outro_enabled",
+            "outro_headline",
+            "outro_sub",
+        ):
+            value = getattr(payload, field_name)
+            if value is not None:
+                merged_brand[field_name] = value
+
+        try:
+            record = runtime.apply_reel_profile_section(
+                agency_id=agency_id,
+                top_level={
+                    "brand_primary_color": payload.primary_color,
+                    "brand_secondary_color": payload.secondary_color,
+                    "logo_position": payload.logo_position,
+                },
+                extras_key="brand",
+                extras_patch=merged_brand,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "BRAND_SAVE_FAILED"),
+                hint=error.hint,
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "saved",
+                "agency_id": agency_id,
+                "brand": _serialize_brand_section(record),
+            },
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Defaults
+    #
+    #  Edits the global rendering defaults for every reel the agency
+    #  produces. Persisted to `intro_enabled`, `duration_seconds` plus
+    #  `extra_settings.defaults` for the full INITIAL_DEFAULTS object.
+    # ─────────────────────────────────────────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/defaults",
+        tags=["Admin · Defaults"],
+        summary="Get the agency's reel rendering defaults",
+        description=(
+            "Returns the defaults slice — intro, duration, and the full "
+            "`extra_settings.defaults` document used by the **Defaults** "
+            "tab (format & locale, subtitles, video & timing, audio, "
+            "captions)."
+        ),
+    )
+    async def get_agency_reel_defaults(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "defaults": _serialize_defaults_section(profile),
+            },
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/defaults",
+        tags=["Admin · Defaults"],
+        summary="Update the agency's reel rendering defaults",
+        description=(
+            "Replaces only the defaults slice. `intro_enabled` and "
+            "`duration_seconds` are mirrored to the corresponding top-level "
+            "columns; the `settings` body is stored verbatim under "
+            "`extra_settings.defaults`. Other extras are preserved."
+        ),
+    )
+    async def update_agency_reel_defaults(
+        agency_id: str,
+        payload: ReelDefaultsUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        existing = runtime.get_reel_profile(agency_id=agency_id)
+        existing_defaults = (
+            existing.extra_settings.get("defaults") if existing else {}
+        ) or {}
+        next_defaults: dict[str, Any] = (
+            {**existing_defaults, **payload.settings}
+            if payload.settings is not None
+            else dict(existing_defaults)
+        )
+
+        try:
+            record = runtime.apply_reel_profile_section(
+                agency_id=agency_id,
+                top_level={
+                    "intro_enabled": payload.intro_enabled,
+                    "duration_seconds": payload.duration_seconds,
+                },
+                extras_key="defaults",
+                extras_patch=next_defaults,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "REEL_DEFAULTS_SAVE_FAILED"),
+                hint=error.hint,
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "saved",
+                "agency_id": agency_id,
+                "defaults": _serialize_defaults_section(record),
+            },
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Automation
+    #
+    #  Edits the publishing automation rules. Persisted to
+    #  `approval_required` and `platforms` plus
+    #  `extra_settings.automation` for the rest.
+    # ─────────────────────────────────────────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/automation",
+        tags=["Admin · Automation"],
+        summary="Get the agency's automation rules",
+        description=(
+            "Returns the automation slice: publish mode (auto vs review), "
+            "the publish target platforms, the review window, quiet hours, "
+            "captions, regen-on-update, and review email recipients. Used "
+            "by the **Automation** tab."
+        ),
+    )
+    async def get_agency_automation_rules(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "automation": _serialize_automation_section(profile),
+            },
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/automation",
+        tags=["Admin · Automation"],
+        summary="Update the agency's automation rules",
+        description=(
+            "Replaces only the automation slice. `publish_mode === 'review'` "
+            "becomes `approval_required = true`; `platforms` is mirrored "
+            "verbatim to the top-level column. Window/quiet-hours/captions/"
+            "regen/emails are merged into `extra_settings.automation`."
+        ),
+    )
+    async def update_agency_automation_rules(
+        agency_id: str,
+        payload: AutomationRulesUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        existing = runtime.get_reel_profile(agency_id=agency_id)
+        existing_automation = (
+            existing.extra_settings.get("automation") if existing else {}
+        ) or {}
+        merged_automation: dict[str, Any] = {**existing_automation}
+        for field_name in (
+            "review_window_enabled",
+            "review_window_hours",
+            "quiet_hours_enabled",
+            "skip_weekends",
+            "auto_captions",
+            "regen_on_update",
+            "review_emails",
+        ):
+            value = getattr(payload, field_name)
+            if value is not None:
+                merged_automation[field_name] = value
+
+        approval_required: bool | None = None
+        if payload.publish_mode is not None:
+            approval_required = payload.publish_mode.strip().lower() == "review"
+
+        try:
+            record = runtime.apply_reel_profile_section(
+                agency_id=agency_id,
+                top_level={
+                    "approval_required": approval_required,
+                    "platforms": payload.platforms,
+                },
+                extras_key="automation",
+                extras_patch=merged_automation,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "AUTOMATION_SAVE_FAILED"),
+                hint=error.hint,
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "saved",
+                "agency_id": agency_id,
+                "automation": _serialize_automation_section(record),
+            },
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Social templates
+    #
+    #  Edits the per-network description templates used at publish time.
+    #  Persisted under `extra_settings.social_templates`.
+    # ─────────────────────────────────────────────────────────────────────
+    @app.get(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/social-templates",
+        tags=["Admin · Social templates"],
+        summary="Get the agency's per-network description templates",
+        description=(
+            "Returns the templates map keyed by platform identifier. The "
+            "**Social** tab uses these to render the publish caption for "
+            "each network."
+        ),
+    )
+    async def get_agency_social_templates(
+        agency_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+        profile = runtime.get_reel_profile(agency_id=agency_id)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "agency_id": agency_id,
+                "templates": _serialize_social_templates(profile),
+            },
+        )
+
+    @app.put(
+        f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/social-templates",
+        tags=["Admin · Social templates"],
+        summary="Update the agency's per-network description templates",
+        description=(
+            "Replaces the full templates map under "
+            "`extra_settings.social_templates`. Other extras are preserved."
+        ),
+    )
+    async def update_agency_social_templates(
+        agency_id: str,
+        payload: SocialTemplatesUpsertPayload,
+        request: Request,
+    ) -> JSONResponse:
+        runtime = _get_runtime(request)
+        authorization_error = _authorize_admin_request(request, runtime)
+        if authorization_error is not None:
+            return authorization_error
+        if runtime.get_agency(agency_id=agency_id) is None:
+            return _json_error(
+                404,
+                "The agency does not exist.",
+                code="ADMIN_AGENCY_NOT_FOUND",
+                details={"agency_id": agency_id},
+            )
+
+        normalized_templates = {
+            str(key).strip().lower(): str(value)
+            for key, value in (payload.templates or {}).items()
+            if str(key).strip()
+        }
+
+        try:
+            record = runtime.apply_reel_profile_section(
+                agency_id=agency_id,
+                top_level=None,
+                extras_key="social_templates",
+                extras_patch=normalized_templates,
+            )
+        except ApplicationError as error:
+            return _json_error(
+                500,
+                str(error),
+                code=getattr(error, "code", "SOCIAL_TEMPLATES_SAVE_FAILED"),
+                hint=error.hint,
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "saved",
+                "agency_id": agency_id,
+                "templates": _serialize_social_templates(record),
+            },
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    #  Admin · Content
+    #
+    #  Read-only views the agency-facing UI uses to render its dashboard.
+    # ─────────────────────────────────────────────────────────────────────
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/reels",
-        tags=["Admin"],
+        tags=["Admin · Content"],
+        summary="List the agency's recent reels",
+        description=(
+            "Returns the most recent reels for the agency, joining the "
+            "`properties` row, the latest `property_pipeline_state`, and "
+            "the most recent `media_revisions` row. Used by the agency "
+            "**Reels** dashboard."
+        ),
     )
     async def list_admin_agency_reels(
         agency_id: str,
@@ -1712,7 +2600,15 @@ def create_fastapi_app(
 
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/social-accounts",
-        tags=["Admin"],
+        tags=["Admin · Content"],
+        summary="List social accounts linked to the agency's GHL location",
+        description=(
+            "Wraps the GoHighLevel accounts API using the agency's stored "
+            "connection. Returns `{connected, items, ...}`. If the agency "
+            "has no GHL connection (or the test call fails), the response "
+            "is still 200 with `connected: false` plus a `reason` code so "
+            "the frontend can render an empty state without crashing."
+        ),
     )
     async def list_admin_agency_social_accounts(
         agency_id: str,
@@ -1778,7 +2674,14 @@ def create_fastapi_app(
 
     @app.get(
         f"{application.admin_access_policy.base_path}/agencies/{{agency_id}}/music-tracks",
-        tags=["Admin"],
+        tags=["Admin · Content"],
+        summary="List the agency's music library",
+        description=(
+            "**Stub endpoint.** The music library has no backing table "
+            "yet, so this always returns `{items: [], implemented: false}`. "
+            "The frontend uses this signal to render a `Music library is "
+            "not yet wired to a backing table` notice."
+        ),
     )
     async def list_admin_agency_music_tracks(
         agency_id: str,
@@ -1808,7 +2711,24 @@ def create_fastapi_app(
             },
         )
 
-    @app.post(application.path)
+    @app.post(
+        application.path,
+        tags=["Webhooks"],
+        summary="Receive a property webhook from a WordPress site",
+        description=(
+            "Resolution chain on every call:\n"
+            "1. The body's `rest_domain` is normalised into `site_id`.\n"
+            "2. `site_id` is looked up in `wordpress_sources` to resolve "
+            "the agency.\n"
+            "3. The agency's stored GHL connection is loaded "
+            "(`location_id` + access token).\n"
+            "4. The agency's reel profile picks the platforms to "
+            "publish to.\n"
+            "5. The job is enqueued.\n\n"
+            "Failure codes: `UNKNOWN_WORDPRESS_SITE` (step 2), "
+            "`GHL_CONNECTION_NOT_FOUND` (step 3)."
+        ),
+    )
     async def receive_property_webhook(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
         site_id = _get_header_value(request, runtime.site_id_header)
@@ -2122,7 +3042,17 @@ def create_fastapi_app(
             },
         )
 
-    @app.post("/videos/scripted/render")
+    @app.post(
+        "/videos/scripted/render",
+        tags=["Webhooks"],
+        summary="Render a scripted video manifest synchronously",
+        description=(
+            "Renders the supplied scripted video manifest and returns the "
+            "resolved artifact paths. Used by clients that want to "
+            "produce a video without going through the WordPress webhook "
+            "pipeline."
+        ),
+    )
     async def render_scripted_video(request: Request) -> JSONResponse:
         runtime = _get_runtime(request)
         content_type = request.headers.get("Content-Type", "")
@@ -2457,6 +3387,71 @@ def _json_error(
     if details:
         payload["details"] = details
     return JSONResponse(status_code=status_code, content=payload)
+
+
+_DEFAULT_BRAND_PRIMARY_COLOR = "#0F172A"
+_DEFAULT_BRAND_SECONDARY_COLOR = "#FFFFFF"
+_DEFAULT_LOGO_POSITION = "top-right"
+
+
+def _serialize_brand_section(profile: object | None) -> dict[str, object]:
+    extras = getattr(profile, "extra_settings", {}) or {}
+    brand = extras.get("brand") if isinstance(extras, dict) else {}
+    brand = brand or {}
+    return {
+        "primary_color": getattr(profile, "brand_primary_color", None)
+        or _DEFAULT_BRAND_PRIMARY_COLOR,
+        "secondary_color": getattr(profile, "brand_secondary_color", None)
+        or _DEFAULT_BRAND_SECONDARY_COLOR,
+        "logo_position": getattr(profile, "logo_position", None) or _DEFAULT_LOGO_POSITION,
+        "font": brand.get("font") or "Inter",
+        "tagline": brand.get("tagline") or "",
+        "watermark_enabled": bool(brand.get("watermark_enabled", True)),
+        "outro_enabled": bool(brand.get("outro_enabled", True)),
+        "outro_headline": brand.get("outro_headline") or "",
+        "outro_sub": brand.get("outro_sub") or "",
+    }
+
+
+def _serialize_defaults_section(profile: object | None) -> dict[str, object]:
+    extras = getattr(profile, "extra_settings", {}) or {}
+    defaults = extras.get("defaults") if isinstance(extras, dict) else {}
+    return {
+        "intro_enabled": bool(getattr(profile, "intro_enabled", True))
+        if profile is not None
+        else True,
+        "duration_seconds": int(getattr(profile, "duration_seconds", 30) or 30)
+        if profile is not None
+        else 30,
+        "settings": defaults if isinstance(defaults, dict) else {},
+    }
+
+
+def _serialize_automation_section(profile: object | None) -> dict[str, object]:
+    extras = getattr(profile, "extra_settings", {}) or {}
+    automation = extras.get("automation") if isinstance(extras, dict) else {}
+    automation = automation or {}
+    approval_required = bool(getattr(profile, "approval_required", False)) if profile else False
+    platforms = list(getattr(profile, "platforms", ()) or ())
+    return {
+        "publish_mode": "review" if approval_required else "auto",
+        "platforms": platforms,
+        "review_window_enabled": bool(automation.get("review_window_enabled", True)),
+        "review_window_hours": int(automation.get("review_window_hours", 1) or 0),
+        "quiet_hours_enabled": bool(automation.get("quiet_hours_enabled", True)),
+        "skip_weekends": bool(automation.get("skip_weekends", False)),
+        "auto_captions": bool(automation.get("auto_captions", True)),
+        "regen_on_update": bool(automation.get("regen_on_update", False)),
+        "review_emails": automation.get("review_emails") or "",
+    }
+
+
+def _serialize_social_templates(profile: object | None) -> dict[str, str]:
+    extras = getattr(profile, "extra_settings", {}) or {}
+    raw = extras.get("social_templates") if isinstance(extras, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
 
 
 def _serialize_agency_reel(item: object) -> dict[str, object]:
