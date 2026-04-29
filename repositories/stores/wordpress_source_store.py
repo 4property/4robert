@@ -237,6 +237,78 @@ class WordPressSourceStore(PostgresRepositoryBase):
             updated_at=_timestamp_to_text(row["updated_at"]),
         )
 
+    def list_sources_for_agency(
+        self, agency_id: str
+    ) -> tuple[WordPressSourceDetailsRecord, ...]:
+        normalized_agency_id = str(agency_id or "").strip()
+        if not normalized_agency_id:
+            return ()
+        rows = self.connection.execute(
+            """
+            SELECT
+                source.id,
+                source.agency_id,
+                source.site_id,
+                source.name,
+                source.site_url,
+                source.normalized_host,
+                source.status,
+                source.last_event_at,
+                source.created_at,
+                source.updated_at,
+                agency.name AS agency_name,
+                agency.slug AS agency_slug,
+                agency.timezone AS agency_timezone,
+                agency.status AS agency_status,
+                CASE
+                    WHEN source.webhook_secret_encrypted IS NULL
+                        OR octet_length(source.webhook_secret_encrypted) = 0
+                    THEN FALSE
+                    ELSE TRUE
+                END AS has_webhook_secret
+            FROM wordpress_sources AS source
+            INNER JOIN agencies AS agency
+                ON agency.id = source.agency_id
+            WHERE source.agency_id = :agency_id
+            ORDER BY source.site_id ASC
+            """,
+            {"agency_id": normalized_agency_id},
+        ).fetchall()
+        return tuple(
+            WordPressSourceDetailsRecord(
+                wordpress_source_id=str(row["id"]),
+                agency_id=str(row["agency_id"]),
+                agency_name=str(row["agency_name"] or ""),
+                agency_slug=str(row["agency_slug"] or ""),
+                agency_timezone=str(row["agency_timezone"] or ""),
+                agency_status=str(row["agency_status"] or ""),
+                site_id=str(row["site_id"] or ""),
+                name=str(row["name"] or ""),
+                site_url=None if row["site_url"] is None else str(row["site_url"]),
+                normalized_host=str(row["normalized_host"] or ""),
+                status=str(row["status"] or ""),
+                has_webhook_secret=bool(row["has_webhook_secret"]),
+                last_event_at=_timestamp_to_text(row["last_event_at"]),
+                created_at=_timestamp_to_text(row["created_at"]),
+                updated_at=_timestamp_to_text(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    def delete_source(self, wordpress_source_id: str) -> bool:
+        normalized_id = str(wordpress_source_id or "").strip()
+        if not normalized_id:
+            return False
+        row = self.connection.execute(
+            """
+            DELETE FROM wordpress_sources
+            WHERE id = :wordpress_source_id
+            RETURNING id
+            """,
+            {"wordpress_source_id": normalized_id},
+        ).fetchone()
+        return row is not None
+
     def list_sources(self) -> tuple[WordPressSourceDetailsRecord, ...]:
         rows = self.connection.execute(
             """

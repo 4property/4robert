@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -294,14 +295,70 @@ class ScriptedVideoArtifactModel(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class GoHighLevelConnectionModel(Base):
+    __tablename__ = "ghl_connections"
+    __table_args__ = (
+        UniqueConstraint("agency_id", name="uq_ghl_connections_agency_id"),
+        Index("idx_ghl_connections_location_id", "location_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agency_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agencies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    location_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    user_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    access_token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    refresh_token: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="active")
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ReelProfileModel(Base):
+    __tablename__ = "reel_profiles"
+    __table_args__ = (
+        UniqueConstraint("agency_id", name="uq_reel_profiles_agency_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    agency_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agencies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="Default")
+    platforms_json: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default='["tiktok","instagram","linkedin","youtube","facebook","gbp"]',
+    )
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    music_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    intro_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    logo_position: Mapped[str] = mapped_column(Text, nullable=False, default="top-right")
+    brand_primary_color: Mapped[str] = mapped_column(Text, nullable=False, default="#0F172A")
+    brand_secondary_color: Mapped[str] = mapped_column(Text, nullable=False, default="#FFFFFF")
+    caption_template: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    extra_settings_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 __all__ = [
     "AgencyModel",
+    "GoHighLevelConnectionModel",
     "JobQueueModel",
     "MediaRevisionModel",
     "OutboxEventModel",
     "PropertyImageModel",
     "PropertyModel",
     "PropertyPipelineStateModel",
+    "ReelProfileModel",
     "ScriptedVideoArtifactModel",
     "WebhookEventModel",
     "WordPressSourceModel",
