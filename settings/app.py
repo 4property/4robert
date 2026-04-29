@@ -251,6 +251,10 @@ class AppSettings(BaseSettings):
         "2021-07-28",
         validation_alias="GO_HIGH_LEVEL_API_VERSION",
     )
+    go_high_level_app_shared_secret: str = Field(
+        "",
+        validation_alias=AliasChoices("GO_HIGH_LEVEL_APP_SHARED_SECRET", "GHL_APP_SHARED_SECRET"),
+    )
     social_publishing_default_platforms: Annotated[tuple[str, ...], NoDecode] = Field(
         (
             "tiktok",
