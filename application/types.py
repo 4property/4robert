@@ -30,16 +30,24 @@ class SocialPublishContext:
     location_id: str
     access_token: str
     platforms: tuple[str, ...]
+    approval_required: bool = False
+    social_templates: tuple[tuple[str, str], ...] = ()
 
     def to_dict(self, *, include_access_token: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
             "provider": self.provider,
             "location_id": self.location_id,
             "platforms": list(self.platforms),
+            "approval_required": self.approval_required,
+            "social_templates": dict(self.social_templates),
         }
         if include_access_token:
             payload["access_token"] = self.access_token
         return payload
+
+    @property
+    def social_templates_map(self) -> dict[str, str]:
+        return dict(self.social_templates)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any] | None) -> "SocialPublishContext | None":
@@ -58,11 +66,23 @@ class SocialPublishContext:
             platforms = _normalise_platforms((payload.get("platform"),))
         if not provider or not location_id or not platforms:
             return None
+        approval_required = bool(payload.get("approval_required", False))
+        raw_templates = payload.get("social_templates") or {}
+        if isinstance(raw_templates, dict):
+            normalized_templates = tuple(
+                (str(key).strip().lower(), str(value))
+                for key, value in raw_templates.items()
+                if str(key).strip()
+            )
+        else:
+            normalized_templates = ()
         return cls(
             provider=provider,
             location_id=location_id,
             access_token=access_token,
             platforms=platforms,
+            approval_required=approval_required,
+            social_templates=normalized_templates,
         )
 
 
