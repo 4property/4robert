@@ -1,0 +1,266 @@
+{
+  "project": "4reels-back",
+  "description": "Backend FastAPI multi-tenant. Phase 4 — hardening del contrato live front↔back: autenticación real para /v1/admin/* y payloads estrictos compatibles con Pydantic. Phase 3 cerrada el 2026-05-06; el snapshot histórico vive en progress/history.md y los artefactos de contrato en docs/http_surface.md + docs/openapi.json.",
+  "phase": "Phase 4 — frontend/backend live contract hardening",
+  "rules": {
+    "one_feature_at_a_time": true,
+    "require_tests_to_close": true,
+    "require_review_to_close": true,
+    "valid_status": [
+      "pending",
+      "in_progress",
+      "done",
+      "blocked"
+    ],
+    "code_lives_in": [
+      "apps/",
+      "modules/",
+      "shared/",
+      "settings/",
+      "alembic/",
+      "tests/"
+    ],
+    "legacy_dirs_frozen": []
+  },
+  "ordering_notes": [
+    "Modo serial estricto: una feature a la vez. Las 4 features son ortogonales (cada una toca un router/módulo distinto) pero se ejecutan en orden de id para mantener el repo trivialmente verificable tras cada cierre.",
+    "Phase 3 es cross-repo: las features 2 y 3 también modifican `4reels front/`. La feature 4 lee el front desde el back (test de contrato). Coordinar con `4reels front/feature_list.json` antes de cerrar — el implementer debe abrir la entrada equivalente allí.",
+    "Sin commits intermedios (regla heredada de Phase 2). Cierre de feature = `pytest -q` verde en back + suites del front verdes + `python -m apps.api --check` + `python -m apps.worker --check` exit 0 + reviewer APPROVED.",
+    "Tras cerrar las 4 features, Phase 3 se da por terminada. El backlog candidato para Phase 4 (multi-provider real, multi-source de ingestión, dashboard de jobs, hardening de observabilidad) vive en REFACTOR_STATUS.md §Phase 4 backlog candidates y NO debe arrancarse hasta que el usuario apruebe alcance.",
+    "Reglas operativas detalladas en `docs/phase_3_operating_rules.md`. Si chocan con este JSON, gana el doc (los textos del JSON se redactaron antes de los spikes por feature)."
+  ],
+  "features": [
+    {
+      "id": 1,
+      "name": "rename_scripted_render_to_v1",
+      "title": "POST /videos/scripted/render → POST /v1/videos/scripted/render",
+      "description": "Último endpoint público del repo que no está bajo /v1/. Mover el path para alinearlo con la convención de Phase 3. Cambio mínimo: prefijo del APIRouter en scripted_router.py + actualización de tests, docs y la colección Postman versionada. Sin tocar use case ni el handler del worker (ya consume el job desde la cola, no la URL).",
+      "module": "modules/rendering/",
+      "scope": {
+        "back": [
+          "Añadir `prefix=\"/v1\"` al `APIRouter(...)` en `modules/rendering/transport/http/scripted_router.py:49` (alternativa: cambiar el path literal `\"/videos/scripted/render\"` → `\"/v1/videos/scripted/render\"`). Decidir según el resto de routers sin admin_access_policy (health usa rutas planas; coherencia: usar prefix `/v1`).",
+          "Adaptar `tests/integration/rendering/test_scripted_router.py` para invocar la URL nueva en los 6 tests existentes (ver progress/history.md feature 8).",
+          "`grep -rn '/videos/scripted/render' .` en back y front para localizar referencias literales remanentes (esperado: `test-postman_collection.json`, `docs/API.md`, `.env.example` si lo menciona). Actualizar todas.",
+          "Actualizar la fila de la tabla en `REFACTOR_STATUS.md` § Phase 3 marcando A1 hecho."
+        ],
+        "front": [
+          "Ningún cambio: no hay caller en el frontend (verificado con `grep -rn 'scripted/render' 4reels\\ front/src 4reels\\ front/tests`)."
+        ],
+        "external": [
+          "El endpoint lo invocan integradores externos vía HMAC. Documentar el rename en `docs/API.md` y dejar nota en el cierre de la feature para que el usuario avise a consumers conocidos. NO se publica un alias legacy: el contrato externo de scripted_render no estaba estabilizado (se cambió de sync a async en feature 8 de Phase 2)."
+        ]
+      },
+      "acceptance": [
+        "POST /v1/videos/scripted/render devuelve 202 con `{status: 'accepted', job_id, event_id, site_id, source_property_id}`",
+        "POST /videos/scripted/render devuelve 404 (sin alias legacy)",
+        "Suite `tests/integration/rendering/test_scripted_router.py` actualizada y verde",
+        "`grep -rn '/videos/scripted/render' .` (excluyendo `progress/history.md`, `docs/phase_2_operating_rules.md` y este `feature_list.json`) devuelve 0 hits",
+        "pytest -q termina verde (baseline 394+)",
+        "python -m apps.api --check exit 0",
+        "python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "./init.sh",
+        "Test manual: arrancar `compose up`, hacer POST con HMAC válido a `/v1/videos/scripted/render`, comprobar 202 + fila en `webhook_events` con `source_kind='scripted_api'` y `jobs.kind='scripted_render'`."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 2,
+      "name": "align_music_endpoint_front_to_back",
+      "title": "Frontend consume /v1/admin/agencies/{id}/music (CRUD real); retirar el stub /music-tracks",
+      "description": "El backend cerró el CRUD de música por track durante feature 6 de Phase 2 bajo `/v1/admin/agencies/{id}/music` (POST/GET list/GET id/PUT/DELETE), pero el frontend (incluido el mock-backend de Playwright) sigue llamando al stub legacy `/v1/admin/agencies/{id}/music-tracks`. Esto deja la pantalla de música rota en producción. Esta feature alinea el front al contrato real del back: actualiza la URL, amplía `musicApi` con register/inspect/reconfigure/decommission, adapta `MusicLibrary.jsx` y `MusicRules.jsx` al shape `{music_id, display_name, object_key, duration_seconds, is_default, created_at}` que devuelve el back, y actualiza `tests/support/mock-backend.js` con el contrato nuevo.",
+      "module": "(cross-repo: 4reels front/src/features/music/, 4reels front/tests/, 4reels back/docs/API.md)",
+      "scope": {
+        "back": [
+          "Documentar en `docs/API.md` el contrato definitivo del CRUD de música: 5 verbos, request/response shape, códigos de error (`MUSIC_TRACK_SAVE_FAILED`, `RESOURCE_NOT_FOUND`).",
+          "Añadir `tests/integration/configuration/test_music_router_smoke.py` (si no está ya cubierto por la suite que cerró feature 6) — verifica que la list response devuelve `{agency_id, items, count}` con el shape per-track exacto que el front espera.",
+          "Sin cambios en el código del back: los endpoints ya existen desde Phase 2 feature 6."
+        ],
+        "front": [
+          "`src/features/music/api.js`: cambiar `/music-tracks` → `/music`; añadir `registerTrack`, `inspectTrack`, `reconfigureTrack`, `decommissionTrack` siguiendo el shape del back.",
+          "`src/features/music/hooks.js`: exponer hooks para los nuevos verbos siguiendo el patrón usado en `features/brand/hooks.js`.",
+          "`src/features/music/MusicLibrary.jsx` y `MusicRules.jsx`: adaptar la UI a la respuesta `{agency_id, items, count}` y al shape per-track. Renombrar identificadores (`id`/`track_id` → `music_id`) en props/state local donde haga falta.",
+          "`tests/support/mock-backend.js`: cambiar la regex `/music-tracks` por `/music` y devolver el contrato canónico (no `{implemented: false}`).",
+          "Tests Playwright: si existe un test E2E para la pantalla de música, adaptar selectores y aserciones; si no existe, añadir uno mínimo (lista + create + delete) en `tests/playwright/music.spec.js`."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Pantalla `Music` del dashboard front lista, crea, edita y borra tracks contra el back real (verificación con `compose up` corriendo)",
+        "`grep -rn 'music-tracks' 4reels\\ front/src 4reels\\ front/tests` devuelve 0 hits",
+        "`tests/support/mock-backend.js` devuelve el contrato canónico del back",
+        "Smoke test integration en el back verde",
+        "pytest -q en back termina verde",
+        "Suites del front (lint + unit + Playwright) verdes",
+        "El frontend abre una entrada equivalente en `4reels front/feature_list.json` y la cierra coordinada con esta"
+      ],
+      "verification": [
+        "Backend: ./init.sh",
+        "Front: ./init.sh (lint + unit + Playwright)",
+        "Manual: `compose up`, navegar a `Admin → Agency → Music`, comprobar CRUD completo y que ningún request 4xx aparece en la consola"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 3,
+      "name": "resolve_session_me_endpoint",
+      "title": "Decidir e implementar el endpoint /me (o eliminar getCurrentUser del front)",
+      "description": "`SessionProvider.jsx:59` invoca `sessionApi.getCurrentUser()` que llama a `apiRequest('/me')`, pero el backend no expone `/me` (no hay tabla `users` ni autenticación de usuario propia — el flujo real es SSO de GoHighLevel + bearer admin token). Esto deja al SessionProvider en estado `error` permanente y el fallback CSS de `session.css` se dispara silenciosamente. La feature decide entre dos opciones documentadas en un spike previo y aplica la elegida.",
+      "module": "(cross-repo: 4reels front/src/features/session/, posiblemente 4reels back/modules/tenancy/ + apps/api/app_factory.py)",
+      "scope": {
+        "spike": [
+          "Sub-task 0 (obligatoria): documentar en `progress/explore_feature_3_resolve_me.md` qué información usa realmente la UI a partir de `getCurrentUser()` (rol super-admin vs agency, agency_id activo, capacidades, email). Mapear cada uso. Decidir Opción A vs B según el resultado y registrar la decisión con `Why:`.",
+          "Recomendación a priori: Opción B (eliminar). El proyecto no tiene tabla `users` ni autenticación per-usuario. La identidad efectiva sale del bearer token (super-admin) o del SSO context de GHL (agency user). `/me` sería un wrapper sintético sobre datos que el front ya tiene."
+        ],
+        "option_a_implement_back": [
+          "Crear `modules/tenancy/transport/http/me_router.py` con `GET /v1/me`. Devuelve `{role: 'super_admin' | 'agency_user', agency_id?, agency_slug?, capabilities[]}` derivado de los headers que el front envía.",
+          "Use case `inspect_current_session` en `modules/tenancy/application/use_cases/`. Recibe los headers normalizados (no `Request` directo) para mantener el use case puro.",
+          "Registrar el router en `apps/api/app_factory.py`.",
+          "Tests unit del use case (4 escenarios: super-admin token / GHL session válida / GHL session caducada / sin auth) + integration del router."
+        ],
+        "option_b_remove_from_front": [
+          "`src/features/session/api.js`: eliminar `getCurrentUser` y la entrada en `sessionApi`.",
+          "`src/features/session/SessionProvider.jsx`: derivar el rol/agencia desde `ghlMvpContext` (que ya decodifica el SSO) y/o desde la presencia del bearer admin token. Eliminar el `useApi(() => sessionApi.getCurrentUser(), [])` y los estados de loading/error asociados.",
+          "`src/features/session/session.css`: borrar las reglas del fallback `/me`-loading y la nota residual del comentario inicial.",
+          "Adaptar tests E2E de session/login: el provider debe llegar a estado `ready` sin llamar a `/me`."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Spike documentado en `progress/explore_feature_3_resolve_me.md` con la decisión final y su `Why:`",
+        "Decisión registrada en `docs/API.md` (sección Sessions) — qué endpoint existe o no y cómo se deriva la identidad",
+        "Si Opción A: `GET /v1/me` devuelve 200 con shape canónico para super-admin y agency_user; tests unit + integration verdes",
+        "Si Opción B: `grep -rn \"'/me'\\|\\\"/me\\\"\" 4reels\\ front/src` devuelve 0 hits y SessionProvider funciona",
+        "El front no muestra el fallback de error de `session.css` en el camino feliz (verificación manual con DevTools abierto: ningún 4xx a `/me`)",
+        "pytest -q (back) y suites del front verdes"
+      ],
+      "verification": [
+        "Backend: ./init.sh",
+        "Front: ./init.sh",
+        "Manual: arrancar la app, comprobar que el shell se monta sin warnings/errors en consola tanto para el flujo super-admin como para el flujo GHL embed"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 4,
+      "name": "http_surface_audit_and_contract_test",
+      "title": "Tabla canónica de endpoints + test de contrato cross-repo",
+      "description": "Cierre de Phase 3. Genera y versiona `docs/http_surface.md` con la tabla canónica de cada endpoint del back (verbo + path + módulo + nombre del handler), publica `docs/openapi.json` desde la app real, y añade `tests/integration/test_http_surface_contract.py` que verifica que cada `apiRequest('<path>', ...)` del frontend tiene un endpoint vivo en el back. Detiene la deriva front↔back que originó las features 2 y 3 de Phase 3.",
+      "module": "tests/integration/, docs/, scripts/ (nuevo) o apps/api/_introspection.py",
+      "scope": {
+        "back": [
+          "Crear `scripts/generate_http_surface.py` (preferido) o `apps/api/_introspection.py` (si encaja con el factory ya existente): construye `build_api_app(...)` con flags de testing y emite Markdown con `(verbo, path, tag, handler_name, module)` ordenado alfabéticamente.",
+          "Ejecutarlo y commitear `docs/http_surface.md`.",
+          "Generar `docs/openapi.json` desde la misma app (ya existe el flag `WEBHOOK_ENABLE_DOCS=true`). Versionar el JSON formateado con `python -m json.tool`.",
+          "`tests/integration/test_http_surface_contract.py`:",
+          "  - Lee `4reels front/src/**/*.{js,jsx}` y extrae `apiRequest('<literal>', ...)` con regex sobre literales. Si encuentra interpolación que no puede normalizar, falla explícitamente listando el archivo+línea.",
+          "  - Normaliza placeholders front → back: `${encodeURIComponent(agencyId)}` → `{agency_id}`, `${siteId}` → `{site_id}`, etc. Mapping table en el propio test (≤30 entradas, fácil de mantener).",
+          "  - Construye `build_api_app(...)` y compara contra `app.routes`: cada path normalizado debe matchear una ruta del back con el mismo verbo HTTP.",
+          "  - Falla con un mensaje accionable: `Front llama a GET /v1/admin/agencies/{id}/music-tracks pero back solo expone GET /v1/admin/agencies/{id}/music — corregir 4reels front/src/features/music/api.js:5`.",
+          "  - Localización del front: el test asume el layout `c:/Users/4pm/Desktop/4reels/4reels front/`. Hacerlo configurable vía env var `FRONTEND_REPO_ROOT` con default a esa ruta.",
+          "Documentar en `docs/conventions.md` que cualquier endpoint nuevo debe pasar por este test, y cómo añadir mappings de placeholders cuando el front introduce un nuevo identificador."
+        ],
+        "front": [
+          "Sin cambios obligatorios. Si el test descubre algún path roto residual no contemplado por features 2 o 3, abrir un issue en `4reels front/feature_list.json` (no resolver en esta feature)."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Existe `docs/http_surface.md` con la tabla canónica autogenerada (commit-eada como artifact, no en `.gitignore`)",
+        "Existe `docs/openapi.json` versionado y formateado",
+        "Existe `tests/integration/test_http_surface_contract.py` y pasa contra el front actual (post-features 1, 2, 3)",
+        "El test falla con mensaje claro si se introduce un mismatch — verificar manualmente cambiando temporalmente un `apiRequest('/v1/admin/agencies')` por un path inexistente en el front, ejecutando el test, y revirtiendo",
+        "`docs/conventions.md` documenta el contrato y cómo extender el mapping de placeholders",
+        "pytest -q termina verde",
+        "python -m apps.api --check exit 0"
+      ],
+      "verification": [
+        "./init.sh",
+        "Probar regresión: cambiar temporalmente un path en `4reels front/src/features/admin/api.js` por uno inexistente, ejecutar `pytest tests/integration/test_http_surface_contract.py -v` y verificar el mensaje de error; revertir."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 5,
+      "name": "frontend_admin_auth_lockstep",
+      "title": "Autenticación real para llamadas del frontend a /v1/admin/*",
+      "description": "El frontend llama correctamente a rutas /v1/admin/*, pero src/lib/api/client.js no adjunta Authorization y el backend exige Bearer ADMIN_API_TOKEN salvo testing. Esta feature define e implementa un contrato seguro para que el frontend pueda operar contra el backend real: super-admin con token admin y usuario agency-scoped desde sesión GoHighLevel sin exponer secretos estáticos en el bundle.",
+      "module": "cross-repo: apps/api/admin_auth.py, modules/publishing/transport/http/sessions_router.py, 4reels front/src/lib/api/client.js, 4reels front/src/features/session/",
+      "scope": {
+        "back": [
+          "Definir el contrato de autorización live: super-admin sigue usando ADMIN_API_TOKEN; sesiones GoHighLevel reciben un token corto agency-scoped emitido por /v1/sessions/gohighlevel/session cuando la location tiene agency_id conectado.",
+          "Extender la autorización de /v1/admin/* para aceptar tokens agency-scoped solo en rutas /v1/admin/agencies/{agency_id}/... cuyo agency_id coincide; mantener rechazo para /v1/admin/agencies global y acciones cross-tenant.",
+          "No relajar Pydantic ni desactivar ADMIN_API_DISABLE_AUTH_FOR_TESTING fuera de tests.",
+          "Añadir tests de integración: sin token -> 401, token admin -> acceso global, token agency válido -> acceso a su agencia, token agency contra otra agencia -> 403, token agency contra listado global -> 403.",
+          "Documentar en docs/API.md y docs/conventions.md cómo se autentican las llamadas live del frontend."
+        ],
+        "front": [
+          "src/lib/api/client.js: implementar getAuthHeaders() para adjuntar Authorization desde el estado de sesión/token autorizado, sin hardcodear secretos en el bundle.",
+          "src/features/session/: persistir de forma controlada el token agency-scoped devuelto por /v1/sessions/gohighlevel/session y limpiarlo al reset/logout.",
+          "Admin-direct mode: documentar y soportar un mecanismo local explícito para token super-admin (por ejemplo input/session storage) sin usar VITE_ADMIN_API_TOKEN como secreto de producción.",
+          "Actualizar Playwright mock-backend si los tests necesitan validar presencia de Authorization.",
+          "Actualizar .env.example eliminando ambigüedad entre VITE_API_URL/VITE_MVP_API_URL y explicando que los secretos admin no deben ir embebidos en builds públicos."
+        ],
+        "external": [
+          "No cambia el contrato de webhooks WordPress ni scripted render; solo afecta clientes que consumen /v1/admin/*."
+        ]
+      },
+      "acceptance": [
+        "El frontend puede listar agencias en modo super-admin contra el backend real con ADMIN_API_DISABLE_AUTH_FOR_TESTING=false",
+        "El frontend puede usar pantallas agency-scoped tras sesión GHL conectada sin recibir 401/503",
+        "Un token agency-scoped no puede acceder a otra agencia ni al listado global de agencias",
+        "No hay VITE_ADMIN_API_TOKEN ni secreto equivalente embebido como recomendación de producción",
+        "tests de integración de auth admin/agency verdes",
+        "npm run lint, npm run build y smoke del front verdes",
+        "pytest -q en back verde"
+      ],
+      "verification": [
+        "Backend: ./init.sh o equivalente PowerShell de AGENTS.md",
+        "Front: ./init.sh",
+        "Manual: backend con ADMIN_API_DISABLE_AUTH_FOR_TESTING=false, abrir front en admin-direct y en sesión GHL, comprobar que no hay 401/503 en DevTools para /v1/admin/*"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 6,
+      "name": "fix_frontend_backend_payload_contract",
+      "title": "Alinear payloads estrictos del frontend con Pydantic del backend",
+      "description": "El test de superficie confirma que rutas y verbos existen, pero varias pantallas envían campos que el backend rechaza con extra='forbid'. Esta feature corrige los shapes de Sources, Brand y Automation, actualiza docs/env obsoletos y añade cobertura para que no vuelva a derivar el contrato live.",
+      "module": "cross-repo: 4reels front/src/features/{admin,brand,automation,defaults}/, modules/configuration/transport/payloads/, modules/ingestion/transport/payloads/, tests/",
+      "scope": {
+        "back": [
+          "Mantener Pydantic estricto; no resolver el problema aceptando campos legacy innecesarios.",
+          "Añadir o ampliar tests de integración que documenten los payloads aceptados por /sources, /brand, /automation y /defaults.",
+          "Si se decide preservar campos UX como tagline/outro/watermark, documentar explícitamente si pertenecen a defaults.settings o requieren schema propio; no añadir backward-compat sin necesidad concreta.",
+          "Actualizar docs/API.md y docs/openapi.json/http_surface si cambia algún contrato real."
+        ],
+        "front": [
+          "Sources: cambiar source_name -> name y source_status -> status; al editar usar PUT /v1/admin/agencies/{agency_id}/sources/{ingestion_source_id} en vez de POST /sources.",
+          "Brand: enviar solo primary_color, secondary_color, logo_position, logo_object_key, intro_logo_object_key, font_family; leer font_family en lugar de font. No enviar tagline, watermark_enabled, outro_enabled, outro_headline ni outro_sub al endpoint /brand mientras el backend no los acepte.",
+          "Automation: enviar solo approval_required, publish_window_start, publish_window_end, publish_days y trigger_on_status. Retirar publish_mode, platforms, review_window_enabled, review_window_hours, quiet_hours_enabled, skip_weekends, auto_captions, regen_on_update y review_emails del PUT /automation.",
+          "Defaults: si la UI necesita persistir platforms o ajustes libres, enviarlos por /defaults usando platforms/settings, porque defaults es el owner canónico de platforms.",
+          "Actualizar comentarios de api.js/hooks.js que describen shapes antiguos.",
+          "Actualizar tests/support/mock-backend.js para rechazar o no depender de campos que el backend real no acepta.",
+          "Actualizar DOCS.md y .env.example: retirar 'everything mocked' si ya no aplica y clarificar VITE_MVP_API_URL/VITE_API_URL."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Crear/editar/borrar WordPress sources desde Admin no produce 422 contra backend real",
+        "Guardar Brand no produce 422 y persiste font_family/logo/colors soportados",
+        "Guardar Automation no produce 422 y persiste los campos soportados por agency_automation_rules",
+        "Platforms se persisten únicamente por /defaults o queda documentado que no se editan desde Automation",
+        "No quedan en payloads live los campos source_name, source_status, font, tagline, watermark_enabled, outro_enabled, outro_headline, outro_sub, publish_mode, review_window_enabled, quiet_hours_enabled ni regen_on_update hacia endpoints que los rechazan",
+        "Tests Playwright o smoke cubren los saves principales sin 4xx",
+        "pytest -q en back y suites del front verdes"
+      ],
+      "verification": [
+        "Backend: ./init.sh o equivalente PowerShell de AGENTS.md",
+        "Front: ./init.sh",
+        "Manual: con backend real, guardar Sources, Brand, Defaults y Automation; comprobar en DevTools que no hay 422 y que las respuestas contienen los shapes esperados"
+      ],
+      "status": "done"
+    }
+  ]
+}

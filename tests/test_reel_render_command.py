@@ -8,9 +8,9 @@ APPLICATION_ROOT = Path(__file__).resolve().parents[1]
 if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
-from services.media.reel_rendering.models import PropertyReelTemplate
-from services.media.reel_rendering.formatting import resolve_agency_logo_box_size, resolve_ber_icon_size
-from services.media.reel_rendering.render import _build_ffmpeg_reel_command
+from modules.rendering.infrastructure.models import PropertyReelTemplate
+from modules.rendering.infrastructure.formatting import resolve_agency_logo_box_size, resolve_ber_icon_size
+from modules.rendering.infrastructure.ffmpeg.commands import build_ffmpeg_reel_command as _build_ffmpeg_reel_command
 
 
 class ReelRenderCommandTests(unittest.TestCase):

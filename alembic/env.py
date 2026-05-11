@@ -6,8 +6,8 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from settings import DATABASE_URL
-from repositories.postgres.base import Base
-from repositories.postgres import models as _models  # noqa: F401
+from shared.db.base import Base
+from shared.db import orm as _orm  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))

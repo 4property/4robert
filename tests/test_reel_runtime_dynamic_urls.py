@@ -15,8 +15,8 @@ APPLICATION_ROOT = Path(__file__).resolve().parents[1]
 if str(APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(APPLICATION_ROOT))
 
-from services.media.reel_rendering.models import PropertyRenderData, PropertyReelTemplate
-from services.media.reel_rendering.runtime import (
+from modules.rendering.infrastructure.models import PropertyRenderData, PropertyReelTemplate
+from modules.rendering.infrastructure.runtime import (
     download_remote_image,
     prepare_agent_image,
     prepare_cover_logo_image,
@@ -91,7 +91,7 @@ class ReelRuntimeDynamicUrlTests(unittest.TestCase):
                     raise HTTPError(request.full_url, 406, "Not Acceptable", hdrs=None, fp=None)
                 return _FakeResponse(b"image-bytes")
 
-            with patch("services.media.reel_rendering.runtime.urlopen", side_effect=fake_urlopen):
+            with patch("modules.rendering.infrastructure.runtime.assets.urlopen", side_effect=fake_urlopen):
                 downloaded_path = download_remote_image(image_url, destination)
 
             self.assertEqual(downloaded_path, destination)
@@ -116,7 +116,7 @@ class ReelRuntimeDynamicUrlTests(unittest.TestCase):
                 return destination
 
             with patch(
-                "services.media.reel_rendering.runtime.download_remote_image",
+                "modules.rendering.infrastructure.runtime.branding.download_remote_image",
                 side_effect=fake_download,
             ) as download_mock:
                 downloaded_path = prepare_agent_image(
@@ -143,7 +143,7 @@ class ReelRuntimeDynamicUrlTests(unittest.TestCase):
                 return destination
 
             with patch(
-                "services.media.reel_rendering.runtime.download_remote_image",
+                "modules.rendering.infrastructure.runtime.branding.download_remote_image",
                 side_effect=fake_download,
             ) as download_mock:
                 downloaded_path = prepare_cover_logo_image(

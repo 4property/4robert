@@ -1,0 +1,3534 @@
+{
+  "components": {
+    "schemas": {
+      "AdminAgencyCreatePayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/admin/agencies`.",
+        "example": {
+          "name": "CKP Estate Agents",
+          "slug": "ckp",
+          "status": "active",
+          "timezone": "Europe/Dublin"
+        },
+        "properties": {
+          "name": {
+            "description": "Display name of the agency.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URL-safe identifier; derived from `name` if blank.",
+            "title": "Slug"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lifecycle status such as `active` or `paused`.",
+            "title": "Status"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "IANA timezone used for scheduling.",
+            "title": "Timezone"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AdminAgencyCreatePayload",
+        "type": "object"
+      },
+      "AdminAgencyUpdatePayload": {
+        "additionalProperties": false,
+        "description": "Body for `PATCH /v1/admin/agencies/{agency_id}`.",
+        "example": {
+          "name": "CKP Estate Agents (Dublin)",
+          "status": "active"
+        },
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New display name for the agency.",
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New URL-safe identifier.",
+            "title": "Slug"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Updated lifecycle status.",
+            "title": "Status"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Updated IANA timezone.",
+            "title": "Timezone"
+          }
+        },
+        "title": "AdminAgencyUpdatePayload",
+        "type": "object"
+      },
+      "AutomationRulesUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/automation`.\n\nAutomation rules persist to `agency_automation_rules`. `platforms` is\nintentionally NOT accepted here — the canonical owner is\n`agency_reel_defaults` (the `/defaults` endpoint).",
+        "example": {
+          "approval_required": false,
+          "publish_days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "publish_window_end": "20:00",
+          "publish_window_start": "09:00",
+          "trigger_on_status": [
+            "for_sale",
+            "to_let"
+          ]
+        },
+        "properties": {
+          "approval_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When true, reels are parked in `awaiting_review` until a human approves them; when false, the pipeline auto-publishes.",
+            "title": "Approval Required"
+          },
+          "publish_days": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Three-letter lowercase weekdays when auto-publish runs.",
+            "examples": [
+              [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri"
+              ]
+            ],
+            "title": "Publish Days"
+          },
+          "publish_window_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest publish time of day, in `HH:MM` (24h, agency timezone).",
+            "examples": [
+              "20:00"
+            ],
+            "title": "Publish Window End"
+          },
+          "publish_window_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Earliest publish time of day, in `HH:MM` (24h, agency timezone).",
+            "examples": [
+              "09:00"
+            ],
+            "title": "Publish Window Start"
+          },
+          "trigger_on_status": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Property statuses that trigger reel generation.",
+            "examples": [
+              [
+                "for_sale",
+                "to_let"
+              ]
+            ],
+            "title": "Trigger On Status"
+          }
+        },
+        "title": "AutomationRulesUpsertPayload",
+        "type": "object"
+      },
+      "BrandSettingsUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/brand`.\n\nEvery field is optional so the frontend can save one input at a time\nwithout resending the whole brand block. Omitted fields preserve the\npreviously stored value (or fall back to the per-section default if\nnone was stored before).",
+        "example": {
+          "font_family": "Inter",
+          "intro_logo_object_key": "agencies/ckp/intro-logo.png",
+          "logo_object_key": "agencies/ckp/logo.png",
+          "logo_position": "top-right",
+          "primary_color": "#0F172A",
+          "secondary_color": "#FFFFFF"
+        },
+        "properties": {
+          "font_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Heading font used in the reel and the outro card.",
+            "examples": [
+              "Inter"
+            ],
+            "title": "Font Family"
+          },
+          "intro_logo_object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Object storage key for the intro-card logo asset.",
+            "title": "Intro Logo Object Key"
+          },
+          "logo_object_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Object storage key for the watermark logo asset.",
+            "title": "Logo Object Key"
+          },
+          "logo_position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Watermark anchor on the rendered reel.",
+            "examples": [
+              "top-left",
+              "top-right",
+              "bottom-left",
+              "bottom-right"
+            ],
+            "title": "Logo Position"
+          },
+          "primary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary brand colour, used for accents and overlays. Hex string.",
+            "examples": [
+              "#0F172A"
+            ],
+            "title": "Primary Color"
+          },
+          "secondary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Secondary brand colour, used for backgrounds and outro cards.",
+            "examples": [
+              "#FFFFFF"
+            ],
+            "title": "Secondary Color"
+          }
+        },
+        "title": "BrandSettingsUpsertPayload",
+        "type": "object"
+      },
+      "GlobalWordPressSourceUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PUT /v1/admin/wordpress-sources/{site_id}``.\n\nThe ``site_id`` is taken from the URL (the value WordPress posts as\n``rest_domain`` in the webhook body). Omit ``agency_id`` to have the\nendpoint create a placeholder agency on the fly.",
+        "example": {
+          "agency_id": "0c0a2c63-9d24-4f1f-8c2b-22b6a09e4b3e",
+          "site_url": "https://janetcarroll.ie",
+          "source_name": "Janet Carroll",
+          "source_status": "active"
+        },
+        "properties": {
+          "agency_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID of the owning agency. Leave blank to auto-create.",
+            "title": "Agency Id"
+          },
+          "agency_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Used when auto-creating the agency.",
+            "title": "Agency Name"
+          },
+          "agency_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Used when auto-creating the agency.",
+            "title": "Agency Slug"
+          },
+          "agency_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "active"
+            ],
+            "title": "Agency Status"
+          },
+          "agency_timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "Europe/Dublin"
+            ],
+            "title": "Agency Timezone"
+          },
+          "normalized_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hostname stored verbatim. Defaults to the lowercased ``site_id``.",
+            "title": "Normalized Host"
+          },
+          "site_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical site URL (used for display only).",
+            "examples": [
+              "https://janetcarroll.ie"
+            ],
+            "title": "Site Url"
+          },
+          "source_name": {
+            "description": "Human-readable name of the WordPress site.",
+            "examples": [
+              "Janet Carroll"
+            ],
+            "minLength": 1,
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "active",
+              "paused"
+            ],
+            "title": "Source Status"
+          },
+          "webhook_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional shared secret to require when WEBHOOK_DISABLE_SECURITY is off.",
+            "title": "Webhook Secret"
+          }
+        },
+        "required": [
+          "source_name"
+        ],
+        "title": "GlobalWordPressSourceUpsertPayload",
+        "type": "object"
+      },
+      "GoHighLevelContextPayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/sessions/gohighlevel/context`.",
+        "example": {
+          "encryptedData": "U2FsdGVkX1+abc123..."
+        },
+        "properties": {
+          "encrypted_data": {
+            "description": "Encrypted user-context blob received from the GHL parent frame.",
+            "minLength": 1,
+            "title": "Encrypted Data",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encrypted_data"
+        ],
+        "title": "GoHighLevelContextPayload",
+        "type": "object"
+      },
+      "GoHighLevelLocationPayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/sessions/gohighlevel/test`.",
+        "example": {
+          "location_id": "v8H1XNB3YCQmVHRhqDoM"
+        },
+        "properties": {
+          "location_id": {
+            "description": "GHL location id whose stored access token should be probed.",
+            "minLength": 1,
+            "title": "Location Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location_id"
+        ],
+        "title": "GoHighLevelLocationPayload",
+        "type": "object"
+      },
+      "GoHighLevelSessionPayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/sessions/gohighlevel/session`.",
+        "example": {
+          "location_id": "v8H1XNB3YCQmVHRhqDoM",
+          "user_id": "5lichOFpkqT72Jb7adil"
+        },
+        "properties": {
+          "location_id": {
+            "description": "The GHL sub-account location id the user opened the app from.",
+            "minLength": 1,
+            "title": "Location Id",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The GHL user id resolved from the iframe SSO payload or fallback.",
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location_id",
+          "user_id"
+        ],
+        "title": "GoHighLevelSessionPayload",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IngestionSourceCreatePayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/admin/agencies/{agency_id}/sources`.",
+        "example": {
+          "name": "CKP Estate Agents",
+          "site_id": "ckp.ie",
+          "site_url": "https://ckp.ie",
+          "status": "active"
+        },
+        "properties": {
+          "kind": {
+            "default": "wordpress",
+            "description": "Ingestion source kind.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name shown in the admin.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "normalized_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults to `site_id` lowercased.",
+            "title": "Normalized Host"
+          },
+          "site_id": {
+            "description": "Lowercased hostname identifying the WordPress site. Must match the value sent as `rest_domain` in webhook bodies.",
+            "examples": [
+              "ckp.ie"
+            ],
+            "minLength": 1,
+            "title": "Site Id",
+            "type": "string"
+          },
+          "site_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "https://ckp.ie"
+            ],
+            "title": "Site Url"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "active",
+              "paused"
+            ],
+            "title": "Status"
+          },
+          "webhook_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional per-site secret used to verify webhook signatures.",
+            "title": "Webhook Secret"
+          }
+        },
+        "required": [
+          "site_id",
+          "name"
+        ],
+        "title": "IngestionSourceCreatePayload",
+        "type": "object"
+      },
+      "IngestionSourceUpdatePayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/sources/{ingestion_source_id}`.",
+        "example": {
+          "name": "CKP Estate Agents Dublin",
+          "site_url": "https://ckp.ie",
+          "status": "active"
+        },
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "normalized_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Host"
+          },
+          "site_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Url"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "active",
+              "paused"
+            ],
+            "title": "Status"
+          },
+          "webhook_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional shared secret used to verify webhook signatures. Send the key (even with empty string) to clear it.",
+            "title": "Webhook Secret"
+          }
+        },
+        "title": "IngestionSourceUpdatePayload",
+        "type": "object"
+      },
+      "MusicTrackPatchPayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/music/{music_id}`.\n\nEvery field is optional: omitted fields preserve the previously stored\nvalue.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 600.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "object_key": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Key"
+          }
+        },
+        "title": "MusicTrackPatchPayload",
+        "type": "object"
+      },
+      "MusicTrackPayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST /v1/admin/agencies/{agency_id}/music`.\n\nUsed to register a brand new music track. The `id` is generated server\nside; the client only supplies the descriptive fields.",
+        "example": {
+          "display_name": "Sunset Drive",
+          "duration_seconds": 28,
+          "is_default": false,
+          "object_key": "agencies/ckp/music/sunset-drive.mp3"
+        },
+        "properties": {
+          "display_name": {
+            "description": "Human-readable label shown in the music picker.",
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Duration of the track in seconds. Must be positive.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 600.0,
+            "title": "Duration Seconds",
+            "type": "integer"
+          },
+          "is_default": {
+            "default": false,
+            "description": "When true, this track is highlighted as the default for new reels.",
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "object_key": {
+            "description": "Object storage key for the audio asset.",
+            "minLength": 1,
+            "title": "Object Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "object_key",
+          "duration_seconds"
+        ],
+        "title": "MusicTrackPayload",
+        "type": "object"
+      },
+      "ProviderConnectionUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Body for `POST` and `PUT /v1/admin/agencies/{agency_id}/ghl-connection`.\n\nBackwards-compatible with the legacy admin panel: it ships the shape\n`{location_id, user_id, access_token, refresh_token, expires_at, status}`.\nThe router maps that to the new `(external_id, secrets, config)` model\nbefore calling the use case, so the panel keeps working without changes.",
+        "example": {
+          "access_token": "ghl-access-token-...",
+          "expires_at": "2026-12-31T00:00:00Z",
+          "location_id": "v8H1XNB3YCQmVHRhqDoM",
+          "refresh_token": "ghl-refresh-token-...",
+          "status": "active",
+          "user_id": "5lichOFpkqT72Jb7adil"
+        },
+        "properties": {
+          "access_token": {
+            "description": "OAuth access token. Stored encrypted; never echoed back.",
+            "minLength": 1,
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "description": "ISO-8601 expiry of the access token. Optional.",
+            "title": "Expires At"
+          },
+          "location_id": {
+            "description": "GoHighLevel sub-account location id stored as `external_id`.",
+            "minLength": 1,
+            "title": "Location Id",
+            "type": "string"
+          },
+          "refresh_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "description": "OAuth refresh token. Stored encrypted; optional.",
+            "title": "Refresh Token"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Connection lifecycle status (`active`, `revoked`, ...).",
+            "examples": [
+              "active"
+            ],
+            "title": "Status"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "GHL user id; falls back to `manual` when omitted.",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "location_id",
+          "access_token"
+        ],
+        "title": "ProviderConnectionUpsertPayload",
+        "type": "object"
+      },
+      "ReelDefaultsUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/defaults`.\n\nDefaults is the canonical owner of `platforms` (which channels reels\npublish to). The free-form `settings` dict mirrors the frontend\nINITIAL_DEFAULTS shape (currency, language, aspect, resolution, fps,\nsubFont, subSize, subBgStyle, musicVolume, kenBurns, introCard,\noutroCard, etc.) and is merged shallow with the previously stored\nobject.",
+        "example": {
+          "caption_template": "{{property_title}} · {{price}}",
+          "duration_seconds": 30,
+          "intro_enabled": true,
+          "music_id": "default-track",
+          "platforms": [
+            "instagram",
+            "tiktok",
+            "facebook",
+            "gbp"
+          ],
+          "settings": {
+            "aspect": "3:4",
+            "currency": "EUR",
+            "fps": "30",
+            "introCard": true,
+            "kenBurns": true,
+            "language": "en-IE",
+            "musicVolume": 65,
+            "outroCard": true,
+            "resolution": "1080p",
+            "subBgStyle": "pill",
+            "subFont": "Inter",
+            "subSize": 44
+          }
+        },
+        "properties": {
+          "caption_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default caption template used by the publisher.",
+            "title": "Caption Template"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target reel duration in seconds when no override is given.",
+            "examples": [
+              30
+            ],
+            "title": "Duration Seconds"
+          },
+          "intro_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether to render an intro card at the start of every reel.",
+            "title": "Intro Enabled"
+          },
+          "music_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identifier of the music track used by default.",
+            "title": "Music Id"
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Social platforms the reel should be published to.",
+            "examples": [
+              [
+                "instagram",
+                "tiktok",
+                "facebook",
+                "gbp"
+              ]
+            ],
+            "title": "Platforms"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free-form rendering defaults (frontend INITIAL_DEFAULTS shape). Stored verbatim under `agency_reel_defaults.settings` (jsonb).",
+            "title": "Settings"
+          }
+        },
+        "title": "ReelDefaultsUpsertPayload",
+        "type": "object"
+      },
+      "ReelProfileUpsertPayload": {
+        "additionalProperties": false,
+        "description": "Raw, low-level reel-profile body. Used by the admin \"Reel settings\" tab.\n\nPrefer the per-section endpoints under ``/v1/admin/agencies/{id}/...``\n(``/brand``, ``/defaults``, ``/automation``, ``/social-templates``,\n``/music``) for any flow that only needs to edit a single concern.",
+        "example": {
+          "approval_required": false,
+          "brand_primary_color": "#0F172A",
+          "brand_secondary_color": "#FFFFFF",
+          "caption_template": "{{property_title}} · {{price}}",
+          "duration_seconds": 30,
+          "extra_settings": {
+            "brand": {
+              "font": "Inter",
+              "tagline": "CKP Estate Agents"
+            },
+            "social_templates": {
+              "instagram": "{{property_title}}\n{{price}}"
+            }
+          },
+          "intro_enabled": true,
+          "logo_position": "top-right",
+          "music_id": "uplifting-corporate-1",
+          "name": "Default",
+          "platforms": [
+            "instagram",
+            "tiktok",
+            "facebook",
+            "gbp"
+          ]
+        },
+        "properties": {
+          "approval_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Required"
+          },
+          "brand_primary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "#0F172A"
+            ],
+            "title": "Brand Primary Color"
+          },
+          "brand_secondary_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "#FFFFFF"
+            ],
+            "title": "Brand Secondary Color"
+          },
+          "caption_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption Template"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "extra_settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Free-form bag of extras. When supplied it REPLACES the free-form `settings` document on `agency_reel_defaults` wholesale — use the per-section endpoints for safe partial edits.",
+            "title": "Extra Settings"
+          },
+          "intro_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intro Enabled"
+          },
+          "logo_position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "top-right"
+            ],
+            "title": "Logo Position"
+          },
+          "music_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Profile name (default `Default`).",
+            "title": "Name"
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Social platforms the reel should be published to.",
+            "title": "Platforms"
+          }
+        },
+        "title": "ReelProfileUpsertPayload",
+        "type": "object"
+      },
+      "ScriptedRenderResponse": {
+        "description": "Response body for `POST /v1/videos/scripted/render`.\n\nThe endpoint accepts the manifest and enqueues a `scripted_render` job;\nthe actual ffmpeg rendering happens asynchronously in the worker. Clients\nthat need the resolved artifact paths poll a separate endpoint (not\nexposed in this feature) once the worker completes.",
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          },
+          "source_property_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Property Id"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "job_id",
+          "event_id",
+          "site_id"
+        ],
+        "title": "ScriptedRenderResponse",
+        "type": "object"
+      },
+      "SocialTemplatesReplacePayload": {
+        "additionalProperties": false,
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/social-templates`.\n\nReplaces the whole template block: every existing per-platform row is\ndropped and re-inserted from the supplied `templates` map. Each key is\na platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,\n`youtube`, `gbp`) and the value is the description template.",
+        "example": {
+          "templates": {
+            "instagram": "{{property_title}} · {{price}}\n{{short_description}}\n👉 {{booking_link}}",
+            "tiktok": "Just listed in {{neighborhood}} — {{property_title}}\n{{price}} · {{bedrooms}} bed"
+          }
+        },
+        "properties": {
+          "templates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Mapping of platform identifier to description template. Unknown keys are accepted so future platforms do not need a schema bump. Empty map drops all stored templates.",
+            "title": "Templates",
+            "type": "object"
+          }
+        },
+        "title": "SocialTemplatesReplacePayload",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "CPIHED Webhook API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Returns 200 once the runtime can accept work, 503 otherwise. Body shape: `{status, dispatcher_accepting_jobs}`.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness probe",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "description": "Always returns 200 with `{\"status\": \"ok\"}` once the process is up.",
+        "operationId": "health_live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Live Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Same response as `/health`. Provided for orchestrator conventions.",
+        "operationId": "health_ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness probe (alias)",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/v1/admin/agencies": {
+      "get": {
+        "description": "Returns every agency known to the backend, together with the currently linked WordPress sources, the saved GoHighLevel connection, and the derived reel-profile snapshot.",
+        "operationId": "list_admin_agencies_v1_admin_agencies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List every agency",
+        "tags": [
+          "Admin · Agencies"
+        ]
+      },
+      "post": {
+        "description": "Creates an empty agency. The slug is derived from `name` if not supplied. After creation the agency has no WordPress sources and no GHL connection.",
+        "operationId": "create_admin_agency_v1_admin_agencies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAgencyCreatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create a new agency",
+        "tags": [
+          "Admin · Agencies"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}": {
+      "delete": {
+        "description": "Deletes the agency and relies on FK cascades for linked sources, connections and configuration rows.",
+        "operationId": "delete_admin_agency_v1_admin_agencies__agency_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete an agency",
+        "tags": [
+          "Admin · Agencies"
+        ]
+      },
+      "get": {
+        "description": "Returns the agency record plus its WordPress sources, the GHL connection and the reel profile snapshot currently persisted for that tenant.",
+        "operationId": "get_admin_agency_v1_admin_agencies__agency_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one agency with its sources, GHL connection and reel profile",
+        "tags": [
+          "Admin · Agencies"
+        ]
+      },
+      "patch": {
+        "description": "Partial update: fields not present in the body keep their current value.",
+        "operationId": "update_admin_agency_v1_admin_agencies__agency_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminAgencyUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update agency name / slug / timezone / status",
+        "tags": [
+          "Admin · Agencies"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/automation": {
+      "get": {
+        "description": "Returns the automation slice: approval requirement, publish window, publish days and trigger statuses. `platforms` is NOT part of this slice — read it from `/defaults`.",
+        "operationId": "read_admin_agency_automation_rules_v1_admin_agencies__agency_id__automation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the agency's automation rules",
+        "tags": [
+          "Admin · Automation"
+        ]
+      },
+      "put": {
+        "description": "Replaces only the automation slice. `platforms` is intentionally rejected by the payload — its canonical owner is the `/defaults` endpoint.",
+        "operationId": "update_admin_agency_automation_rules_v1_admin_agencies__agency_id__automation_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationRulesUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update the agency's automation rules",
+        "tags": [
+          "Admin · Automation"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/brand": {
+      "get": {
+        "description": "Returns the brand slice of the agency configuration: colours, logo position, logo object keys, font family. Used by the agency-facing **Brand** tab.",
+        "operationId": "read_admin_agency_brand_settings_v1_admin_agencies__agency_id__brand_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the agency's brand identity",
+        "tags": [
+          "Admin · Brand"
+        ]
+      },
+      "put": {
+        "description": "Replaces only the brand slice of the agency configuration. Fields omitted from the body preserve the previously stored value. Other configuration sections (defaults, automation, social_templates, music) are not touched.",
+        "operationId": "update_admin_agency_brand_settings_v1_admin_agencies__agency_id__brand_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrandSettingsUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update the agency's brand identity",
+        "tags": [
+          "Admin · Brand"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/defaults": {
+      "get": {
+        "description": "Returns the defaults slice — platforms, target duration, intro toggle, default music, caption template and the free-form `settings` document used by the **Defaults** tab.",
+        "operationId": "read_admin_agency_reel_defaults_v1_admin_agencies__agency_id__defaults_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the agency's reel rendering defaults",
+        "tags": [
+          "Admin · Defaults"
+        ]
+      },
+      "put": {
+        "description": "Replaces only the defaults slice. `platforms` is mirrored verbatim to the canonical column (defaults owns this field). `settings` is shallow-merged with the previously stored object so partial updates from one tab do not drop fields written by another.",
+        "operationId": "update_admin_agency_reel_defaults_v1_admin_agencies__agency_id__defaults_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelDefaultsUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update the agency's reel rendering defaults",
+        "tags": [
+          "Admin · Defaults"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/ghl-connection": {
+      "delete": {
+        "description": "Deletes the connection. Subsequent webhooks for this agency will be rejected with `GHL_CONNECTION_NOT_FOUND` until a new connection is attached.",
+        "operationId": "detach_admin_agency_ghl_connection_v1_admin_agencies__agency_id__ghl_connection_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detach the agency's GoHighLevel connection",
+        "tags": [
+          "Admin · GHL connection"
+        ]
+      },
+      "get": {
+        "description": "Returns the saved connection metadata (location id, status, config, presence flags for tokens). The plaintext access and refresh tokens are never returned.",
+        "operationId": "inspect_admin_agency_ghl_connection_v1_admin_agencies__agency_id__ghl_connection_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect the agency's GoHighLevel connection",
+        "tags": [
+          "Admin · GHL connection"
+        ]
+      },
+      "post": {
+        "description": "Stores the `location_id` and OAuth tokens for the agency's GHL sub-account. Tokens are encrypted at rest with Fernet; the response never echoes the plaintext access or refresh token.",
+        "operationId": "attach_admin_agency_ghl_connection_v1_admin_agencies__agency_id__ghl_connection_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach (or replace) the agency's GoHighLevel connection",
+        "tags": [
+          "Admin · GHL connection"
+        ]
+      },
+      "put": {
+        "description": "Replaces the saved tokens for an agency that already has a GoHighLevel connection. Returns 404 (`GHL_CONNECTION_NOT_FOUND`) if no connection exists yet — use POST to attach one first.",
+        "operationId": "rotate_admin_agency_ghl_credentials_v1_admin_agencies__agency_id__ghl_connection_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConnectionUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rotate the agency's GoHighLevel credentials",
+        "tags": [
+          "Admin · GHL connection"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/ghl-connection/test": {
+      "post": {
+        "description": "Calls the GHL accounts endpoint with the stored connection and returns the social accounts the location has linked. Useful to verify that the saved access token still works.",
+        "operationId": "probe_admin_agency_ghl_connection_v1_admin_agencies__agency_id__ghl_connection_test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Probe the agency's GoHighLevel connection",
+        "tags": [
+          "Admin · GHL connection"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/music": {
+      "get": {
+        "description": "Returns every music track attached to the agency, ordered by display name. Replaces the legacy `/music-tracks` stub.",
+        "operationId": "list_admin_agency_music_tracks_v1_admin_agencies__agency_id__music_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the agency's music library",
+        "tags": [
+          "Admin · Music"
+        ]
+      },
+      "post": {
+        "description": "Adds a track to the agency music library. The `id` is generated server side; the response echoes the saved record.",
+        "operationId": "register_admin_agency_music_track_v1_admin_agencies__agency_id__music_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MusicTrackPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register a new music track for the agency",
+        "tags": [
+          "Admin · Music"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/music/{music_id}": {
+      "delete": {
+        "operationId": "decommission_admin_agency_music_track_v1_admin_agencies__agency_id__music__music_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "music_id",
+            "required": true,
+            "schema": {
+              "title": "Music Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decommission a music track from the agency library",
+        "tags": [
+          "Admin · Music"
+        ]
+      },
+      "get": {
+        "operationId": "inspect_admin_agency_music_track_v1_admin_agencies__agency_id__music__music_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "music_id",
+            "required": true,
+            "schema": {
+              "title": "Music Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect a single music track",
+        "tags": [
+          "Admin · Music"
+        ]
+      },
+      "put": {
+        "description": "Updates the descriptive fields of a music track. Omitted fields preserve the previously stored value.",
+        "operationId": "reconfigure_admin_agency_music_track_v1_admin_agencies__agency_id__music__music_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "music_id",
+            "required": true,
+            "schema": {
+              "title": "Music Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MusicTrackPatchPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconfigure an existing music track",
+        "tags": [
+          "Admin · Music"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reel-profile": {
+      "get": {
+        "description": "Returns the agency configuration assembled into the legacy `reel_profiles` shape (brand + defaults + automation + social templates + music tracks). Prefer the per-section endpoints — `/brand`, `/defaults`, `/automation`, `/social-templates`, `/music` — when you only need a single concern.",
+        "operationId": "get_admin_agency_reel_profile_v1_admin_agencies__agency_id__reel_profile_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the aggregated reel profile for an agency",
+        "tags": [
+          "Admin · Reel profile (raw)"
+        ]
+      },
+      "put": {
+        "description": "Accepts the legacy aggregated payload and fans the update out to the typed sections (`brand`, `defaults`, `automation`). Fields omitted from the body preserve the previously stored value. `extra_settings`, when present, replaces the free-form `agency_reel_defaults.settings` document wholesale.",
+        "operationId": "upsert_admin_agency_reel_profile_v1_admin_agencies__agency_id__reel_profile_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelProfileUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update the aggregated reel profile for an agency",
+        "tags": [
+          "Admin · Reel profile (raw)"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels": {
+      "get": {
+        "description": "Returns the most recent reels for the agency, joining the `properties` row, the latest `reels` row, and the most recent `media_revisions` row. Used by the agency Reels dashboard.",
+        "operationId": "list_admin_agency_reels_v1_admin_agencies__agency_id__reels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the agency's recent reels",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}": {
+      "get": {
+        "description": "Same shape as one item from the listing endpoint, plus a `has_video` flag and a relative `video_url` to stream the rendered MP4.",
+        "operationId": "get_admin_agency_reel_v1_admin_agencies__agency_id__reels__site_id___source_property_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one reel for the agency",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/approve": {
+      "post": {
+        "description": "Two-step action.\n\n1. The reel is moved to `workflow_state='approved'` / `publish_status='pending_publish'` so the editor reflects the new gate immediately.\n2. A fresh `reel_publish` job is enqueued from the stored WordPress payload, with `approval_required=False` forced on the `publish_context`. If the original payload or the agency's GHL connection is missing, the response stays 200 with `publish_enqueued=false` so the frontend can render a consistent state.",
+        "operationId": "approve_admin_agency_reel_v1_admin_agencies__agency_id__reels__site_id___source_property_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve a reel and regenerate (re-publish) it",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/images": {
+      "get": {
+        "description": "Returns every image WordPress shipped for the property, in the order they were ingested. Each entry includes the original `image_url`, the local cached path (when downloaded), and a stable backend URL via `file_url` for locally-cached images.",
+        "operationId": "list_admin_agency_reel_images_v1_admin_agencies__agency_id__reels__site_id___source_property_id__images_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the property images that fed the reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/images/{position}/file": {
+      "get": {
+        "description": "Serves the locally-cached property image at the given position. Returns 404 if the image was never downloaded.",
+        "operationId": "stream_admin_agency_reel_image_v1_admin_agencies__agency_id__reels__site_id___source_property_id__images__position__file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "title": "Position",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream one of the property's downloaded image files",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/manifest": {
+      "get": {
+        "description": "Returns the resolved render manifest for the most recent revision: scenes, durations, music selection, brand overlay placement, subtitle layout.",
+        "operationId": "get_admin_agency_reel_manifest_v1_admin_agencies__agency_id__reels__site_id___source_property_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Manifest JSON wrapped in `{ manifest: … }`."
+          },
+          "404": {
+            "description": "No manifest is available for this reel."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get the rendered reel's manifest JSON",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/reject": {
+      "post": {
+        "description": "Sets the reel's pipeline state to `rejected` and the publish status to `rejected` so it stays out of the publish queue.",
+        "operationId": "reject_admin_agency_reel_v1_admin_agencies__agency_id__reels__site_id___source_property_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject a reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/video": {
+      "get": {
+        "description": "Streams the most recent rendered MP4 for the reel. Honours the `Range` header so HTML5 `<video>` players can seek and lazy-load. Returns 404 if no rendered video exists yet.",
+        "operationId": "stream_admin_agency_reel_video_v1_admin_agencies__agency_id__reels__site_id___source_property_id__video_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Full MP4 body."
+          },
+          "206": {
+            "description": "Range chunk (used by HTML5 video for seeking)."
+          },
+          "404": {
+            "description": "No rendered video for this reel."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream the rendered MP4 for a reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/social-accounts": {
+      "get": {
+        "description": "Wraps the GoHighLevel accounts API using the agency's stored connection. Always returns 200; if the agency has no GHL connection (or the call fails) the body has `connected: false` or `items: []` plus a `reason` code so the frontend can render an empty state without crashing.",
+        "operationId": "list_admin_agency_social_accounts_v1_admin_agencies__agency_id__social_accounts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List social accounts linked to the agency's GHL location",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/social-templates": {
+      "get": {
+        "description": "Returns the templates map keyed by platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`, `youtube`, `gbp`). Used by the **Social** tab to render the publish caption.",
+        "operationId": "read_admin_agency_social_templates_v1_admin_agencies__agency_id__social_templates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read the agency's per-platform description templates",
+        "tags": [
+          "Admin · Social templates"
+        ]
+      },
+      "put": {
+        "description": "Replaces the entire templates block: every existing per-platform row is dropped and re-inserted from the supplied map. Send an empty map to remove all templates.",
+        "operationId": "replace_admin_agency_social_templates_v1_admin_agencies__agency_id__social_templates_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocialTemplatesReplacePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace the agency's per-platform description templates",
+        "tags": [
+          "Admin · Social templates"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/sources": {
+      "get": {
+        "operationId": "list_ingestion_sources_endpoint_v1_admin_agencies__agency_id__sources_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List the ingestion sources of an agency",
+        "tags": [
+          "Admin - Sources"
+        ]
+      },
+      "post": {
+        "description": "Creates an ingestion source bound to the agency. The `site_id` is the value WordPress posts as `rest_domain` in webhook bodies.",
+        "operationId": "register_ingestion_source_endpoint_v1_admin_agencies__agency_id__sources_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestionSourceCreatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register a new ingestion source for an agency",
+        "tags": [
+          "Admin - Sources"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/sources/{ingestion_source_id}": {
+      "delete": {
+        "operationId": "decommission_ingestion_source_endpoint_v1_admin_agencies__agency_id__sources__ingestion_source_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_source_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decommission an ingestion source",
+        "tags": [
+          "Admin - Sources"
+        ]
+      },
+      "get": {
+        "operationId": "inspect_ingestion_source_endpoint_v1_admin_agencies__agency_id__sources__ingestion_source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_source_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect a single ingestion source",
+        "tags": [
+          "Admin - Sources"
+        ]
+      },
+      "put": {
+        "operationId": "reconfigure_ingestion_source_endpoint_v1_admin_agencies__agency_id__sources__ingestion_source_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ingestion_source_id",
+            "required": true,
+            "schema": {
+              "title": "Ingestion Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestionSourceUpdatePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconfigure an ingestion source",
+        "tags": [
+          "Admin - Sources"
+        ]
+      }
+    },
+    "/v1/admin/wordpress-sources": {
+      "get": {
+        "description": "Flat global view for source provisioning. The agency-scoped endpoint (`GET /v1/admin/agencies/{id}/sources`) is preferred for new flows.",
+        "operationId": "list_admin_wordpress_sources_v1_admin_wordpress_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List every WordPress source across all agencies",
+        "tags": [
+          "Admin · Sources"
+        ]
+      }
+    },
+    "/v1/admin/wordpress-sources/{site_id}": {
+      "get": {
+        "description": "Looks up a WordPress source by the `site_id` (the value the `rest_domain` body field carries on the inbound webhook). Returns 404 with code `ADMIN_SOURCE_NOT_FOUND` if no source is registered for that site.",
+        "operationId": "get_admin_wordpress_source_v1_admin_wordpress_sources__site_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a single WordPress source by site_id",
+        "tags": [
+          "Admin · Sources"
+        ]
+      },
+      "put": {
+        "description": "Upserts the WordPress source identified by `site_id`. Will create the agency on the fly if `agency_id` is omitted. Reassigning a source to a different agency is rejected.",
+        "operationId": "upsert_admin_wordpress_source_v1_admin_wordpress_sources__site_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalWordPressSourceUpsertPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create or update a WordPress source by site_id",
+        "tags": [
+          "Admin · Sources"
+        ]
+      }
+    },
+    "/v1/ingest/wordpress/property": {
+      "post": {
+        "description": "Resolves the agency from the body's `rest_domain` (or `X-WP-Site-Id` header), validates security headers/HMAC, and enqueues a `reel_publish` job. Returns 202 with the new `event_id`/`job_id`.",
+        "operationId": "ingest_wordpress_property_endpoint_v1_ingest_wordpress_property_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Receive a property webhook from a WordPress site",
+        "tags": [
+          "Webhooks"
+        ]
+      }
+    },
+    "/v1/sessions/gohighlevel/context": {
+      "post": {
+        "description": "Decrypts the embedded HighLevel userData blob with GO_HIGH_LEVEL_APP_SHARED_SECRET and returns the resolved session context.",
+        "operationId": "resolve_gohighlevel_session_context_v1_sessions_gohighlevel_context_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoHighLevelContextPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decrypt the GoHighLevel iframe SSO payload",
+        "tags": [
+          "Session - GoHighLevel"
+        ]
+      }
+    },
+    "/v1/sessions/gohighlevel/session": {
+      "post": {
+        "description": "Given the active location_id and user_id, returns whether the location has a saved access token and which agency it belongs to.",
+        "operationId": "create_gohighlevel_session_v1_sessions_gohighlevel_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoHighLevelSessionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create or refresh the agency-bound session for a GHL location",
+        "tags": [
+          "Session - GoHighLevel"
+        ]
+      }
+    },
+    "/v1/sessions/gohighlevel/test": {
+      "post": {
+        "description": "Identical to the agency-scoped GoHighLevel connection test but keyed by location_id rather than agency_id.",
+        "operationId": "test_gohighlevel_session_connection_v1_sessions_gohighlevel_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoHighLevelLocationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Probe a GHL location's saved token and list its social accounts",
+        "tags": [
+          "Session - GoHighLevel"
+        ]
+      }
+    },
+    "/v1/sessions/gohighlevel/tokens": {
+      "get": {
+        "description": "Returns one row per agency that has a stored GHL connection, with access tokens redacted. Used as a quick global health check.",
+        "operationId": "list_gohighlevel_session_connections_v1_sessions_gohighlevel_tokens_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List every saved GoHighLevel connection",
+        "tags": [
+          "Session - GoHighLevel"
+        ]
+      }
+    },
+    "/v1/videos/scripted/render": {
+      "post": {
+        "description": "Validates the manifest's tenant fields (`site_id`, `source_property_id`), enqueues a `scripted_render` job, and returns 202 with `event_id` and `job_id`. The worker performs the ffmpeg render asynchronously.",
+        "operationId": "enqueue_scripted_render_endpoint_v1_videos_scripted_render_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptedRenderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Enqueue a scripted property video render",
+        "tags": [
+          "Video Rendering"
+        ]
+      }
+    }
+  }
+}

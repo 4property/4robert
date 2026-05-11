@@ -34,9 +34,9 @@ cp .env.example .env      # then fill in the values
 ## Run
 
 ```bash
-python main.py            # start the server
-python main.py --check    # readiness check, no server
-python main.py --check --readiness-json   # machine-readable output
+python -m apps.api            # start the API server
+python -m apps.api --check    # readiness check, no server
+python -m apps.api --check --readiness-json   # machine-readable output
 ```
 
 ## Test

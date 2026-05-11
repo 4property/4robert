@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from core.logging import (
+from shared.observability import (
     DailyDirectoryRotatingFileHandler,
     configure_logging,
     log_persistent_event,
@@ -94,7 +94,7 @@ class LoggingTests(unittest.TestCase):
     def test_configure_logging_writes_all_persistent_logs_inside_dated_directory(self) -> None:
         with _workspace_temp_dir() as workspace_dir:
             frozen_date = date(2026, 4, 23)
-            with patch("core.logging._current_log_date", return_value=frozen_date):
+            with patch("shared.observability.persistent_log._current_log_date", return_value=frozen_date):
                 configure_logging(
                     "INFO",
                     workspace_dir=workspace_dir,

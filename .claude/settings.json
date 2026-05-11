@@ -1,0 +1,47 @@
+{
+  "$schema_comment": "Hooks que automatizan la verificación. El harness los ejecuta, no el agente, así que no se pueden saltar.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe; elif [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python; fi; \"$PY\" -m pytest tests/unit -q --no-header 2>&1 | tail -5",
+            "description": "Tras editar o escribir archivos, corre los tests unitarios y muestra el resumen."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./init.sh > /tmp/harness_init.log 2>&1 && echo '[harness] init.sh OK' || (echo '[harness] init.sh FALLÓ — revisa /tmp/harness_init.log antes de cerrar' && tail -30 /tmp/harness_init.log)",
+            "description": "Antes de cerrar la sesión, fuerza una verificación completa."
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./init.sh)",
+      "Bash(.venv/Scripts/python.exe -m pytest*)",
+      "Bash(.venv/bin/python -m pytest*)",
+      "Bash(python -m pytest*)",
+      "Bash(.venv/Scripts/python.exe -m apps.api*)",
+      "Bash(.venv/bin/python -m apps.api*)",
+      "Bash(python -m apps.api*)",
+      "Bash(.venv/Scripts/python.exe -m apps.worker*)",
+      "Bash(.venv/bin/python -m apps.worker*)",
+      "Bash(python -m apps.worker*)",
+      "Bash(alembic upgrade*)",
+      "Bash(alembic downgrade*)",
+      "Bash(alembic current*)",
+      "Bash(alembic history*)",
+      "Bash(alembic revision*)"
+    ]
+  }
+}
