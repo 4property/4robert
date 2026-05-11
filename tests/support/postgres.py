@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -13,21 +14,26 @@ from uuid import uuid4
 
 from sqlalchemy import create_engine, inspect, text
 
-from repositories.postgres.security import encrypt_text
+from shared.db.security import encrypt_text
 
 APPLICATION_ROOT = Path(__file__).resolve().parents[2]
 TEST_TEMP_ROOT = APPLICATION_ROOT / ".tmp_test_cases"
 ACTIVE_TABLES = frozenset(
     {
         "agencies",
-        "wordpress_sources",
+        "ingestion_sources",
+        "provider_connections",
+        "agency_brand_settings",
+        "agency_reel_defaults",
+        "agency_automation_rules",
+        "agency_social_templates",
+        "agency_music_tracks",
         "properties",
         "property_images",
-        "property_pipeline_state",
-        "webhook_events",
-        "gohighlevel_tokens",
-        "job_queue",
+        "reels",
         "media_revisions",
+        "webhook_events",
+        "jobs",
         "outbox_events",
         "scripted_video_artifacts",
         "alembic_version",
@@ -37,9 +43,24 @@ ACTIVE_TABLES = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class SeededTenant:
+    """One tenant + its WordPress ingestion source.
+
+    `wordpress_source_id` and `site_id` are kept on this dataclass for
+    backwards compatibility with the legacy tests; new tests should use
+    `ingestion_source_id` and `external_source_id`.
+    """
+
     agency_id: str
-    wordpress_source_id: str
-    site_id: str
+    ingestion_source_id: str
+    external_source_id: str
+
+    @property
+    def wordpress_source_id(self) -> str:
+        return self.ingestion_source_id
+
+    @property
+    def site_id(self) -> str:
+        return self.external_source_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +107,7 @@ def temporary_workspace():
 def temporary_postgres_schema(database_url: str):
     schema = f"test_{uuid4().hex}"
     admin_engine = create_engine(database_url, future=True)
+    scoped_url: str | None = None
     try:
         with admin_engine.begin() as connection:
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -112,6 +134,19 @@ def temporary_postgres_schema(database_url: str):
             schema=schema,
         )
     finally:
+        # Dispose any engine the runtime cached against the scoped URL: the
+        # schema is being dropped, so its pooled connections are about to be
+        # invalidated. Without this disposal the cache accumulates one stale
+        # engine per test, eventually starving the Postgres connection budget.
+        if scoped_url is not None:
+            try:
+                from shared.db.engine import _ENGINE_CACHE  # type: ignore[attr-defined]
+
+                cached_engine = _ENGINE_CACHE.pop(scoped_url, None)
+                if cached_engine is not None:
+                    cached_engine.dispose()
+            except Exception:
+                pass
         with admin_engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin_engine.dispose()
@@ -123,35 +158,23 @@ def seed_tenant(
     site_id: str = "site-a",
     source_status: str = "active",
 ) -> SeededTenant:
+    """Seed an agency + a WordPress `ingestion_sources` row.
+
+    `site_id` is kept as the parameter name for backwards compatibility; it
+    becomes `ingestion_sources.external_id` (with `kind='wordpress'`).
+    """
     timestamp = datetime.now(timezone.utc)
     agency_id = str(uuid4())
-    wordpress_source_id = str(uuid4())
-    normalized_site_id = site_id.strip().lower()
+    ingestion_source_id = str(uuid4())
+    external_source_id = site_id.strip().lower()
     engine = create_engine(database_url, future=True)
     try:
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    """
-                    INSERT INTO agencies (
-                        id,
-                        name,
-                        slug,
-                        timezone,
-                        status,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (
-                        :id,
-                        :name,
-                        :slug,
-                        :timezone,
-                        :status,
-                        :created_at,
-                        :updated_at
-                    )
-                    """
+                    "INSERT INTO agencies (id, name, slug, timezone, status, "
+                    "created_at, updated_at) VALUES (:id, :name, :slug, "
+                    ":timezone, :status, :created_at, :updated_at)"
                 ),
                 {
                     "id": agency_id,
@@ -165,43 +188,27 @@ def seed_tenant(
             )
             connection.execute(
                 text(
-                    """
-                    INSERT INTO wordpress_sources (
-                        id,
-                        agency_id,
-                        site_id,
-                        name,
-                        site_url,
-                        normalized_host,
-                        webhook_secret_encrypted,
-                        status,
-                        last_event_at,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (
-                        :id,
-                        :agency_id,
-                        :site_id,
-                        :name,
-                        :site_url,
-                        :normalized_host,
-                        :webhook_secret_encrypted,
-                        :status,
-                        NULL,
-                        :created_at,
-                        :updated_at
-                    )
-                    """
+                    "INSERT INTO ingestion_sources ("
+                    "id, agency_id, kind, external_id, name, config_json, "
+                    "secrets_encrypted, status, last_event_at, created_at, updated_at"
+                    ") VALUES ("
+                    ":id, :agency_id, 'wordpress', :external_id, :name, "
+                    "CAST(:config_json AS jsonb), :secrets_encrypted, :status, "
+                    "NULL, :created_at, :updated_at"
+                    ")"
                 ),
                 {
-                    "id": wordpress_source_id,
+                    "id": ingestion_source_id,
                     "agency_id": agency_id,
-                    "site_id": normalized_site_id,
+                    "external_id": external_source_id,
                     "name": "Test Source",
-                    "site_url": f"https://{normalized_site_id}",
-                    "normalized_host": normalized_site_id,
-                    "webhook_secret_encrypted": encrypt_text("test-secret"),
+                    "config_json": json.dumps(
+                        {
+                            "site_url": f"https://{external_source_id}",
+                            "normalized_host": external_source_id,
+                        }
+                    ),
+                    "secrets_encrypted": encrypt_text("test-secret"),
                     "status": source_status,
                     "created_at": timestamp,
                     "updated_at": timestamp,
@@ -211,16 +218,62 @@ def seed_tenant(
         engine.dispose()
     return SeededTenant(
         agency_id=agency_id,
-        wordpress_source_id=wordpress_source_id,
-        site_id=normalized_site_id,
+        ingestion_source_id=ingestion_source_id,
+        external_source_id=external_source_id,
     )
 
+
+def seed_provider_connection(
+    database_url: str,
+    *,
+    agency_id: str,
+    provider: str = "gohighlevel",
+    external_id: str = "loc-test",
+    config: dict | None = None,
+    secrets: dict | None = None,
+) -> str:
+    """Seed a `provider_connections` row for an existing agency."""
+    timestamp = datetime.now(timezone.utc)
+    connection_id = str(uuid4())
+    secrets_payload = json.dumps(
+        secrets if secrets is not None else {"access_token": "token-test"},
+        separators=(",", ":"),
+    )
+    engine = create_engine(database_url, future=True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO provider_connections ("
+                    "id, agency_id, provider, external_id, config_json, "
+                    "secrets_encrypted, status, created_at, updated_at"
+                    ") VALUES ("
+                    ":id, :agency_id, :provider, :external_id, "
+                    "CAST(:config_json AS jsonb), :secrets_encrypted, "
+                    "'active', :created_at, :updated_at"
+                    ")"
+                ),
+                {
+                    "id": connection_id,
+                    "agency_id": agency_id,
+                    "provider": provider,
+                    "external_id": external_id,
+                    "config_json": json.dumps(config or {"user_id": "user-test"}),
+                    "secrets_encrypted": encrypt_text(secrets_payload),
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                },
+            )
+    finally:
+        engine.dispose()
+    return connection_id
 
 __all__ = [
     "ACTIVE_TABLES",
     "APPLICATION_ROOT",
     "PostgresTestSchema",
     "SeededTenant",
+    "seed_provider_connection",
     "seed_tenant",
     "temporary_postgres_schema",
     "temporary_workspace",

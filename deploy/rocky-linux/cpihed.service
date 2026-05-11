@@ -10,7 +10,7 @@ Group=cpihed
 WorkingDirectory=/opt/cpihed
 EnvironmentFile=/etc/cpihed/cpihed.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/cpihed/.venv/bin/python /opt/cpihed/main.py
+ExecStart=/opt/cpihed/.venv/bin/python -m apps.api
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=90

@@ -11,6 +11,63 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-miapp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: 4reels-api:latest
+    container_name: 4reels-api
+    restart: unless-stopped
+    command: ["python", "-m", "apps.api"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-1234}@postgres:5432/${POSTGRES_DB:-miapp}
+      WEBHOOK_HOST: 0.0.0.0
+      WEBHOOK_PORT: "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - property_media:/app/property_media
+      - property_media_raw:/app/property_media_raw
+      - generated_media:/app/generated_media
+      - logs:/app/logs
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: 4reels-worker:latest
+    container_name: 4reels-worker
+    restart: unless-stopped
+    command: ["python", "-m", "apps.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-1234}@postgres:5432/${POSTGRES_DB:-miapp}
+      WORKER_COUNT: ${WORKER_COUNT:-1}
+      WORKER_QUEUE_LEASE_SECONDS: ${WORKER_QUEUE_LEASE_SECONDS:-900}
+      WORKER_QUEUE_POLL_INTERVAL_SECONDS: ${WORKER_QUEUE_POLL_INTERVAL_SECONDS:-0.5}
+      WORKER_JOB_RETRY_BACKOFF_SECONDS: ${WORKER_JOB_RETRY_BACKOFF_SECONDS:-30}
+      WORKER_JOB_MAX_ATTEMPTS: ${WORKER_JOB_MAX_ATTEMPTS:-3}
+      WORKER_SHUTDOWN_TIMEOUT_SECONDS: ${WORKER_SHUTDOWN_TIMEOUT_SECONDS:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - property_media:/app/property_media
+      - property_media_raw:/app/property_media_raw
+      - generated_media:/app/generated_media
+      - logs:/app/logs
 
 volumes:
   postgres_data:
+  property_media:
+  property_media_raw:
+  generated_media:
+  logs:

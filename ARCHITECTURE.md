@@ -1,77 +1,203 @@
 # Architecture
 
-## Flow
+> **Phase 1 complete (2026-04-30).** Schema, infrastructure, and the API/worker
+> process split are in place. The legacy code under `services/`,
+> `application/`, `repositories/`, `core/` and `domain/` keeps working through
+> compatibility shims; Phase 2 dissolves it into per-module use cases. See
+> [REFACTOR_STATUS.md](REFACTOR_STATUS.md) for the running checklist.
 
-1. WordPress posts to `POST /webhooks/wordpress/property`.
-2. Transport validates the request, writes a webhook audit row, and enqueues a job.
-3. The dispatcher leases jobs and serializes work by `site_id + property_id` so the same property is never processed concurrently.
-4. The pipeline runs five stages: ingest → plan → prepare assets → render reel + poster → publish.
-5. Publish persists a media revision and emits an outbox event; social delivery runs through GoHighLevel.
+## Product
 
-`for_sale` / `to_let` use the full reel template. `sale_agreed`, `sold`, `let_agreed`, `let` use a short status reel with a single moving image.
+4reels is a multi-tenant SaaS that turns property feeds into vertical reels and
+publishes them through social-channel adapters.
 
-## Workflow states
+```
+ingestion source ──► catalog ──► reel pipeline ──► publishing adapter
+   (WordPress)      (properties)  (render+poster)    (GoHighLevel)
+```
 
-`property_pipeline_state` tracks the latest state per property:
+Each tenant ("agency") configures its own ingestion sources, brand assets, reel
+defaults, automation rules, social copy templates and publishing connections.
+The schema and module layout are designed so that **adding a new ingestion
+source or a new publisher is an additive change**: a row in
+`ingestion_sources(kind=…)` or `provider_connections(provider=…)` plus an
+adapter under the corresponding module. No table is added.
 
-`ingested`, `assets_prepared`, `rendered`, `awaiting_review`, `published`, `partial`, `failed`, `skipped`.
+## Top-level layout
 
-`awaiting_review` is the handoff point for a future preview/approval flow. The outbox already emits the events; review itself is optional.
+```
+4reels back/
+├── apps/
+│   ├── api/            # FastAPI process (HTTP only, no worker threads)
+│   └── worker/         # Decoupled worker process (job dispatcher)
+├── modules/                 # Bounded contexts
+│   ├── tenancy/             # agencies + super-admin + tenant resolution
+│   ├── ingestion/           # ingestion_sources(kind) + adapters
+│   ├── catalog/             # properties + property_images
+│   ├── reels/               # reel pipeline + state + media_revisions
+│   ├── configuration/       # brand / defaults / automation / social / music
+│   ├── publishing/          # provider_connections(provider) + adapters
+│   ├── rendering/           # ffmpeg + layout + photo selection
+│   └── delivery/            # jobs + outbox + dispatcher contract
+├── shared/                  # Cross-cutting (renamed from `platform/` to
+│   │                        #   avoid shadowing Python's stdlib)
+│   ├── db/                  # SQLAlchemy session, engine, UoW, security
+│   ├── http/                # Shared FastAPI primitives
+│   ├── observability/       # logging + persistent events + readiness checks
+│   ├── errors/              # ApplicationError + subclasses
+│   ├── locking/             # exclusive_file_lock
+│   ├── crypto/              # secret_box for encrypting tokens at rest
+│   ├── storage/             # site storage path resolution
+│   └── media_cleanup/       # raw + temporary file cleanup
+├── settings/                # Split by concern
+├── alembic/versions/
+│   └── 20260501_0001_initial_schema.py    # Single clean migration
+├── compose.yml              # postgres + api + worker as separate services
+└── tests/{unit,integration,support}/
+```
 
-## Modules
+Each module is internally split into:
 
-### Transport — `services/transport/http/`
+```
+modules/<bounded-context>/
+├── domain/           # Plain Python value objects, no SQLAlchemy
+├── application/      # Use cases — one verb-resource per file
+│   └── use_cases/
+├── infrastructure/   # SQLAlchemy repositories, external clients
+└── transport/        # FastAPI routers + Pydantic payloads
+```
 
-`server.py`, `operations.py`, `security.py`. Validates headers and signatures, accepts the webhook, writes audit rows, enqueues jobs, and exposes `/health/live` and `/health/ready`. Readiness is capability-based: core processing can be ready while optional features remain unconfigured.
+**Module rules**
 
-### Dispatch & queue — `application/dispatch/`, `repositories/stores/job_queue_store.py`
+- A module may import from `shared/` and from another module's `domain/`.
+- A module may **not** import another module's `application/` or
+  `infrastructure/`.
+- Cross-module composition lives in `apps/api/app_factory.py` or
+  `apps/worker/runtime.py`, never inside a module.
 
-PostgreSQL-backed durable queue with lease-based claims, retry backoff for transient failures, and keyed serialization. Worker count can exceed 1 without breaking property-level ordering.
+## Schema
 
-### Pipeline — `application/pipeline/`
+A single Alembic migration
+([`alembic/versions/20260501_0001_initial_schema.py`](alembic/versions/20260501_0001_initial_schema.py))
+defines 16 tables.
 
-`media_pipeline.py` orchestrates the stages. `media_services.py` wires asset preparation, rendering, and publishing. `content_generation.py` produces deterministic captions behind a boundary so an AI implementation can be swapped in later. `application/admin/` exposes management endpoints for WordPress sources.
+| Table | Owner module | Discriminator |
+|---|---|---|
+| `agencies` | tenancy | — |
+| `ingestion_sources` | ingestion | `kind` (`wordpress`, …) |
+| `provider_connections` | publishing | `provider` (`gohighlevel`, …) |
+| `agency_brand_settings` | configuration | — |
+| `agency_reel_defaults` | configuration | — |
+| `agency_automation_rules` | configuration | — |
+| `agency_social_templates` | configuration | (per-platform PK) |
+| `agency_music_tracks` | configuration | — |
+| `properties` | catalog | — |
+| `property_images` | catalog | — |
+| `reels` (was `property_pipeline_state`) | reels | — |
+| `media_revisions` | reels | — |
+| `webhook_events` | delivery | — |
+| `jobs` (was `job_queue`) | delivery | `kind` (`reel_publish`, `scripted_render`) |
+| `outbox_events` | delivery | — |
+| `scripted_video_artifacts` | reels | — |
 
-### Rendering — `services/media/reel_rendering/`
+Renames captured in the single migration:
 
-Builds the reel manifest, computes overlay layout in Python before ffmpeg, renders text that auto-fits / wraps / clamps, omits missing optional fields, and persists the resolved layout in the manifest for audit. ffmpeg paints a layout that's already resolved.
+| Was | Now |
+|---|---|
+| `site_id` | `external_source_id` |
+| `wordpress_source_id` | `ingestion_source_id` |
+| `last_published_location_id` | `last_published_provider_external_id` |
+| `gohighlevel_access_token_encrypted` | `provider_secrets_encrypted` |
+| JSON-in-`TEXT` columns | `JSONB` |
 
-### Social delivery — `services/publishing/social_delivery/`
+## Persistence: Unit of Work
 
-Uploads media to GoHighLevel, picks one location user and account per platform, publishes sequentially, and applies per-platform validation. GBP posts use the poster image. The job succeeds if at least one platform publishes; only total failure across all requested platforms fails the job.
+[`shared/db/uow.py`](shared/db/uow.py) exposes module-namespaced repositories:
 
-### Site storage — `services/media/site_storage.py`
+```python
+from shared.db import DatabaseUnitOfWork
 
-Resolves per-site paths under `property_media/<site>/`, `property_media_raw/<site>/`, `generated_media/<site>/reels/`, `generated_media/<site>/posters/`.
+with DatabaseUnitOfWork() as uow:
+    agency = uow.tenancy.agencies.get_by_slug("acme")
+    source = uow.ingestion.sources.get_by_kind_external_id(
+        kind="wordpress", external_id="acme.example.com",
+    )
+    ghl = uow.publishing.connections.get_with_secrets(
+        agency_id=agency.agency_id, provider="gohighlevel",
+    )
+```
 
-## Persistence
+Each `<Aggregate>Repository` extends
+[`shared/db/repository_base.py::ModuleRepository`](shared/db/repository_base.py)
+and receives a SQLAlchemy `Session` from the UoW. Repositories never commit on
+their own — `__exit__` commits on success and rolls back on exception.
 
-PostgreSQL tables (`repositories/postgres/models/`):
+Encryption: secrets that must round-trip (publisher tokens, webhook secrets)
+go through [`shared/db/security.py`](shared/db/security.py) (Fernet) before
+landing in `*.secrets_encrypted` BYTEA columns.
 
-- `agencies`, `wordpress_sources` — tenancy
-- `properties`, `property_images` — normalized payloads and image metadata
-- `property_pipeline_state` — latest workflow + delivery state and current revision id
-- `webhook_events` — transport audit
-- `job_queue` — durable background work
-- `media_revisions` — immutable render history
-- `outbox_events` — domain events for downstream consumers
-- `scripted_video_artifacts` — scripted render outputs
+## API process — `apps/api/`
 
-`media_revisions` separates revision history from mutable current state, which is the foundation for preview, approval, and republish flows.
+Stateless FastAPI process. Handles inbound webhooks, admin/tenant management
+endpoints, reel preview streaming with HTTP Range requests, and GoHighLevel
+session decoding for the embedded app. **The API does not run the dispatcher
+loop.** Lifespan only opens the UoW factory and the outbox relay.
+
+URL surface: `/v1/*` (renamed in Phase 3). Health probes at `/health{,/live,/ready}`.
+
+## Worker process — `apps/worker/`
+
+Separate process sharing only Postgres with the API. Claims jobs via
+`SELECT … FOR UPDATE SKIP LOCKED`, dispatches by `jobs.kind`:
+
+```
+reel_publish     → modules/reels/application/orchestrator.ReelPipeline
+scripted_render  → modules/reels/application/use_cases/render_scripted_video
+```
+
+SIGTERM-safe shutdown: drains in-flight jobs and releases leases before exit.
+
+Multi-worker safe: the property-level serialization rule
+("don't process two jobs for the same `(external_source_id, property_id)`
+concurrently") is encoded in the SQL `claim_next_ready_job` query.
+
+## Settings
+
+[`settings/`](settings/) is split by concern (no `app.py` god-file):
+`application`, `database`, `http`, `worker`, `publishing`, `rendering`,
+`observability`. Environment variables are documented in
+[`.env.example`](.env.example). The worker-only knobs are namespaced
+`WORKER_*` (renamed from `WEBHOOK_WORKER_*`) so it's clear which side of the
+split they affect.
+
+## Outbox
+
+`outbox_events` decouples the writer (use cases inside the worker) from
+external consumers (notifications, analytics). The relay polls
+`status='pending'` rows and dispatches them; consumers acknowledge by status.
+
+Today's events: `media_rendered`, `review_requested`, `publish_completed`,
+`publish_failed`, `publish_skipped`. Adding a new consumer is an additive
+change — it reads the same table.
 
 ## Errors and logging
 
-`core/errors.py`, `core/logging.py`. Errors carry `stage`, `code`, `retryable`, `context`, and `external_trace_id`. Console output stays rich for development; the structured fields make stage failures, publish errors, and layout clamps diagnosable in production.
+[`shared/errors/`](shared/errors/) (was `core/errors.py`) defines
+`ApplicationError` with `stage`, `code`, `retryable`, `context`,
+`external_trace_id`.
 
-## Outbox events
-
-`media_rendered`, `review_requested`, `publish_completed`, `publish_failed`, `publish_skipped`. Intended consumers: notifications, review workflows, analytics, async AI generation.
+[`shared/observability/`](shared/observability/) hosts the logging filter +
+persistent event log. Console output stays rich for development; the
+structured fields drive production alerting.
 
 ## Deployment
 
-- FastAPI behind a reverse proxy with TLS.
-- PostgreSQL with the Alembic schema applied.
-- One or more workers depending on throughput.
-- Forward stdout/stderr to centralized logs.
+`compose.yml` runs three services:
 
-Rocky Linux specifics: [`deploy/rocky-linux/README.md`](deploy/rocky-linux/README.md).
+```
+postgres ──► api    (python -m apps.api)
+         └─► worker (python -m apps.worker)
+```
+
+api and worker share `DATABASE_URL` and the on-disk `property_media/` /
+`generated_media/` workspace volumes. They do not communicate over HTTP.

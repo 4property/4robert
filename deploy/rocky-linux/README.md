@@ -49,7 +49,7 @@ In `/etc/cpihed/cpihed.env`, at minimum set:
 ## Preflight
 
 ```bash
-sudo -u cpihed bash -lc 'cd /opt/cpihed && set -a && source /etc/cpihed/cpihed.env && set +a && .venv/bin/python main.py --check'
+sudo -u cpihed bash -lc 'cd /opt/cpihed && set -a && source /etc/cpihed/cpihed.env && set +a && .venv/bin/python -m apps.api --check'
 ```
 
 The check validates PostgreSQL connectivity and schema, runtime directories, `ffmpeg`, subtitle font, background music, and webhook secret configuration. For production, both `Runtime ready` and `Production ready` must report `Yes`. The check fails if `WEBHOOK_DISABLE_SECURITY=true` or any site secret still uses a placeholder.
@@ -64,7 +64,7 @@ sudo systemctl status cpihed
 sudo journalctl -u cpihed -f
 ```
 
-`/health/live` and `/health/ready` return minimal status only — use `python main.py --check` and `journalctl` for diagnostics.
+`/health/live` and `/health/ready` return minimal status only — use `python -m apps.api --check` and `journalctl` for diagnostics.
 
 ## Reverse proxy
 

@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import AliasChoices, Field, ValidationError as PydanticValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from core.errors import ApplicationError
+from shared.errors import ApplicationError
 from settings.database import (
     DEFAULT_DATABASE_ENCRYPTION_KEY,
     DEFAULT_DATABASE_MAX_OVERFLOW,
@@ -108,7 +108,7 @@ class AppSettings(BaseSettings):
         ge=1,
     )
     webhook_path: str = Field(
-        "/webhooks/wordpress/property",
+        "/v1/ingest/wordpress/property",
         validation_alias="WEBHOOK_PATH",
     )
     webhook_site_id_header: str = Field(
@@ -143,30 +143,35 @@ class AppSettings(BaseSettings):
         False,
         validation_alias="WEBHOOK_ENABLE_DOCS",
     )
-    webhook_worker_count: int = Field(
+    worker_count: int = Field(
         1,
-        validation_alias="WEBHOOK_WORKER_COUNT",
+        validation_alias="WORKER_COUNT",
         ge=1,
     )
-    webhook_job_max_attempts: int = Field(
+    worker_job_max_attempts: int = Field(
         3,
-        validation_alias="WEBHOOK_JOB_MAX_ATTEMPTS",
+        validation_alias="WORKER_JOB_MAX_ATTEMPTS",
         ge=1,
     )
-    webhook_job_retry_backoff_seconds: float = Field(
+    worker_job_retry_backoff_seconds: float = Field(
         30.0,
-        validation_alias="WEBHOOK_JOB_RETRY_BACKOFF_SECONDS",
+        validation_alias="WORKER_JOB_RETRY_BACKOFF_SECONDS",
         ge=0.0,
     )
-    webhook_queue_poll_interval_seconds: float = Field(
+    worker_queue_poll_interval_seconds: float = Field(
         0.5,
-        validation_alias="WEBHOOK_QUEUE_POLL_INTERVAL_SECONDS",
+        validation_alias="WORKER_QUEUE_POLL_INTERVAL_SECONDS",
         gt=0.0,
     )
-    webhook_queue_lease_seconds: int = Field(
+    worker_queue_lease_seconds: int = Field(
         900,
-        validation_alias="WEBHOOK_QUEUE_LEASE_SECONDS",
+        validation_alias="WORKER_QUEUE_LEASE_SECONDS",
         ge=30,
+    )
+    worker_shutdown_timeout_seconds: int = Field(
+        30,
+        validation_alias="WORKER_SHUTDOWN_TIMEOUT_SECONDS",
+        ge=1,
     )
     webhook_shutdown_timeout_seconds: int = Field(
         10,
@@ -209,7 +214,7 @@ class AppSettings(BaseSettings):
         validation_alias="ADMIN_API_ENABLED",
     )
     admin_api_base_path: str = Field(
-        "/admin",
+        "/v1/admin",
         validation_alias="ADMIN_API_BASE_PATH",
     )
     admin_api_token: str = Field(
@@ -219,6 +224,15 @@ class AppSettings(BaseSettings):
     admin_api_disable_auth_for_testing: bool = Field(
         False,
         validation_alias="ADMIN_API_DISABLE_AUTH_FOR_TESTING",
+    )
+    admin_agency_token_secret: str = Field(
+        "",
+        validation_alias="ADMIN_AGENCY_TOKEN_SECRET",
+    )
+    admin_agency_token_ttl_seconds: int = Field(
+        3600,
+        validation_alias="ADMIN_AGENCY_TOKEN_TTL_SECONDS",
+        ge=60,
     )
     database_url: str = Field(
         DEFAULT_DATABASE_URL,
@@ -524,7 +538,7 @@ class AppSettings(BaseSettings):
             raise ValueError("ADMIN_API_BASE_PATH cannot be empty.")
         if not normalized_value.startswith("/"):
             raise ValueError("ADMIN_API_BASE_PATH must start with '/'.")
-        return normalized_value.rstrip("/") or "/admin"
+        return normalized_value.rstrip("/") or "/v1/admin"
 
     @field_validator("log_level")
     @classmethod
@@ -577,9 +591,9 @@ class AppSettings(BaseSettings):
             self.log_level = "INFO"
 
         if not self.admin_api_base_path:
-            self.admin_api_base_path = "/admin"
+            self.admin_api_base_path = "/v1/admin"
         elif self.admin_api_base_path != "/":
-            self.admin_api_base_path = self.admin_api_base_path.rstrip("/") or "/admin"
+            self.admin_api_base_path = self.admin_api_base_path.rstrip("/") or "/v1/admin"
 
         if not self.persistent_log_directory:
             self.persistent_log_directory = "logs"
@@ -625,7 +639,7 @@ def get_app_settings() -> AppSettings:
             context=context,
             hint=(
                 "Review the values in .env against .env.example. On Rocky Linux, validate the "
-                "environment first with `python main.py --check` before starting the systemd service."
+                "environment first with `python -m apps.api --check` before starting the service."
             ),
             cause=exc,
         ) from exc

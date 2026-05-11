@@ -36,5 +36,5 @@ echo
 echo "Runtime installed."
 echo "Next steps:"
 echo "1. Edit $ENV_FILE"
-echo "2. Run: cd $APP_DIR && .venv/bin/python main.py --check"
+echo "2. Run: cd $APP_DIR && .venv/bin/python -m apps.api --check"
 echo "3. Enable the service: systemctl enable --now $SERVICE_NAME"
