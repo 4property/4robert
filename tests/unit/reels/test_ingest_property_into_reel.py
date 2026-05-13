@@ -15,6 +15,7 @@ from modules.reels.application.use_cases.ingest_property_into_reel import (
     IngestPropertyIntoReelUseCase,
 )
 from modules.reels.domain import build_empty_reel_state
+from modules.configuration.domain import RenderTemplate
 
 
 _PAYLOAD = {
@@ -54,10 +55,16 @@ def _build_uow(
     *,
     states: _StubReelStates | None = None,
     properties: _StubProperties | None = None,
+    defaults: Any = None,
+    templates: dict[str, RenderTemplate] | None = None,
 ) -> Any:
     return SimpleNamespace(
         catalog=SimpleNamespace(properties=properties or _StubProperties()),
         reels=SimpleNamespace(states=states or _StubReelStates()),
+        configuration=SimpleNamespace(
+            defaults=SimpleNamespace(get=lambda agency_id: defaults),
+            render_templates=_StubRenderTemplates(templates or {}),
+        ),
     )
 
 
@@ -77,6 +84,14 @@ def _build_job() -> PropertyMediaJob:
         publish_context=None,
         job_id="job-1",
     )
+
+
+class _StubRenderTemplates:
+    def __init__(self, templates: dict[str, RenderTemplate]) -> None:
+        self.templates = templates
+
+    def get(self, template_id: str) -> RenderTemplate | None:
+        return self.templates.get(template_id)
 
 
 def test_execute_persists_state_and_returns_context_for_fresh_property(tmp_path: Path) -> None:
@@ -195,6 +210,50 @@ def test_execute_is_noop_when_state_unchanged_and_artifacts_present(tmp_path: Pa
     assert states.saved == []
 
 
+def test_execute_content_fingerprint_changes_with_render_template(tmp_path: Path) -> None:
+    classic_template = _render_template("classic")
+    compact_template = _render_template(
+        "compact",
+        reel_settings={"width": 720, "height": 1280},
+        poster_settings={"width": 900, "height": 1200},
+    )
+    templates = {
+        "classic": classic_template,
+        "compact": compact_template,
+    }
+    use_case = IngestPropertyIntoReelUseCase(
+        workspace_dir=tmp_path,
+        property_url_template="",
+        property_url_tracking_params=None,
+        social_publishing_enabled=False,
+    )
+
+    classic = use_case.execute(
+        _build_job(),
+        uow=_build_uow(
+            defaults=SimpleNamespace(render_template_id="classic"),
+            templates=templates,
+        ),
+    )
+    compact = use_case.execute(
+        _build_job(),
+        uow=_build_uow(
+            defaults=SimpleNamespace(render_template_id="compact"),
+            templates=templates,
+        ),
+    )
+
+    classic_snapshot = json.loads(classic.content_snapshot_json)
+    compact_snapshot = json.loads(compact.content_snapshot_json)
+    assert classic_snapshot["render_template"]["template_id"] == "classic"
+    assert compact_snapshot["render_template"]["template_id"] == "compact"
+    assert (
+        classic_snapshot["render_template"]["settings_hash"]
+        != compact_snapshot["render_template"]["settings_hash"]
+    )
+    assert classic.content_fingerprint != compact.content_fingerprint
+
+
 def test_execute_propagates_when_payload_is_not_a_mapping(tmp_path: Path) -> None:
     uow = _build_uow()
     use_case = IngestPropertyIntoReelUseCase(
@@ -224,3 +283,22 @@ def test_execute_propagates_when_payload_is_not_a_mapping(tmp_path: Path) -> Non
     # Failure happens before any DB write.
     assert uow.catalog.properties.upserts == []
     assert uow.reels.states.saved == []
+
+
+def _render_template(
+    template_id: str,
+    *,
+    reel_settings: dict[str, object] | None = None,
+    poster_settings: dict[str, object] | None = None,
+) -> RenderTemplate:
+    return RenderTemplate(
+        template_id=template_id,
+        display_name=template_id.title(),
+        description="",
+        status="active",
+        sort_order=0,
+        preview_images=(),
+        layout_variant="classic",
+        reel_settings=reel_settings or {},
+        poster_settings=poster_settings or {},
+    )

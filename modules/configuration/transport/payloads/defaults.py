@@ -21,10 +21,11 @@ class ReelDefaultsUpsertPayload(BaseModel):
         str_strip_whitespace=True,
         json_schema_extra={
             "example": {
-                "platforms": ["instagram", "tiktok", "facebook", "gbp"],
+                "platforms": ["instagram", "tiktok", "facebook", "gbp", "pinterest"],
                 "duration_seconds": 30,
                 "intro_enabled": True,
                 "music_id": "default-track",
+                "render_template_id": "classic",
                 "caption_template": "{{property_title}} · {{price}}",
                 "settings": {
                     "currency": "EUR",
@@ -47,7 +48,7 @@ class ReelDefaultsUpsertPayload(BaseModel):
     platforms: list[str] | None = Field(
         default=None,
         description="Social platforms the reel should be published to.",
-        examples=[["instagram", "tiktok", "facebook", "gbp"]],
+        examples=[["instagram", "tiktok", "facebook", "gbp", "pinterest"]],
     )
     duration_seconds: int | None = Field(
         default=None,
@@ -67,6 +68,11 @@ class ReelDefaultsUpsertPayload(BaseModel):
     caption_template: str | None = Field(
         default=None,
         description="Default caption template used by the publisher.",
+    )
+    render_template_id: str | None = Field(
+        default=None,
+        description="Render template pack selected for agency reels and posters.",
+        examples=["classic"],
     )
     settings: dict | None = Field(
         default=None,

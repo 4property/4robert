@@ -88,6 +88,7 @@ def test_update_aggregated_reel_profile_fans_out_to_each_section() -> None:
             "platforms": ["instagram"],
             "duration_seconds": 20,
             "music_id": "m1",
+            "render_template_id": None,
             "intro_enabled": True,
             "caption_template": "hello",
             "settings": {"watermark": True},

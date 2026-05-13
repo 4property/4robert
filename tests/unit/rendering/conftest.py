@@ -33,6 +33,8 @@ def build_property_data(
     price_display_text: str | None = None,
     viewing_times: tuple[str, ...] = (),
     agency_psra: str | None = None,
+    accent_text_color: str | None = None,
+    accent_background_color: str | None = None,
 ) -> PropertyRenderData:
     return PropertyRenderData(
         site_id="ckp.ie",
@@ -61,6 +63,8 @@ def build_property_data(
         price_display_text=price_display_text,
         agency_psra=agency_psra,
         viewing_times=viewing_times,
+        accent_text_color=accent_text_color,
+        accent_background_color=accent_background_color,
     )
 
 

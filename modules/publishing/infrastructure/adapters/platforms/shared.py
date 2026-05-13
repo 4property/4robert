@@ -115,6 +115,24 @@ def build_youtube_gohighlevel_payload(
     return {"youtubePostDetails": youtube_post_details}
 
 
+def build_pinterest_gohighlevel_payload(
+    target_url: str | None,
+    title: str | None,
+) -> dict[str, object]:
+    pinterest_post_details: dict[str, object] = {}
+    normalized_title = _clean_text(title)
+    normalized_url = _clean_text(target_url)
+    if normalized_title is not None:
+        pinterest_post_details["title"] = normalized_title[:100]
+    if normalized_url is not None:
+        pinterest_post_details["link"] = normalized_url
+    return (
+        {"pinterestPostDetails": pinterest_post_details}
+        if pinterest_post_details
+        else {}
+    )
+
+
 def _render_site_label(property_url: str | None) -> str | None:
     site_label = _extract_site_label(property_url)
     if site_label is None:
@@ -175,6 +193,7 @@ __all__ = [
     "build_empty_gohighlevel_payload",
     "build_google_business_profile_gohighlevel_payload",
     "build_google_business_profile_description",
+    "build_pinterest_gohighlevel_payload",
     "build_property_link_description",
     "build_youtube_gohighlevel_payload",
     "build_youtube_upload_file_name",

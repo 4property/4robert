@@ -86,6 +86,8 @@ class Property:
     amenities: str | None = None
     property_order: int | None = None
     wppd_parent_id: str | None = None
+    wppd_accent_text_color: str | None = None
+    wppd_accent_background_color: str | None = None
     property_type_ids: tuple[int, ...] = field(default_factory=tuple)
     property_county_ids: tuple[int, ...] = field(default_factory=tuple)
     property_area_ids: tuple[int, ...] = field(default_factory=tuple)
@@ -175,6 +177,8 @@ class Property:
             amenities=to_text(payload.get("amenities")),
             property_order=to_int(payload.get("property_order")),
             wppd_parent_id=to_text(payload.get("wppd_parent_id")),
+            wppd_accent_text_color=to_text(payload.get("wppd_accent_text_color")),
+            wppd_accent_background_color=to_text(payload.get("wppd_accent_background_color")),
             property_type_ids=to_int_tuple(payload.get("property_type")),
             property_county_ids=to_int_tuple(payload.get("property_county")),
             property_area_ids=to_int_tuple(payload.get("property_area")),

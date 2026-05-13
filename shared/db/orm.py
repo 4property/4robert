@@ -38,6 +38,7 @@ from modules.configuration.infrastructure.orm import (
     AgencyMusicTrackORM,
     AgencyReelDefaultsORM,
     AgencySocialTemplateORM,
+    RenderTemplateORM,
 )
 from shared.db.base import Base
 
@@ -174,6 +175,12 @@ class ReelORM(Base):
     publish_target_snapshot: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    render_template_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("render_templates.template_id"),
+        nullable=False,
+        server_default="classic",
+    )
     selected_image_folder: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     artifact_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     local_artifact_path: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
@@ -217,6 +224,12 @@ class MediaRevisionORM(Base):
     source_property_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     artifact_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     render_profile: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    render_template_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("render_templates.template_id"),
+        nullable=False,
+        server_default="classic",
+    )
     media_path: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     metadata_path: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     mime_type: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
@@ -393,6 +406,7 @@ __all__ = [
     "PropertyImageORM",
     "PropertyORM",
     "ProviderConnectionORM",
+    "RenderTemplateORM",
     "ReelORM",
     "ScriptedVideoArtifactORM",
     "WebhookEventORM",

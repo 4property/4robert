@@ -165,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         persistent_log_directory=PERSISTENT_LOG_DIRECTORY,
         persistent_log_max_bytes=PERSISTENT_LOG_MAX_BYTES,
         persistent_log_backup_count=PERSISTENT_LOG_BACKUP_COUNT,
+        process_role="api",
     )
 
     host = args.host or WEBHOOK_HOST

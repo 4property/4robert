@@ -164,6 +164,7 @@ def _build_ingested_reel_state(
     pending_publish_platforms: tuple[str, ...],
     reset_publish_history: bool,
     normalized_external_source_id: str,
+    render_template_id: str,
 ) -> ReelState:
     selected_image_folder = state.selected_image_folder
     if requires_asset_preparation:
@@ -205,6 +206,7 @@ def _build_ingested_reel_state(
         content_snapshot=content_snapshot,
         publish_target_fingerprint=publish_target_fingerprint,
         publish_target_snapshot=publish_target_snapshot,
+        render_template_id=render_template_id or "classic",
         selected_image_folder=selected_image_folder,
         artifact_kind=delivery_plan.artifact_kind,
         local_artifact_path=local_artifact_path,

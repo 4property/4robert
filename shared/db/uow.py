@@ -39,6 +39,9 @@ from modules.configuration.infrastructure.defaults_repository import (
 from modules.configuration.infrastructure.music_track_repository import (
     MusicTracksRepository,
 )
+from modules.configuration.infrastructure.render_template_repository import (
+    RenderTemplateRepository,
+)
 from modules.configuration.infrastructure.social_template_repository import (
     SocialTemplatesRepository,
 )
@@ -95,6 +98,7 @@ class ConfigurationNamespace:
     automation: AutomationRulesRepository
     social_templates: SocialTemplatesRepository
     music: MusicTracksRepository
+    render_templates: RenderTemplateRepository
 
 
 @dataclass(slots=True)
@@ -156,6 +160,7 @@ class DatabaseUnitOfWork:
             automation=AutomationRulesRepository(self.session),
             social_templates=SocialTemplatesRepository(self.session),
             music=MusicTracksRepository(self.session),
+            render_templates=RenderTemplateRepository(self.session),
         )
         self.delivery = DeliveryNamespace(
             jobs=JobRepository(self.session),

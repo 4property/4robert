@@ -101,6 +101,9 @@ class PreparedReelAssets:
     background_audio_path: Path
     background_audio_candidates: tuple[Path, ...] = field(default_factory=tuple)
     reserve_agency_logo_space: bool = False
+    vertical_banner_path: Path | None = None
+    vertical_banner_x: int | None = None
+    vertical_banner_y: int | None = None
 
 
 @dataclass(slots=True)
@@ -131,10 +134,13 @@ class PropertyRenderData:
     property_size: str | None = None
     agency_psra: str | None = None
     agency_logo_url: str | None = None
+    agency_logo_local_path: Path | None = None
     listing_lifecycle: str | None = None
     banner_text: str | None = None
     price_display_text: str | None = None
     viewing_times: tuple[str, ...] = ()
+    accent_text_color: str | None = None
+    accent_background_color: str | None = None
 
 
 PropertyReelData = PropertyRenderData

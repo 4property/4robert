@@ -1,0 +1,26 @@
+[Unit]
+Description=reels test (4Reels-Backend) property webhook pipeline
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=support
+Group=support
+WorkingDirectory=/opt/projects/4Reels-Backend
+EnvironmentFile=/opt/projects/4Reels-Backend/.env
+ExecStart=/opt/projects/4Reels-Backend/.venv/bin/python -m apps.api
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/projects/4Reels-Backend
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

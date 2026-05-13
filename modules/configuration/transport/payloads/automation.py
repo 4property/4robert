@@ -23,6 +23,9 @@ class AutomationRulesUpsertPayload(BaseModel):
                 "publish_window_end": "20:00",
                 "publish_days": ["mon", "tue", "wed", "thu", "fri"],
                 "trigger_on_status": ["for_sale", "to_let"],
+                "hold_window_seconds": 0,
+                "quiet_hours_enabled": False,
+                "skip_weekends": False,
             }
         },
     )
@@ -53,6 +56,29 @@ class AutomationRulesUpsertPayload(BaseModel):
         default=None,
         description="Property statuses that trigger reel generation.",
         examples=[["for_sale", "to_let"]],
+    )
+    hold_window_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        le=86400,
+        description=(
+            "Delay in seconds to wait before publishing after the trigger "
+            "(0 = immediate, max 24h)."
+        ),
+    )
+    quiet_hours_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "When true, publishes are deferred until publish_window_start "
+            "if outside [start, end]."
+        ),
+    )
+    skip_weekends: bool | None = Field(
+        default=None,
+        description=(
+            "When true, publishes scheduled for Saturday/Sunday are deferred "
+            "to the next Monday."
+        ),
     )
 
 

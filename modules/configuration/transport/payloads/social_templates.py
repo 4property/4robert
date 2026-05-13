@@ -11,7 +11,7 @@ class SocialTemplatesReplacePayload(BaseModel):
     Replaces the whole template block: every existing per-platform row is
     dropped and re-inserted from the supplied `templates` map. Each key is
     a platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,
-    `youtube`, `gbp`) and the value is the description template.
+    `youtube`, `gbp`, `pinterest`) and the value is the description template.
     """
 
     model_config = ConfigDict(
@@ -32,7 +32,11 @@ class SocialTemplatesReplacePayload(BaseModel):
         description=(
             "Mapping of platform identifier to description template. "
             "Unknown keys are accepted so future platforms do not need a "
-            "schema bump. Empty map drops all stored templates."
+            "schema bump. Empty map drops all stored templates. Each value "
+            "may reference any of the variables in `ALLOWED_TEMPLATE_VARIABLES` "
+            "(see `modules.configuration.domain.social_templates_variables`) "
+            "using `{{variable_name}}` syntax. Unknown variables are rejected "
+            "with 422 `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE`."
         ),
     )
 

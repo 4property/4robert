@@ -37,6 +37,7 @@ _DEFAULT_PLATFORMS = (
     "youtube",
     "facebook",
     "gbp",
+    "pinterest",
 )
 
 
@@ -59,6 +60,11 @@ class AggregatedReelProfile:
             int(defaults.duration_seconds) if defaults is not None else 30
         )
         music_id = defaults.music_id if defaults is not None else ""
+        render_template_id = (
+            getattr(defaults, "render_template_id", "classic")
+            if defaults is not None
+            else "classic"
+        )
         intro_enabled = bool(defaults.intro_enabled) if defaults is not None else True
         caption_template = (
             defaults.caption_template if defaults is not None else ""
@@ -111,6 +117,7 @@ class AggregatedReelProfile:
             "platforms": platforms,
             "duration_seconds": duration_seconds,
             "music_id": music_id,
+            "render_template_id": render_template_id,
             "intro_enabled": intro_enabled,
             "logo_position": logo_position,
             "brand_primary_color": brand_primary,

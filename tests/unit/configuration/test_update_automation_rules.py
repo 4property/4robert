@@ -24,6 +24,9 @@ def test_update_automation_forwards_payload_to_repository() -> None:
             publish_window_end="20:00",
             publish_days=["mon", "tue", "wed"],
             trigger_on_status=["for_sale", "to_let"],
+            hold_window_seconds=1800,
+            quiet_hours_enabled=True,
+            skip_weekends=True,
         ),
     )
     call = automation.upsert_calls[0]
@@ -33,6 +36,29 @@ def test_update_automation_forwards_payload_to_repository() -> None:
     assert call["publish_window_end"] == "20:00"
     assert list(call["publish_days"]) == ["mon", "tue", "wed"]
     assert list(call["trigger_on_status"]) == ["for_sale", "to_let"]
+    assert call["hold_window_seconds"] == 1800
+    assert call["quiet_hours_enabled"] is True
+    assert call["skip_weekends"] is True
+
+
+def test_update_automation_omits_new_fields_when_not_provided() -> None:
+    """When the PUT omits hold/quiet/skip, the use case must forward None to
+    the repository so the merge layer preserves the previously stored values
+    (defaults only apply on the initial INSERT)."""
+
+    automation = StubAutomation()
+    uow = build_uow(automation=automation)
+    UpdateAutomationRulesUseCase().execute(
+        uow=uow,
+        data=UpdateAutomationRulesInput(
+            agency_id="agency-1",
+            approval_required=True,
+        ),
+    )
+    call = automation.upsert_calls[0]
+    assert call["hold_window_seconds"] is None
+    assert call["quiet_hours_enabled"] is None
+    assert call["skip_weekends"] is None
 
 
 def test_update_automation_does_not_accept_platforms_field() -> None:

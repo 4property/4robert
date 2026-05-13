@@ -250,6 +250,7 @@ class GoHighLevelMultiPublishMixin:
                     title=target.title,
                     social_post_type=effective_social_post_type,
                     target_url=target.target_url,
+                    scheduled_at=request.scheduled_at,
                 )
                 outcomes.append(
                     PlatformPublishOutcome(

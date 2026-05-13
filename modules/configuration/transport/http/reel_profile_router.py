@@ -123,6 +123,7 @@ def create_reel_profile_router(
                         platforms=payload.platforms,
                         duration_seconds=payload.duration_seconds,
                         music_id=payload.music_id,
+                        render_template_id=payload.render_template_id,
                         intro_enabled=payload.intro_enabled,
                         logo_position=payload.logo_position,
                         brand_primary_color=payload.brand_primary_color,

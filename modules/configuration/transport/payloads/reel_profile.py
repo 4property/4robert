@@ -24,9 +24,10 @@ class ReelProfileUpsertPayload(BaseModel):
         json_schema_extra={
             "example": {
                 "name": "Default",
-                "platforms": ["instagram", "tiktok", "facebook", "gbp"],
+                "platforms": ["instagram", "tiktok", "facebook", "gbp", "pinterest"],
                 "duration_seconds": 30,
                 "music_id": "uplifting-corporate-1",
+                "render_template_id": "classic",
                 "intro_enabled": True,
                 "logo_position": "top-right",
                 "brand_primary_color": "#0F172A",
@@ -48,6 +49,7 @@ class ReelProfileUpsertPayload(BaseModel):
     )
     duration_seconds: int | None = Field(default=None, ge=5, le=180)
     music_id: str | None = None
+    render_template_id: str | None = Field(default=None, examples=["classic"])
     intro_enabled: bool | None = None
     logo_position: str | None = Field(default=None, examples=["top-right"])
     brand_primary_color: str | None = Field(default=None, examples=["#0F172A"])

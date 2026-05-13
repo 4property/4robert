@@ -36,6 +36,7 @@ class ReelDefaults:
     music_id: str
     intro_enabled: bool
     caption_template: str
+    render_template_id: str = "classic"
     settings: Mapping[str, Any] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
@@ -49,6 +50,9 @@ class AutomationRules:
     publish_window_end: str
     publish_days: tuple[str, ...]
     trigger_on_status: tuple[str, ...]
+    hold_window_seconds: int
+    quiet_hours_enabled: bool
+    skip_weekends: bool
     created_at: str
     updated_at: str
 
@@ -75,10 +79,38 @@ class MusicTrack:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class RenderTemplatePreviewImage:
+    kind: str
+    image_url: str
+    alt: str
+
+
+@dataclass(frozen=True, slots=True)
+class RenderTemplate:
+    template_id: str
+    display_name: str
+    description: str
+    status: str
+    sort_order: int
+    preview_images: tuple[RenderTemplatePreviewImage, ...]
+    layout_variant: str
+    reel_settings: Mapping[str, Any] = field(default_factory=dict)
+    poster_settings: Mapping[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+
+    @property
+    def is_selectable(self) -> bool:
+        return self.status == "active"
+
+
 __all__ = [
     "AutomationRules",
     "BrandSettings",
     "MusicTrack",
+    "RenderTemplate",
+    "RenderTemplatePreviewImage",
     "ReelDefaults",
     "SocialTemplate",
 ]

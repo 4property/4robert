@@ -15,6 +15,7 @@ required.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -102,8 +103,8 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         "selected_slides": [],
     }
 
-    def _fake_template(profile: str) -> object:
-        captured["template"].append({"render_profile": profile})
+    def _fake_template(profile: str, *, template=None) -> object:
+        captured["template"].append({"render_profile": profile, "template": template})
         return object()  # opaque template token
 
     def _fake_selected_slides(selected_dir: Path, paths: tuple[Path, ...]):
@@ -112,13 +113,21 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         )
         return [{"stub_slide_for": str(p)} for p in paths]
 
-    def _fake_prepare(workspace, render_data, *, template, working_dir):
+    def _fake_prepare(
+        workspace,
+        render_data,
+        *,
+        template,
+        working_dir,
+        layout_variant="classic",
+    ):
         captured["prepare"].append(
             {
                 "workspace": workspace,
                 "render_data": render_data,
                 "template": template,
                 "working_dir": working_dir,
+                "layout_variant": layout_variant,
             }
         )
         working_dir.mkdir(parents=True, exist_ok=True)
@@ -131,6 +140,9 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         output_path,
         template,
         render_profile,
+        render_template_id,
+        render_template_settings_hash,
+        poster_template,
         prepared_assets,
         working_dir,
     ):
@@ -141,6 +153,9 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
                 "output_path": output_path,
                 "template": template,
                 "render_profile": render_profile,
+                "render_template_id": render_template_id,
+                "render_template_settings_hash": render_template_settings_hash,
+                "poster_template": poster_template,
                 "prepared_assets": prepared_assets,
                 "working_dir": working_dir,
             }
@@ -155,6 +170,7 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         template,
         prepared_assets,
         working_dir,
+        layout_variant="classic",
     ):
         captured["reel"].append(
             {
@@ -164,16 +180,26 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
                 "template": template,
                 "prepared_assets": prepared_assets,
                 "working_dir": working_dir,
+                "layout_variant": layout_variant,
             }
         )
         Path(output_path).write_bytes(b"fake-mp4")
 
-    def _fake_poster(workspace, render_data, *, output_path):
+    def _fake_poster(
+        workspace,
+        render_data,
+        *,
+        output_path,
+        template,
+        layout_variant="classic",
+    ):
         captured["poster"].append(
             {
                 "workspace": workspace,
                 "render_data": render_data,
                 "output_path": output_path,
+                "template": template,
+                "layout_variant": layout_variant,
             }
         )
         Path(output_path).write_bytes(b"fake-jpg")
@@ -324,6 +350,36 @@ def test_render_media_invokes_generate_poster_with_correct_paths(
     expected_poster_path = artifact.staging_dir / f"{context.property.slug}-poster.jpg"
     assert poster_call["output_path"] == expected_poster_path
     assert expected_poster_path.exists()
+
+
+def test_render_media_passes_selected_template_settings_to_reel_and_poster(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _patch_primitives(monkeypatch)
+    context = replace(
+        _build_context(tmp_path),
+        render_template_id="compact",
+        render_template_settings_hash="settings-hash",
+        render_template_reel_settings={"width": 720, "height": 1280},
+        render_template_poster_settings={"width": 900, "height": 1200},
+    )
+    selected_dir = tmp_path / "selected"
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    prepared = _build_prepared_assets(selected_dir)
+
+    renderer = DefaultMediaRenderer(workspace_dir=tmp_path)
+    renderer.render_media(context, prepared)
+
+    assert captured["template"][0]["template"].width == 720
+    assert captured["template"][0]["template"].height == 1280
+    poster_template = captured["poster"][0]["template"]
+    assert poster_template.width == 900
+    assert poster_template.height == 1200
+    manifest_call = captured["manifest"][0]
+    assert manifest_call["render_template_id"] == "compact"
+    assert manifest_call["render_template_settings_hash"] == "settings-hash"
+    assert manifest_call["poster_template"].width == 900
 
 
 def test_render_video_alias_delegates_to_render_media(

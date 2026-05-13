@@ -36,6 +36,7 @@ _DEFAULT_PLATFORMS = (
     "youtube",
     "facebook",
     "gbp",
+    "pinterest",
 )
 
 
@@ -118,6 +119,7 @@ def create_defaults_router(
                         music_id=payload.music_id,
                         intro_enabled=payload.intro_enabled,
                         caption_template=payload.caption_template,
+                        render_template_id=payload.render_template_id,
                         settings=payload.settings,
                     ),
                 )
@@ -170,6 +172,7 @@ def _serialize_defaults(
             "music_id": "",
             "intro_enabled": True,
             "caption_template": "",
+            "render_template_id": "classic",
             "settings": {},
             "created_at": "",
             "updated_at": "",
@@ -181,6 +184,7 @@ def _serialize_defaults(
         "music_id": record.music_id,
         "intro_enabled": record.intro_enabled,
         "caption_template": record.caption_template,
+        "render_template_id": record.render_template_id,
         "settings": dict(record.settings or {}),
         "created_at": record.created_at,
         "updated_at": record.updated_at,

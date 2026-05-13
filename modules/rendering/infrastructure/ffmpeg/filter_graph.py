@@ -126,6 +126,13 @@ def build_slide_segment_filter(
     include_ber_icon: bool,
     render_agency_logo: bool | None = None,
     apply_fade_in: bool = True,
+    layout_variant: str = "classic",
+    top_panel_color: str | None = None,
+    bottom_panel_color: str | None = None,
+    text_override_color: str | None = None,
+    vertical_banner_input_index: int | None = None,
+    vertical_banner_x: int | None = None,
+    vertical_banner_y: int | None = None,
 ) -> str:
     if render_agency_logo is None:
         render_agency_logo = include_agency_logo
@@ -143,6 +150,7 @@ def build_slide_segment_filter(
         has_ber_badge=include_ber_icon,
         has_agency_logo=include_agency_logo,
         cover_caption=None,
+        layout_variant=layout_variant,
     )
     crop_x, crop_y = build_slide_crop_expressions(
         slide=slide,
@@ -192,6 +200,13 @@ def build_slide_segment_filter(
         ber_icon_label = "ber_header_icon"
         filter_parts.append(f"[{next_input_index}:v]format=rgba[ber_header_icon]")
 
+    vertical_banner_label: str | None = None
+    if vertical_banner_input_index is not None:
+        vertical_banner_label = "vertical_status_banner"
+        filter_parts.append(
+            f"[{vertical_banner_input_index}:v]format=rgba[{vertical_banner_label}]"
+        )
+
     filter_parts.append(
         build_overlay_filter(
             property_data,
@@ -205,6 +220,13 @@ def build_slide_segment_filter(
             ber_icon_label=ber_icon_label,
             output_label="vout",
             layout=segment_layout,
+            layout_variant=layout_variant,
+            top_panel_color=top_panel_color,
+            bottom_panel_color=bottom_panel_color,
+            text_override_color=text_override_color,
+            vertical_banner_label=vertical_banner_label,
+            vertical_banner_x=vertical_banner_x,
+            vertical_banner_y=vertical_banner_y,
         )
     )
     return ";".join(filter_parts)

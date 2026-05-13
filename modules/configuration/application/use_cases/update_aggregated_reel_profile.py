@@ -28,6 +28,7 @@ from modules.configuration.application.use_cases.read_aggregated_reel_profile im
     ReadAggregatedReelProfileUseCase,
 )
 from shared.db import DatabaseUnitOfWork
+from shared.errors import ResourceNotFoundError, ValidationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,7 @@ class UpdateAggregatedReelProfileInput:
     platforms: list[str] | None = None
     duration_seconds: int | None = None
     music_id: str | None = None
+    render_template_id: str | None = None
     intro_enabled: bool | None = None
     logo_position: str | None = None
     brand_primary_color: str | None = None
@@ -66,6 +68,21 @@ class UpdateAggregatedReelProfileUseCase:
             raise RuntimeError("The unit of work is not active.")
         agency_id = str(data.agency_id or "").strip()
         ensure_agency_exists(uow, agency_id)
+        if data.render_template_id is not None:
+            template_id = str(data.render_template_id or "").strip()
+            template = uow.configuration.render_templates.get(template_id)
+            if template is None:
+                raise ResourceNotFoundError(
+                    "The render template does not exist.",
+                    code="RENDER_TEMPLATE_NOT_FOUND",
+                    context={"template_id": template_id},
+                )
+            if not template.is_selectable:
+                raise ValidationError(
+                    "The render template is not selectable.",
+                    code="RENDER_TEMPLATE_NOT_SELECTABLE",
+                    context={"template_id": template_id, "status": template.status},
+                )
 
         # Brand slice. Only fields explicitly supplied propagate; the
         # repository preserves the previous value otherwise.
@@ -92,6 +109,7 @@ class UpdateAggregatedReelProfileUseCase:
             "platforms": data.platforms,
             "duration_seconds": data.duration_seconds,
             "music_id": data.music_id,
+            "render_template_id": data.render_template_id,
             "intro_enabled": data.intro_enabled,
             "caption_template": data.caption_template,
         }
@@ -103,6 +121,7 @@ class UpdateAggregatedReelProfileUseCase:
                 platforms=data.platforms,
                 duration_seconds=data.duration_seconds,
                 music_id=data.music_id,
+                render_template_id=data.render_template_id,
                 intro_enabled=data.intro_enabled,
                 caption_template=data.caption_template,
                 settings=(

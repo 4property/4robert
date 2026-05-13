@@ -220,6 +220,7 @@ class MultiPlatformPublishRequest:
     source_site_id: str | None
     social_post_type: str
     artifact_kind: str
+    scheduled_at: str | None
 
     def __init__(
         self,
@@ -239,6 +240,7 @@ class MultiPlatformPublishRequest:
         source_site_id: str | None = None,
         social_post_type: str = "reel",
         artifact_kind: str = "reel_video",
+        scheduled_at: str | None = None,
     ) -> None:
         raw_descriptions = dict(descriptions_by_platform or {})
         raw_titles = dict(titles_by_platform or {})
@@ -316,6 +318,12 @@ class MultiPlatformPublishRequest:
         object.__setattr__(self, "source_site_id", source_site_id)
         object.__setattr__(self, "social_post_type", social_post_type)
         object.__setattr__(self, "artifact_kind", artifact_kind)
+        normalized_scheduled_at: str | None
+        if scheduled_at is None:
+            normalized_scheduled_at = None
+        else:
+            normalized_scheduled_at = str(scheduled_at).strip() or None
+        object.__setattr__(self, "scheduled_at", normalized_scheduled_at)
 
     @property
     def video_path(self) -> Path:
@@ -349,10 +357,19 @@ class MultiPlatformPublishResult:
     def aggregate_status(self) -> str:
         if not self.desired_platforms:
             return "skipped"
-        if not self.has_any_success:
+        effective_outcomes = tuple(
+            outcome
+            for outcome in self.platform_results
+            if outcome.outcome != "skipped_missing_account"
+        )
+        effective_count = len(effective_outcomes)
+        successful_count = len(self.successful_platforms)
+        if effective_count == 0:
             return "failed"
-        if len(self.successful_platforms) == len(self.desired_platforms):
+        if successful_count == effective_count:
             return "published"
+        if successful_count == 0:
+            return "failed"
         return "partial"
 
     @property

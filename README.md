@@ -59,3 +59,10 @@ python -m pytest -q
 - Google Business Profile must already be connected to the target HighLevel sub-account in Social Planner before webhooks are sent.
 - Rocky Linux deployment guide: [`deploy/rocky-linux/README.md`](deploy/rocky-linux/README.md).
 - Architecture detail: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+## License
+
+Copyright (C) 2026 Roberto Gaviño Hurtado.
+
+This project is licensed under the GNU General Public License, version 2 only
+(GPL-2.0-only). See [`LICENSE`](LICENSE) for details.

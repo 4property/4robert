@@ -198,7 +198,12 @@ def _resolve_publish_inputs(
     )
 
 
-def _build_content_snapshot(*, property_item: Property, delivery_plan) -> dict[str, object]:
+def _build_content_snapshot(
+    *,
+    property_item: Property,
+    delivery_plan,
+    render_template_snapshot: dict[str, object] | None = None,
+) -> dict[str, object]:
     snapshot = property_item.to_dict()
     snapshot.pop("raw_data", None)
     snapshot["delivery_plan"] = {
@@ -210,6 +215,8 @@ def _build_content_snapshot(*, property_item: Property, delivery_plan) -> dict[s
         "banner_text": delivery_plan.banner_text,
         "price_display_text": delivery_plan.price_display_text,
     }
+    if render_template_snapshot is not None:
+        snapshot["render_template"] = dict(render_template_snapshot)
     return snapshot
 
 

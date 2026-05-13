@@ -46,11 +46,17 @@ from apps.api.logging_middleware import register_logging_middleware
 from modules.configuration.transport.http.automation_router import (
     create_automation_router,
 )
+from modules.configuration.transport.http.brand_logo_router import (
+    create_brand_logo_router,
+)
 from modules.configuration.transport.http.brand_router import create_brand_router
 from modules.configuration.transport.http.defaults_router import create_defaults_router
 from modules.configuration.transport.http.music_router import create_music_router
 from modules.configuration.transport.http.reel_profile_router import (
     create_reel_profile_router,
+)
+from modules.configuration.transport.http.render_templates_router import (
+    create_render_templates_router,
 )
 from modules.configuration.transport.http.social_templates_router import (
     create_social_templates_router,
@@ -248,6 +254,7 @@ def build_api_app(
         allow_origins=["*"],
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_private_network=True,
     )
     register_logging_middleware(app)
 
@@ -341,6 +348,13 @@ def _include_module_routers(
         )
     )
     app.include_router(
+        create_brand_logo_router(
+            unit_of_work_factory=unit_of_work_factory,
+            admin_access_policy=admin_access_policy,
+            workspace_dir=resolved_workspace,
+        )
+    )
+    app.include_router(
         create_defaults_router(
             unit_of_work_factory=unit_of_work_factory,
             admin_access_policy=admin_access_policy,
@@ -366,6 +380,12 @@ def _include_module_routers(
     )
     app.include_router(
         create_reel_profile_router(
+            unit_of_work_factory=unit_of_work_factory,
+            admin_access_policy=admin_access_policy,
+        )
+    )
+    app.include_router(
+        create_render_templates_router(
             unit_of_work_factory=unit_of_work_factory,
             admin_access_policy=admin_access_policy,
         )

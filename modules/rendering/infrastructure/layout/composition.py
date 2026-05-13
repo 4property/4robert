@@ -33,14 +33,31 @@ def build_overlay_layout(
     has_agency_logo: bool = False,
     cover_caption: str | None = None,
     single_line_contact_email: bool = False,
+    layout_variant: str = "classic",
 ) -> OverlayLayout:
     width = settings.width
     height = settings.height
-    outer_margin_x = max(36, round(width * 0.04))
-    outer_margin_y = max(36, round(height * 0.03))
+    # Feature 16: the side_banner variant ditches the outer photo
+    # margins entirely so the property photo runs edge to edge
+    # (full-bleed). The top panel becomes a full-width band and the
+    # vertical status ribbon floats near the right side.
+    if layout_variant == "side_banner":
+        outer_margin_x = 0
+        outer_margin_y = 0
+    else:
+        outer_margin_x = max(36, round(width * 0.04))
+        outer_margin_y = max(36, round(height * 0.03))
     panel_padding_x = max(26, round(width * 0.024))
     panel_padding_y = max(22, round(height * 0.018))
     panel_width = width - (outer_margin_x * 2)
+
+    if layout_variant == "side_banner":
+        # The reference side_banner has a full-width translucent top
+        # band; text and BER are constrained inside that band while the
+        # vertical ribbon floats above it.
+        top_panel_width = panel_width
+    else:
+        top_panel_width = panel_width
 
     warnings: list[LayoutWarning] = []
 
@@ -52,7 +69,8 @@ def build_overlay_layout(
         outer_margin_y=outer_margin_y,
         panel_padding_x=panel_padding_x,
         panel_padding_y=panel_padding_y,
-        panel_width=panel_width,
+        panel_width=top_panel_width,
+        layout_variant=layout_variant,
     )
     warnings.extend(top_warnings)
 
@@ -73,6 +91,7 @@ def build_overlay_layout(
         panel_padding_x=panel_padding_x,
         panel_padding_y=panel_padding_y,
         panel_width=panel_width,
+        layout_variant=layout_variant,
     )
     warnings.extend(bottom_warnings)
 

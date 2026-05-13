@@ -25,6 +25,9 @@ class UpdateAutomationRulesInput:
     publish_window_end: str | None = None
     publish_days: Iterable[str] | None = None
     trigger_on_status: Iterable[str] | None = None
+    hold_window_seconds: int | None = None
+    quiet_hours_enabled: bool | None = None
+    skip_weekends: bool | None = None
 
 
 class UpdateAutomationRulesUseCase:
@@ -45,6 +48,9 @@ class UpdateAutomationRulesUseCase:
             publish_window_end=data.publish_window_end,
             publish_days=data.publish_days,
             trigger_on_status=data.trigger_on_status,
+            hold_window_seconds=data.hold_window_seconds,
+            quiet_hours_enabled=data.quiet_hours_enabled,
+            skip_weekends=data.skip_weekends,
         )
 
 

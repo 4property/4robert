@@ -50,6 +50,7 @@ from shared.storage.site_layout import (
 )
 from modules.rendering.infrastructure.ffmpeg.filters import build_overlay_filter
 from modules.rendering.infrastructure.formatting import (
+    apply_alpha_to_hex,
     build_fit_inside_rgba_filter,
     resolve_agent_image_size,
     resolve_ber_icon_size,
@@ -81,6 +82,7 @@ def generate_property_poster_from_data(
     *,
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
+    layout_variant: str = "classic",
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
     base_settings = template or PropertyReelTemplate(
@@ -118,6 +120,7 @@ def generate_property_poster_from_data(
             property_data,
             template=settings,
             working_dir=temp_dir / "prepared",
+            layout_variant=layout_variant,
         )
         if not prepared_assets.slides:
             raise PropertyReelError("No primary image is available for poster generation.")
@@ -130,6 +133,13 @@ def generate_property_poster_from_data(
             next_input_index += 1
         if prepared_assets.ber_icon_path is not None:
             ber_icon_input_index = next_input_index
+            next_input_index += 1
+        vertical_banner_input_index: int | None = None
+        if (
+            layout_variant == "side_banner"
+            and prepared_assets.vertical_banner_path is not None
+        ):
+            vertical_banner_input_index = next_input_index
 
         filter_script_path = temp_dir / "filter_complex.txt"
         filter_script_path.write_text(
@@ -144,6 +154,10 @@ def generate_property_poster_from_data(
                 agent_input_index=1,
                 agency_logo_input_index=agency_logo_input_index,
                 ber_icon_input_index=ber_icon_input_index,
+                layout_variant=layout_variant,
+                vertical_banner_input_index=vertical_banner_input_index,
+                vertical_banner_x=prepared_assets.vertical_banner_x,
+                vertical_banner_y=prepared_assets.vertical_banner_y,
             ),
             encoding="utf-8",
         )
@@ -176,6 +190,15 @@ def generate_property_poster_from_data(
                     "1",
                     "-i",
                     str(prepared_assets.ber_icon_path),
+                ]
+            )
+        if vertical_banner_input_index is not None:
+            command.extend(
+                [
+                    "-loop",
+                    "1",
+                    "-i",
+                    str(prepared_assets.vertical_banner_path),
                 ]
             )
         command.extend(
@@ -298,6 +321,10 @@ def _build_poster_filter_script(
     agent_input_index: int,
     agency_logo_input_index: int | None,
     ber_icon_input_index: int | None,
+    layout_variant: str = "classic",
+    vertical_banner_input_index: int | None = None,
+    vertical_banner_x: int | None = None,
+    vertical_banner_y: int | None = None,
 ) -> str:
     overlay_layout = build_overlay_layout(
         property_data,
@@ -308,6 +335,7 @@ def _build_poster_filter_script(
         has_agency_logo=include_agency_logo,
         cover_caption=None,
         single_line_contact_email=True,
+        layout_variant=layout_variant,
     )
     photo_box = _resolve_poster_photo_box(settings, overlay_layout)
     agent_image_width, agent_image_height = (
@@ -382,6 +410,27 @@ def _build_poster_filter_script(
         filter_parts.append(
             f"[{ber_icon_input_index}:v]scale={ber_icon_width}:{ber_icon_height},format=rgba[ber_header_icon]"
         )
+
+    # Feature 16: side_banner gets accent-colored transparent panels and
+    # a pre-rendered vertical status banner overlay; classic falls back
+    # to the original black panel colors byte-for-byte.
+    poster_panel_color = (
+        apply_alpha_to_hex(property_data.accent_background_color, alpha=0.55)
+        if layout_variant == "side_banner"
+        else None
+    )
+    poster_text_override = (
+        property_data.accent_text_color
+        if layout_variant == "side_banner"
+        else None
+    )
+    vertical_banner_label: str | None = None
+    if vertical_banner_input_index is not None:
+        vertical_banner_label = "poster_vertical_banner"
+        filter_parts.append(
+            f"[{vertical_banner_input_index}:v]format=rgba[{vertical_banner_label}]"
+        )
+
     filter_parts.append(
         build_overlay_filter(
             property_data,
@@ -408,6 +457,13 @@ def _build_poster_filter_script(
             ),
             output_label="vout",
             layout=overlay_layout,
+            layout_variant=layout_variant,
+            top_panel_color=poster_panel_color,
+            bottom_panel_color=poster_panel_color,
+            text_override_color=poster_text_override,
+            vertical_banner_label=vertical_banner_label,
+            vertical_banner_x=vertical_banner_x,
+            vertical_banner_y=vertical_banner_y,
         )
     )
     return ";".join(filter_parts)

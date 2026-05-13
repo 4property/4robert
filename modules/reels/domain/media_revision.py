@@ -21,6 +21,7 @@ class MediaRevision:
     publish_target_fingerprint: str
     workflow_state: str
     created_at: str
+    render_template_id: str = "classic"
 
 
 __all__ = ["MediaRevision"]

@@ -89,6 +89,7 @@ def _build_workflow_payload(
         "slug": context.property.slug,
         "listing_lifecycle": context.delivery_plan.listing_lifecycle,
         "render_profile": context.delivery_plan.render_profile,
+        "render_template_id": context.render_template_id,
         "artifact_kind": context.delivery_plan.artifact_kind,
         "workflow_state": workflow_state,
     }
@@ -229,7 +230,10 @@ class PersistLocalArtifactsUseCase:
                     property_id=context.property.id,
                     requires_render=context.requires_render,
                 ),
-                hint="Re-render the media or restore the published artifact files before retrying a publish-only workflow.",
+                hint=(
+                    "Re-render the media or restore the published artifact files "
+                    "before retrying a publish-only workflow."
+                ),
             )
         return context.existing_published_media
 
@@ -249,7 +253,9 @@ class PersistLocalArtifactsUseCase:
         context: PropertyContext,
         rendered_media: RenderedMediaArtifact,
     ) -> Path | None:
-        poster_source_path = rendered_media.staging_dir / f"{context.property.slug}-poster.jpg"
+        poster_source_path = (
+            rendered_media.staging_dir / f"{context.property.slug}-poster.jpg"
+        )
         if not poster_source_path.exists() or poster_source_path.stat().st_size == 0:
             if rendered_media.artifact_kind == "reel_video":
                 raise ValidationError(
@@ -262,8 +268,9 @@ class PersistLocalArtifactsUseCase:
                         poster_source_path=str(poster_source_path),
                     ),
                     hint=(
-                        "Verify poster rendering completed successfully before the local publish step "
-                        "and keep the staging poster alongside the reel output."
+                        "Verify poster rendering completed successfully before "
+                        "the local publish step and keep the staging poster "
+                        "alongside the reel output."
                     ),
                 )
             return None
@@ -321,6 +328,7 @@ class PersistLocalArtifactsUseCase:
                 publish_target_fingerprint=context.publish_target_fingerprint,
                 workflow_state="rendered",
                 created_at=_now_iso(),
+                render_template_id=context.render_template_id,
             )
         )
         uow.delivery.outbox.add_event(

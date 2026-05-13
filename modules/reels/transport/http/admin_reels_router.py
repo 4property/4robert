@@ -213,6 +213,16 @@ def create_admin_reels_router(
         if result.publish_enqueued:
             body["event_id"] = result.event_id
             body["job_id"] = result.job_id
+            if result.idempotent_replay:
+                body["idempotent_replay"] = True
+            # Feature 11: surface the next scheduled publish slot
+            # (ISO8601 UTC) when one was computed from the agency's
+            # automation rules. Emit ``null`` rather than omitting the
+            # key so the frontend can branch on ``payload.scheduled_at``
+            # without worrying about presence vs absence. The shape
+            # matches the cross-repo contract documented in
+            # ``docs/API.md``.
+            body["scheduled_at"] = result.scheduled_at
         else:
             body["reason"] = result.reason
             body["hint"] = result.hint

@@ -101,6 +101,7 @@ class GoHighLevelPropertyPublisher:
             source_site_id=context.site_id,
             social_post_type=context.delivery_plan.social_post_type,
             artifact_kind=context.delivery_plan.artifact_kind,
+            scheduled_at=context.publish_context.scheduled_at,
         )
         publish_to_platforms = getattr(self.publisher, "publish_media_to_platforms", None)
         if publish_to_platforms is None:
@@ -263,6 +264,7 @@ class GoHighLevelPropertyPublisher:
                 selected_dir=selected_dir,
                 selected_image_paths=selected_image_paths,
             ),
+            layout_variant=context.render_template_layout_variant or "classic",
         )
         logger.info(
             format_console_block(
@@ -316,6 +318,28 @@ class GoHighLevelPropertyPublisher:
             selected_dir,
             selected_image_paths=selected_image_paths,
         )
+        # Feature 16: forward per-property accent colors with the same
+        # brand fallback the reel pipeline uses so a republished poster
+        # matches its sibling MP4 visually.
+        poster_settings = context.render_template_poster_settings or {}
+        fallback_text_color = (
+            poster_settings.get("fallback_accent_text_color")
+            if isinstance(poster_settings, dict)
+            else None
+        )
+        fallback_background_color = (
+            poster_settings.get("fallback_accent_background_color")
+            if isinstance(poster_settings, dict)
+            else None
+        )
+        accent_text_color = (
+            context.property.wppd_accent_text_color
+            or (str(fallback_text_color) if fallback_text_color else None)
+        )
+        accent_background_color = (
+            context.property.wppd_accent_background_color
+            or (str(fallback_background_color) if fallback_background_color else None)
+        )
         return PropertyRenderData(
             site_id=context.site_id,
             property_id=context.property.id,
@@ -347,6 +371,8 @@ class GoHighLevelPropertyPublisher:
             property_size=context.property.property_size,
             viewing_times=context.property.viewing_times,
             selected_slides=tuple(selected_slides),
+            accent_text_color=accent_text_color,
+            accent_background_color=accent_background_color,
         )
 
 

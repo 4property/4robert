@@ -36,6 +36,7 @@ class ReelState:
     last_published_provider_external_id: str
     created_at: str
     updated_at: str
+    render_template_id: str = "classic"
 
 
 def build_empty_reel_state(
@@ -65,6 +66,7 @@ def build_empty_reel_state(
         last_published_provider_external_id="",
         created_at="",
         updated_at="",
+        render_template_id="classic",
     )
 
 

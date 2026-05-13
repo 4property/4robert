@@ -125,6 +125,7 @@
         "description": "Body for `PUT /v1/admin/agencies/{agency_id}/automation`.\n\nAutomation rules persist to `agency_automation_rules`. `platforms` is\nintentionally NOT accepted here — the canonical owner is\n`agency_reel_defaults` (the `/defaults` endpoint).",
         "example": {
           "approval_required": false,
+          "hold_window_seconds": 0,
           "publish_days": [
             "mon",
             "tue",
@@ -134,6 +135,8 @@
           ],
           "publish_window_end": "20:00",
           "publish_window_start": "09:00",
+          "quiet_hours_enabled": false,
+          "skip_weekends": false,
           "trigger_on_status": [
             "for_sale",
             "to_let"
@@ -151,6 +154,20 @@
             ],
             "description": "When true, reels are parked in `awaiting_review` until a human approves them; when false, the pipeline auto-publishes.",
             "title": "Approval Required"
+          },
+          "hold_window_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Delay in seconds to wait before publishing after the trigger (0 = immediate, max 24h).",
+            "title": "Hold Window Seconds"
           },
           "publish_days": {
             "anyOf": [
@@ -205,6 +222,30 @@
               "09:00"
             ],
             "title": "Publish Window Start"
+          },
+          "quiet_hours_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When true, publishes are deferred until publish_window_start if outside [start, end].",
+            "title": "Quiet Hours Enabled"
+          },
+          "skip_weekends": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When true, publishes scheduled for Saturday/Sunday are deferred to the next Monday.",
+            "title": "Skip Weekends"
           },
           "trigger_on_status": {
             "anyOf": [
@@ -922,8 +963,10 @@
             "instagram",
             "tiktok",
             "facebook",
-            "gbp"
+            "gbp",
+            "pinterest"
           ],
+          "render_template_id": "classic",
           "settings": {
             "aspect": "3:4",
             "currency": "EUR",
@@ -1011,10 +1054,26 @@
                 "instagram",
                 "tiktok",
                 "facebook",
-                "gbp"
+                "gbp",
+                "pinterest"
               ]
             ],
             "title": "Platforms"
+          },
+          "render_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Render template pack selected for agency reels and posters.",
+            "examples": [
+              "classic"
+            ],
+            "title": "Render Template Id"
           },
           "settings": {
             "anyOf": [
@@ -1059,8 +1118,10 @@
             "instagram",
             "tiktok",
             "facebook",
-            "gbp"
-          ]
+            "gbp",
+            "pinterest"
+          ],
+          "render_template_id": "classic"
         },
         "properties": {
           "approval_required": {
@@ -1201,9 +1262,44 @@
             ],
             "description": "Social platforms the reel should be published to.",
             "title": "Platforms"
+          },
+          "render_template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "examples": [
+              "classic"
+            ],
+            "title": "Render Template Id"
           }
         },
         "title": "ReelProfileUpsertPayload",
+        "type": "object"
+      },
+      "RenderTemplateSelectPayload": {
+        "additionalProperties": false,
+        "example": {
+          "template_id": "classic"
+        },
+        "properties": {
+          "template_id": {
+            "description": "Identifier of the active render template pack.",
+            "examples": [
+              "classic"
+            ],
+            "title": "Template Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id"
+        ],
+        "title": "RenderTemplateSelectPayload",
         "type": "object"
       },
       "ScriptedRenderResponse": {
@@ -1249,7 +1345,7 @@
       },
       "SocialTemplatesReplacePayload": {
         "additionalProperties": false,
-        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/social-templates`.\n\nReplaces the whole template block: every existing per-platform row is\ndropped and re-inserted from the supplied `templates` map. Each key is\na platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,\n`youtube`, `gbp`) and the value is the description template.",
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/social-templates`.\n\nReplaces the whole template block: every existing per-platform row is\ndropped and re-inserted from the supplied `templates` map. Each key is\na platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,\n`youtube`, `gbp`, `pinterest`) and the value is the description template.",
         "example": {
           "templates": {
             "instagram": "{{property_title}} · {{price}}\n{{short_description}}\n👉 {{booking_link}}",
@@ -1261,7 +1357,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Mapping of platform identifier to description template. Unknown keys are accepted so future platforms do not need a schema bump. Empty map drops all stored templates.",
+            "description": "Mapping of platform identifier to description template. Unknown keys are accepted so future platforms do not need a schema bump. Empty map drops all stored templates. Each value may reference any of the variables in `ALLOWED_TEMPLATE_VARIABLES` (see `modules.configuration.domain.social_templates_variables`) using `{{variable_name}}` syntax. Unknown variables are rejected with 422 `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE`.",
             "title": "Templates",
             "type": "object"
           }
@@ -1319,7 +1415,7 @@
   "paths": {
     "/health": {
       "get": {
-        "description": "Returns 200 once the runtime can accept work, 503 otherwise. Body shape: `{status, dispatcher_accepting_jobs}`.",
+        "description": "Returns 200 once the runtime can accept work, 503 otherwise. Body shape: `{status, dispatcher_accepting_jobs, configured_worker_count}`.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -1745,6 +1841,97 @@
           }
         },
         "summary": "Update the agency's brand identity",
+        "tags": [
+          "Admin · Brand"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/brand/logo": {
+      "post": {
+        "description": "Accepts a multipart `file` field with content-type `image/jpeg` or `image/png` and stores the binary under the workspace's agency-branding folder. The response carries `object_key` (stable opaque identifier the admin sends back via PUT /agencies/{id}/brand to attach the logo) and `url` (an admin endpoint that streams the binary back for previews). Returns 415 if the content-type is not JPG/PNG, 422 if the filename extension and content-type do not agree, and 413 if the payload exceeds 5 MB.",
+        "operationId": "upload_admin_agency_brand_logo_v1_admin_agencies__agency_id__brand_logo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload the agency's branding logo (JPG/PNG, <=5MB)",
+        "tags": [
+          "Admin · Brand"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/brand/logo/file/{filename}": {
+      "get": {
+        "description": "Serves the binary previously uploaded via `POST /agencies/{id}/brand/logo`. The filename is the trailing segment of the persisted `object_key` (e.g. `logo-abcdef012345.png`). Returns 404 if the file does not exist or has been removed from the workspace.",
+        "operationId": "stream_admin_agency_brand_logo_v1_admin_agencies__agency_id__brand_logo_file__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream a previously uploaded agency brand logo",
         "tags": [
           "Admin · Brand"
         ]
@@ -2865,6 +3052,96 @@
         ]
       }
     },
+    "/v1/admin/agencies/{agency_id}/render-template": {
+      "put": {
+        "operationId": "select_admin_agency_render_template_v1_admin_agencies__agency_id__render_template_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenderTemplateSelectPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select the render template pack for an agency",
+        "tags": [
+          "Admin · Render templates"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/render-templates": {
+      "get": {
+        "operationId": "list_admin_agency_render_templates_v1_admin_agencies__agency_id__render_templates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List render template packs for an agency",
+        "tags": [
+          "Admin · Render templates"
+        ]
+      }
+    },
     "/v1/admin/agencies/{agency_id}/social-accounts": {
       "get": {
         "description": "Wraps the GoHighLevel accounts API using the agency's stored connection. Always returns 200; if the agency has no GHL connection (or the call fails) the body has `connected: false` or `items: []` plus a `reason` code so the frontend can render an empty state without crashing.",
@@ -2908,7 +3185,7 @@
     },
     "/v1/admin/agencies/{agency_id}/social-templates": {
       "get": {
-        "description": "Returns the templates map keyed by platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`, `youtube`, `gbp`). Used by the **Social** tab to render the publish caption.",
+        "description": "Returns the templates map keyed by platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`, `youtube`, `gbp`, `pinterest`). Used by the **Social** tab to render the publish caption.",
         "operationId": "read_admin_agency_social_templates_v1_admin_agencies__agency_id__social_templates_get",
         "parameters": [
           {

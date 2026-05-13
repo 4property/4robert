@@ -106,6 +106,11 @@ class IngestWordPressPropertyUseCase:
             if defaults is not None and defaults.platforms
             else data.default_platforms
         )
+        render_template_id = (
+            getattr(defaults, "render_template_id", "classic")
+            if defaults is not None
+            else "classic"
+        )
         approval_required = bool(
             automation.approval_required if automation is not None else False
         )
@@ -121,6 +126,7 @@ class IngestWordPressPropertyUseCase:
             "platforms": list(platforms),
             "approval_required": approval_required,
             "social_templates": list(social_templates),
+            "render_template_id": render_template_id or "classic",
         }
         provider_secret_bundle = json.dumps(
             {"access_token": access_token, "provider": "gohighlevel"},

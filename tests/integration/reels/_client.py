@@ -184,6 +184,63 @@ def seed_property_image(
         engine.dispose()
 
 
+def seed_automation_rules(
+    database_url: str,
+    *,
+    agency_id: str,
+    approval_required: bool = False,
+    publish_window_start: str = "09:00",
+    publish_window_end: str = "17:00",
+    publish_days: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri"),
+    trigger_on_status: tuple[str, ...] = ("for_sale", "to_let"),
+    hold_window_seconds: int = 0,
+    quiet_hours_enabled: bool = False,
+    skip_weekends: bool = False,
+) -> None:
+    """Insert an `agency_automation_rules` row for the seeded agency.
+
+    Used by feature 11 + feature 14 integration tests to verify that
+    ``compute_next_publish_slot`` is wired all the way from the persisted
+    window (including the feature-13 ``hold_window_seconds``,
+    ``quiet_hours_enabled`` and ``skip_weekends`` toggles) to the approve
+    response body.
+    """
+    timestamp = datetime.now(timezone.utc)
+    engine = create_engine(database_url, future=True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO agency_automation_rules ("
+                    "agency_id, approval_required, publish_window_start, "
+                    "publish_window_end, publish_days, trigger_on_status, "
+                    "hold_window_seconds, quiet_hours_enabled, skip_weekends, "
+                    "created_at, updated_at"
+                    ") VALUES ("
+                    ":agency_id, :approval_required, :publish_window_start, "
+                    ":publish_window_end, :publish_days, :trigger_on_status, "
+                    ":hold_window_seconds, :quiet_hours_enabled, :skip_weekends, "
+                    ":created_at, :updated_at"
+                    ")"
+                ),
+                {
+                    "agency_id": agency_id,
+                    "approval_required": approval_required,
+                    "publish_window_start": publish_window_start,
+                    "publish_window_end": publish_window_end,
+                    "publish_days": list(publish_days),
+                    "trigger_on_status": list(trigger_on_status),
+                    "hold_window_seconds": int(hold_window_seconds),
+                    "quiet_hours_enabled": bool(quiet_hours_enabled),
+                    "skip_weekends": bool(skip_weekends),
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                },
+            )
+    finally:
+        engine.dispose()
+
+
 def insert_legacy_queued_job(
     database_url: str,
     *,
@@ -191,14 +248,18 @@ def insert_legacy_queued_job(
     ingestion_source_id: str,
     external_source_id: str,
     property_id: int,
+    publish_context: dict | None = None,
 ) -> tuple[str, str]:
     """Pre-seed an event + queued job so the regenerate flow can supersede it.
 
-    Returns the `(event_id, job_id)` of the seeded row.
+    Returns the `(event_id, job_id)` of the seeded row. ``publish_context``
+    (feature 11) seeds the ``jobs.publish_context_json`` column so the
+    idempotent-replay path can recover the original ``scheduled_at``.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
     event_id = str(uuid4())
     job_id = str(uuid4())
+    serialized_publish_context = json.dumps(publish_context or {}, separators=(",", ":"))
     engine = create_engine(database_url, future=True)
     try:
         with engine.begin() as connection:
@@ -237,7 +298,7 @@ def insert_legacy_queued_job(
                     ":job_id, :event_id, :agency_id, :ingestion_source_id, "
                     "'reel_publish', :external_source_id, :property_id, "
                     ":received_at, 'hash-old', 'queued', "
-                    "CAST('{}' AS jsonb), CAST('{}' AS jsonb), "
+                    "CAST('{}' AS jsonb), CAST(:publish_context_json AS jsonb), "
                     ":empty_token, 0, 3, :received_at, '', "
                     ":received_at, :received_at"
                     ")"
@@ -250,6 +311,7 @@ def insert_legacy_queued_job(
                     "external_source_id": external_source_id,
                     "property_id": property_id,
                     "received_at": timestamp,
+                    "publish_context_json": serialized_publish_context,
                     "empty_token": encrypt_text(""),
                 },
             )
@@ -262,6 +324,7 @@ __all__ = [
     "ADMIN_BEARER",
     "build_admin_reels_client",
     "insert_legacy_queued_job",
+    "seed_automation_rules",
     "seed_property_image",
     "seed_property_with_reel",
 ]

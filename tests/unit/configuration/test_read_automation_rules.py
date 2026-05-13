@@ -20,12 +20,18 @@ def test_read_automation_returns_existing_record() -> None:
         publish_window_end="20:00",
         publish_days=("mon", "tue"),
         trigger_on_status=("for_sale",),
+        hold_window_seconds=1800,
+        quiet_hours_enabled=True,
+        skip_weekends=True,
         created_at="",
         updated_at="",
     )
     uow = build_uow(automation=StubAutomation(existing=record))
     result = ReadAutomationRulesUseCase().execute(uow=uow, agency_id="agency-1")
     assert result is record
+    assert result.hold_window_seconds == 1800
+    assert result.quiet_hours_enabled is True
+    assert result.skip_weekends is True
 
 
 def test_read_automation_returns_none_when_no_record() -> None:

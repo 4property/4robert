@@ -30,6 +30,7 @@ def _row_to_revision(row) -> MediaRevision:
         source_property_id=int(row.source_property_id),
         artifact_kind=str(row.artifact_kind or ""),
         render_profile=str(row.render_profile or ""),
+        render_template_id=str(row.render_template_id or "classic"),
         media_path=str(row.media_path or ""),
         metadata_path=str(row.metadata_path or ""),
         mime_type=str(row.mime_type or ""),
@@ -47,15 +48,16 @@ class MediaRevisionRepository(ModuleRepository):
                 "INSERT INTO media_revisions ("
                 "revision_id, agency_id, ingestion_source_id, external_source_id, "
                 "source_property_id, artifact_kind, render_profile, media_path, "
-                "metadata_path, mime_type, content_fingerprint, "
+                "render_template_id, metadata_path, mime_type, content_fingerprint, "
                 "publish_target_fingerprint, workflow_state, created_at"
                 ") VALUES ("
                 ":revision_id, :agency_id, :ingestion_source_id, :external_source_id, "
                 ":source_property_id, :artifact_kind, :render_profile, :media_path, "
-                ":metadata_path, :mime_type, :content_fingerprint, "
+                ":render_template_id, :metadata_path, :mime_type, :content_fingerprint, "
                 ":publish_target_fingerprint, :workflow_state, :created_at"
                 ") ON CONFLICT (revision_id) DO UPDATE SET "
                 "workflow_state = EXCLUDED.workflow_state, "
+                "render_template_id = EXCLUDED.render_template_id, "
                 "media_path = EXCLUDED.media_path, "
                 "metadata_path = EXCLUDED.metadata_path, "
                 "mime_type = EXCLUDED.mime_type"
@@ -68,6 +70,7 @@ class MediaRevisionRepository(ModuleRepository):
                 "source_property_id": record.source_property_id,
                 "artifact_kind": record.artifact_kind,
                 "render_profile": record.render_profile,
+                "render_template_id": record.render_template_id or "classic",
                 "media_path": record.media_path,
                 "metadata_path": record.metadata_path,
                 "mime_type": record.mime_type,
@@ -83,7 +86,7 @@ class MediaRevisionRepository(ModuleRepository):
             text(
                 "SELECT revision_id, agency_id, ingestion_source_id, "
                 "external_source_id, source_property_id, artifact_kind, "
-                "render_profile, media_path, metadata_path, mime_type, "
+                "render_profile, render_template_id, media_path, metadata_path, mime_type, "
                 "content_fingerprint, publish_target_fingerprint, workflow_state, "
                 "created_at FROM media_revisions WHERE revision_id = :revision_id"
             ),
@@ -101,7 +104,7 @@ class MediaRevisionRepository(ModuleRepository):
             text(
                 "SELECT revision_id, agency_id, ingestion_source_id, "
                 "external_source_id, source_property_id, artifact_kind, "
-                "render_profile, media_path, metadata_path, mime_type, "
+                "render_profile, render_template_id, media_path, metadata_path, mime_type, "
                 "content_fingerprint, publish_target_fingerprint, workflow_state, "
                 "created_at FROM media_revisions "
                 "WHERE external_source_id = :external_source_id "

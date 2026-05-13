@@ -43,6 +43,9 @@ from modules.rendering.infrastructure.manifest import write_property_reel_manife
 from modules.rendering.infrastructure.models import PropertyRenderData
 from modules.rendering.infrastructure.poster import generate_property_poster_from_data
 from modules.rendering.infrastructure.preparation import prepare_reel_render_assets
+from modules.rendering.infrastructure.render_template_settings import (
+    build_property_reel_template_from_overrides,
+)
 from modules.rendering.infrastructure.runtime import build_local_selected_slides
 
 logger = logging.getLogger(__name__)
@@ -72,7 +75,16 @@ class DefaultMediaRenderer:
         prepared_assets: PreparedMediaAssets,
     ) -> RenderedMediaArtifact:
         revision_id = uuid4().hex
-        template = build_reel_template_for_render_profile(context.delivery_plan.render_profile)
+        reel_base_template = build_property_reel_template_from_overrides(
+            context.render_template_reel_settings
+        )
+        poster_template = build_property_reel_template_from_overrides(
+            context.render_template_poster_settings
+        )
+        template = build_reel_template_for_render_profile(
+            context.delivery_plan.render_profile,
+            template=reel_base_template,
+        )
         staging_root = context.storage_paths.generated_reels_root / "_staging"
         staging_root.mkdir(parents=True, exist_ok=True)
         staging_dir = Path(
@@ -91,11 +103,13 @@ class DefaultMediaRenderer:
             selected_slides=selected_slides,
         )
         render_working_dir = staging_dir / "_prepared"
+        layout_variant = context.render_template_layout_variant or "classic"
         prepared_render_assets = prepare_reel_render_assets(
             self.workspace_dir,
             property_render_data,
             template=template,
             working_dir=render_working_dir,
+            layout_variant=layout_variant,
         )
 
         write_property_reel_manifest_from_data(
@@ -104,6 +118,9 @@ class DefaultMediaRenderer:
             output_path=manifest_path,
             template=template,
             render_profile=context.delivery_plan.render_profile,
+            render_template_id=context.render_template_id,
+            render_template_settings_hash=context.render_template_settings_hash,
+            poster_template=poster_template,
             prepared_assets=prepared_render_assets,
             working_dir=render_working_dir,
         )
@@ -114,11 +131,14 @@ class DefaultMediaRenderer:
             template=template,
             prepared_assets=prepared_render_assets,
             working_dir=render_working_dir,
+            layout_variant=layout_variant,
         )
         generate_property_poster_from_data(
             self.workspace_dir,
             property_render_data,
             output_path=poster_path,
+            template=poster_template,
+            layout_variant=layout_variant,
         )
         logger.info(
             format_console_block(
@@ -148,6 +168,32 @@ class DefaultMediaRenderer:
         prepared_assets: PreparedMediaAssets,
         selected_slides,
     ) -> PropertyRenderData:
+        # Feature 16: per-property accent colors flow from the WordPress
+        # webhook through Property.wppd_accent_*. When absent, fall back
+        # to the agency BrandSettings.primary_color pre-resolved during
+        # ingestion and stashed inside render_template_reel_settings (and
+        # the poster variant). The poster fallbacks are only consulted by
+        # poster-only call sites; for the unified reel render data the
+        # reel settings are authoritative.
+        reel_settings = context.render_template_reel_settings or {}
+        fallback_text_color = (
+            reel_settings.get("fallback_accent_text_color")
+            if isinstance(reel_settings, dict)
+            else None
+        )
+        fallback_background_color = (
+            reel_settings.get("fallback_accent_background_color")
+            if isinstance(reel_settings, dict)
+            else None
+        )
+        accent_text_color = (
+            context.property.wppd_accent_text_color
+            or (str(fallback_text_color) if fallback_text_color else None)
+        )
+        accent_background_color = (
+            context.property.wppd_accent_background_color
+            or (str(fallback_background_color) if fallback_background_color else None)
+        )
         return PropertyRenderData(
             site_id=context.site_id,
             property_id=context.property.id,
@@ -170,6 +216,7 @@ class DefaultMediaRenderer:
             agent_number=context.property.agent_number,
             agency_psra=context.property.agency_psra,
             agency_logo_url=context.property.agency_logo_url,
+            agency_logo_local_path=context.agency_logo_local_path,
             price=context.property.price,
             price_display_text=context.delivery_plan.price_display_text,
             property_type_label=context.property.property_type_label,
@@ -178,6 +225,8 @@ class DefaultMediaRenderer:
             eircode=context.property.eircode,
             property_size=context.property.property_size,
             selected_slides=tuple(selected_slides),
+            accent_text_color=accent_text_color,
+            accent_background_color=accent_background_color,
         )
 
 

@@ -10,6 +10,9 @@ from modules.configuration.infrastructure.defaults_repository import ReelDefault
 from modules.configuration.infrastructure.music_track_repository import (
     MusicTracksRepository,
 )
+from modules.configuration.infrastructure.render_template_repository import (
+    RenderTemplateRepository,
+)
 from modules.configuration.infrastructure.social_template_repository import (
     SocialTemplatesRepository,
 )
@@ -19,5 +22,6 @@ __all__ = [
     "BrandSettingsRepository",
     "MusicTracksRepository",
     "ReelDefaultsRepository",
+    "RenderTemplateRepository",
     "SocialTemplatesRepository",
 ]

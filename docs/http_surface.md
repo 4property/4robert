@@ -6,7 +6,7 @@ Generated from the real FastAPI app with:
 python scripts/generate_http_surface.py --write
 ```
 
-Total routes: 51
+Total routes: 55
 
 | Method | Path | Tag | Handler | Module |
 |---|---|---|---|---|
@@ -22,6 +22,8 @@ Total routes: 51
 | PUT | `/v1/admin/agencies/{agency_id}/automation` | Admin · Automation | `update_admin_agency_automation_rules` | `modules.configuration.transport.http.automation_router` |
 | GET | `/v1/admin/agencies/{agency_id}/brand` | Admin · Brand | `read_admin_agency_brand_settings` | `modules.configuration.transport.http.brand_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/brand` | Admin · Brand | `update_admin_agency_brand_settings` | `modules.configuration.transport.http.brand_router` |
+| POST | `/v1/admin/agencies/{agency_id}/brand/logo` | Admin · Brand | `upload_admin_agency_brand_logo` | `modules.configuration.transport.http.brand_logo_router` |
+| GET | `/v1/admin/agencies/{agency_id}/brand/logo/file/{filename}` | Admin · Brand | `stream_admin_agency_brand_logo` | `modules.configuration.transport.http.brand_logo_router` |
 | GET | `/v1/admin/agencies/{agency_id}/defaults` | Admin · Defaults | `read_admin_agency_reel_defaults` | `modules.configuration.transport.http.defaults_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/defaults` | Admin · Defaults | `update_admin_agency_reel_defaults` | `modules.configuration.transport.http.defaults_router` |
 | DELETE | `/v1/admin/agencies/{agency_id}/ghl-connection` | Admin · GHL connection | `detach_admin_agency_ghl_connection` | `modules.publishing.transport.http.connections_router` |
@@ -44,6 +46,8 @@ Total routes: 51
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/manifest` | Admin · Content | `get_admin_agency_reel_manifest` | `modules.reels.transport.http.admin_reels_assets` |
 | POST | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/reject` | Admin · Content | `reject_admin_agency_reel` | `modules.reels.transport.http.admin_reels_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/video` | Admin · Content | `stream_admin_agency_reel_video` | `modules.reels.transport.http.admin_reels_assets` |
+| PUT | `/v1/admin/agencies/{agency_id}/render-template` | Admin · Render templates | `select_admin_agency_render_template` | `modules.configuration.transport.http.render_templates_router` |
+| GET | `/v1/admin/agencies/{agency_id}/render-templates` | Admin · Render templates | `list_admin_agency_render_templates` | `modules.configuration.transport.http.render_templates_router` |
 | GET | `/v1/admin/agencies/{agency_id}/social-accounts` | Admin · Content | `list_admin_agency_social_accounts` | `modules.publishing.transport.http.social_accounts_router` |
 | GET | `/v1/admin/agencies/{agency_id}/social-templates` | Admin · Social templates | `read_admin_agency_social_templates` | `modules.configuration.transport.http.social_templates_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/social-templates` | Admin · Social templates | `replace_admin_agency_social_templates` | `modules.configuration.transport.http.social_templates_router` |

@@ -102,6 +102,8 @@ class PropertyORM(Base):
     amenities: Mapped[str | None] = mapped_column(Text)
     property_order: Mapped[int | None] = mapped_column(Integer)
     wppd_parent_id: Mapped[str | None] = mapped_column(Text)
+    wppd_accent_text_color: Mapped[str | None] = mapped_column(Text)
+    wppd_accent_background_color: Mapped[str | None] = mapped_column(Text)
     property_type_ids: Mapped[str | None] = mapped_column(Text)
     property_county_ids: Mapped[str | None] = mapped_column(Text)
     property_area_ids: Mapped[str | None] = mapped_column(Text)

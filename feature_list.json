@@ -261,6 +261,209 @@
         "Manual: con backend real, guardar Sources, Brand, Defaults y Automation; comprobar en DevTools que no hay 422 y que las respuestas contienen los shapes esperados"
       ],
       "status": "done"
+    },
+    {
+      "id": 8,
+      "name": "pinterest_social_platform_support",
+      "title": "Reconocer Pinterest como destino social conectado y publicable",
+      "description": "Añade Pinterest al contrato backend de plataformas sociales: cuentas de GoHighLevel, defaults de publicación, perfiles agregados y políticas del publisher. No implementa OAuth propio; la conexión sigue llegando desde la cuenta GoHighLevel del agency.",
+      "module": "modules/publishing/, modules/configuration/, modules/tenancy/",
+      "schema": "No",
+      "acceptance": [
+        "El registro de plataformas incluye pinterest y normaliza alias simples",
+        "SUPPORTED_GOHIGHLEVEL_PLATFORMS contiene pinterest",
+        "Los defaults de plataformas incluyen pinterest en defaults, aggregated reel profile y admin agencies",
+        "GET /v1/admin/agencies/{agency_id}/social-accounts serializa cuentas Pinterest devueltas por GoHighLevel",
+        "La política de publicación permite pinterest con media requerido por el flujo existente",
+        "Tests unitarios/integración relevantes pasan"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/publishing tests/integration/publishing/test_social_accounts_router.py tests/integration/configuration/test_defaults_router.py -q"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 9,
+      "name": "agency_default_descriptions_ui",
+      "title": "Admin UI para descripciones por defecto por agencia y por plataforma",
+      "description": "La tabla agency_social_templates(platform, description_template, title_template, hashtags) y la API GET/PUT /v1/admin/agencies/{id}/social-templates ya existen; el pipeline las consume en regenerate_reel → DeterministicPropertyContentGenerator. Falta UI en el admin para editarlas. Decisión a tomar en la review: eliminar la columna dead-code agency_reel_defaults.caption_template o cablearla como fallback global.",
+      "module": "modules/configuration/",
+      "schema": "Pendiente decisión (drop o keep caption_template)",
+      "acceptance": [
+        "GET/PUT /v1/admin/agencies/{id}/social-templates valida que description_template solo referencia variables permitidas (property_title, price, bedrooms, etc.)",
+        "Test de integración del router cubre upsert per-platform y 422 si variable desconocida",
+        "docs/API.md lista las variables permitidas",
+        "Si se decide drop de caption_template: alembic revision incluida"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/ tests/unit/configuration/ -q"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 10,
+      "name": "agency_logo_upload",
+      "title": "Upload de logo de agencia que sobrescribe el del webhook WP",
+      "description": "Hoy el rendering tira de property.agency_logo_url (campo del webhook). El usuario quiere subir un logo propio que se use siempre. La columna agency_brand_settings.logo_object_key existe pero PUT /brand la rechaza con extra='forbid'. Falta: endpoint multipart de upload, ampliar PUT /brand para aceptar logo_object_key/intro_logo_object_key, y preferir el logo de agencia sobre el del webhook en el rendering.",
+      "module": "modules/configuration/, modules/rendering/",
+      "schema": "No (columnas ya existen)",
+      "acceptance": [
+        "POST /v1/admin/agencies/{id}/brand/logo (multipart) acepta JPG/PNG con límite de tamaño, sube a S3 con fallback FS vía runtime/assets.py:resolve_cached_branding_destination y devuelve {object_key, url}",
+        "PUT /v1/admin/agencies/{id}/brand acepta logo_object_key e intro_logo_object_key (nullable para borrar)",
+        "El rendering del reel usa agency_brand_settings.logo_object_key si está set; fallback a property.agency_logo_url si null",
+        "Tests unitarios del rendering verifican ambos caminos (override y fallback)"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_brand_router.py tests/unit/rendering/ -q",
+        "Manual: subir logo, publicar reel desde webhook con agency_logo distinto, verificar que el MP4 usa el logo subido"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 11,
+      "name": "wire_automation_publish_window_to_ghl_schedule",
+      "title": "Conectar la ventana de publicación recurrente al scheduleDate de GHL",
+      "description": "La UI de AutomationConfig ya guarda publish_window_start, publish_window_end, publish_days, quiet_hours, skip_weekends en agency_automation_rules vía PUT /v1/admin/agencies/{id}/automation. Pero regenerate_reel.py:183 carga las rules y hace `del automation` sin usarlas; el cliente GHL nunca envía scheduleDate. Cablear: calcular el próximo slot válido en función de las rules y now, threadearlo por publish_context hasta social_service.create_social_post como scheduleDate ISO8601.",
+      "module": "modules/configuration/, modules/reels/, modules/publishing/",
+      "schema": "No",
+      "acceptance": [
+        "Nuevo use case compute_next_publish_slot(rules, now_utc) en modules/configuration/application/ con tests exhaustivos: within window, outside window same day, outside window next day, weekend skip, all days excluded → fallback definido",
+        "publish_context lleva campo opcional scheduled_at (ISO8601 UTC) cuando aplica",
+        "MultiPlatformPublishRequest y social_service.create_social_post envían json_body['scheduleDate'] cuando scheduled_at no es None",
+        "Test de integración con cliente GHL mockeado verifica el body enviado en ambos casos (con y sin scheduleDate)"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/configuration/ tests/integration/publishing/ tests/unit/reels/test_regenerate_reel.py -q",
+        "Manual: configurar ventana fuera de la hora actual, aprobar reel, inspeccionar el log del POST a /social-media-posting/.../posts"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 12,
+      "name": "unescape_html_entities_everywhere",
+      "title": "Decodificar HTML entities en title/caption del rendering y del POST a GHL",
+      "description": "WordPress emite &#8217;, &amp;, &quot;, &#x2019; en title.rendered y content.rendered. Hoy llegan crudos al subtítulo del MP4 y al summary del POST /posts de GHL. Aplicar html.unescape() en los puntos finales: (1) DeterministicPropertyContentGenerator.generate_property_content para variables sustituidas, (2) normalize_caption del rendering (prompting.py:79), (3) social_service.create_social_post antes del POST body.",
+      "module": "modules/rendering/, modules/publishing/",
+      "schema": "No",
+      "acceptance": [
+        "Strings con &#8217;, &amp;, &quot;, &#x2019; salen decodificadas en el overlay del MP4",
+        "El summary del POST a GHL llega decodificado (test con mock HTTP client)",
+        "Tests unitarios con al menos 6 casos (numérica decimal, numérica hex, named, anidados, idempotencia, string vacío)"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/rendering/ tests/unit/publishing/ -q"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 13,
+      "name": "extend_automation_rules_with_hold_quiet_skip",
+      "title": "Extender agency_automation_rules con hold_window_seconds + quiet_hours_enabled + skip_weekends",
+      "description": "La pestaña Automation del front guarda hoy hold/quiet/skip como claves opacas en /defaults.settings (automation.reviewWindowEnabled, automation.quietHoursEnabled, automation.skipWeekends) que el back ignora al calcular el slot. Para que el usuario pueda decir realmente 'esperar X antes de publicar', añadir tres columnas al schema y al payload Pydantic de /automation: hold_window_seconds INTEGER NOT NULL DEFAULT 0, quiet_hours_enabled BOOLEAN NOT NULL DEFAULT FALSE, skip_weekends BOOLEAN NOT NULL DEFAULT FALSE. Reutilizar publish_window_start/end (horas permitidas) y publish_days (existentes). Sin breaking change: campos opcionales en el PUT, defaults silenciosos en el repository. Plan completo en progress/plan_scheduled_publish_window_v2.md. Bloquea feature 16 del front.",
+      "module": "modules/configuration/, alembic/",
+      "schema": "Sí (migración alembic 20260513_0003_automation_hold_quiet_skip.py)",
+      "acceptance": [
+        "alembic upgrade head y alembic downgrade -1 verdes en DB limpia con las tres columnas nuevas",
+        "AgencyAutomationRulesORM, AutomationRules dataclass, AutomationRulesUpsertPayload y AutomationRulesRepository.upsert aceptan hold_window_seconds (0..86400), quiet_hours_enabled y skip_weekends",
+        "extra='forbid' del payload se mantiene; PUT que omite los nuevos campos preserva existing.<x> (defaults sólo aplican en INSERT)",
+        "Tests integration de /automation router round-trip los 3 campos (PUT → GET → assert) y unit tests del repository cubren defaults y merge",
+        "docs/API.md documenta los nuevos campos y rangos válidos"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_automation_router.py tests/unit/configuration/test_update_automation_rules.py tests/unit/configuration/test_read_automation_rules.py -q",
+        ".venv/bin/python -m apps.api --check && .venv/bin/python -m apps.worker --check"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 14,
+      "name": "compute_slot_honors_timezone_hold_quiet_skip",
+      "title": "compute_next_publish_slot honra timezone + hold_window + quiet_hours_enabled + skip_weekends",
+      "description": "Hoy compute_next_publish_slot interpreta publish_window_start/end como UTC, ignora agency.timezone (existe en shared/db/orm.py:55), y no aplica delay desde now. Refactor: aceptar kwarg agency_timezone (IANA, fallback UTC con log), leer hold_window_seconds, quiet_hours_enabled, skip_weekends del dataclass AutomationRules (campos añadidos en feature 13), y aplicar shifts en orden estricto (hold → skip_weekends → quiet_hours). regenerate_reel.py carga agency=uow.tenancy.agencies.get(...) y pasa el timezone. Preserva contrato: si todo cae en zona libre y sin delay → None (= inmediato). Plan completo en progress/plan_scheduled_publish_window_v2.md.",
+      "module": "modules/configuration/application/use_cases/, modules/reels/application/use_cases/",
+      "schema": "No",
+      "acceptance": [
+        "compute_next_publish_slot(rules, now_utc, *, agency_timezone='UTC') con algoritmo: target = now_utc + hold_window_seconds; convertir a local; aplicar skip_weekends (avanzar a próximo lunes a start); aplicar quiet_hours (avanzar a próximo start válido); volver a UTC. Retorna None solo si todos los flags están desactivados o el resultado coincide con now_utc",
+        "Tests unitarios añaden ≥9 casos: hold puro, hold + quiet con cruce de día en TZ Dublin, skip_weekends sábado, skip_weekends viernes 23:00, quiet con publish_days vacío, agency_timezone inválido cae a UTC y loggea, agency_timezone DST shift, hold ≥ 24h",
+        "regenerate_reel.py carga agency.timezone y lo forwarda; StubTenancyAgency.get_timezone en tests/unit/reels/_uow_stubs.py",
+        "Los 3 tests integration añadidos por feature 11 (test_admin_reels_router.py:700-859) se extienden con un caso de skip_weekends que cruza zona horaria, todos pasan",
+        "Caso de tz inválida no rompe el approve: warnings-errors.log con traceId, slot se calcula en UTC"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/configuration/test_compute_next_publish_slot.py tests/unit/reels/ tests/integration/reels/test_admin_reels_router.py -q",
+        "Manual: configurar agency con timezone='Europe/Dublin', quiet 22:00-07:00, aprobar reel a las 23:00 Dublin, verificar que body GHL lleva scheduleDate ~07:00 del día siguiente UTC"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 15,
+      "name": "webhook_auto_publish_honors_scheduled_at",
+      "title": "ingest_property_into_reel computa scheduled_at y lo añade al publish_context",
+      "description": "El flujo webhook auto-publish (modules/reels/application/use_cases/ingest_property_into_reel.py) nunca llama a compute_next_publish_slot — feature 11 lo dejó fuera de scope intencionalmente. Ahora el usuario pide que también se difiera a GHL como scheduled. Cargar automation rules + agency.timezone en el use case del webhook, calcular slot, persistir 'scheduled_at' en jobs.publish_context_json. Sin idempotent-replay (no aplica al webhook). approval_required=true sigue dejando el reel pendiente del approve manual sin cambios.",
+      "module": "modules/reels/application/use_cases/",
+      "schema": "No",
+      "acceptance": [
+        "ingest_property_into_reel.py carga automation y agency, llama compute_next_publish_slot, inyecta 'scheduled_at' en el dict publish_context que retorna _resolve_publish_inputs",
+        "Si approval_required=true, sin cambios respecto al comportamiento actual (reel queda pending, scheduled_at irrelevante hasta el approve)",
+        "Test unitario nuevo (tests/unit/reels/test_ingest_property_includes_scheduled_at.py) cubre: approval_required=false + quiet hours activas → publish_context['scheduled_at'] poblado; approval_required=true → scheduled_at puede ser cualquier valor pero el job queda en pending",
+        "Test integration del webhook (tests/integration/ingestion/ si existe; si no, crear uno) mockea GHL y verifica que el body del POST lleva scheduleDate cuando el slot es futuro"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/reels/test_ingest_property_includes_scheduled_at.py tests/integration/ingestion/ tests/integration/publishing/ -q",
+        "Manual: trigger del webhook WordPress con approval_required=false desde agency con quiet hours activas, verificar en GHL Social Planner que el post aparece como Scheduled"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 16,
+      "name": "side_banner_render_template",
+      "title": "Nuevo render template 'side_banner' con foto a sangre, banner vertical rotado y colores per-propiedad",
+      "description": "Anadir un segundo render template (template_id='side_banner', layout_variant='side_banner') ademas del 'classic' actual. Visual: foto full-bleed, panel superior anclado arriba-izquierda (~65% ancho), banner vertical rotado 90 pegado al borde derecho con texto dinamico via build_status_ribbon_text (FOR SALE / SOLD / AGREED), panel inferior full-width con foto agente circular + tarjeta blanca con logo agencia. Colores derivados por-propiedad de dos nuevos campos del webhook WordPress 'wppd_accent_text_color' y 'wppd_accent_background_color' (HEX) aplicados con alpha overlay @0.85 (rebajados manteniendo paleta); fallback a BrandSettings.primary_color de la agencia si la propiedad no los trae. Aplica a reel MP4 + poster JPG (mismo build_overlay_layout). Plan maestro completo en progress/explore_feature_16_side_banner_template.md; sub-spikes en progress/explore_feature_16_ingestion_accent_colors.md y progress/explore_feature_16_layout_side_banner.md.",
+      "module": "modules/catalog/, modules/rendering/, modules/configuration/, modules/reels/, alembic/",
+      "schema": "Si (2 migraciones: 20260513_0003_add_property_accent_colors + 20260513_0004_seed_side_banner_render_template)",
+      "scope": {
+        "back": [
+          "16-A Schema + ingestion: anadir wppd_accent_text_color y wppd_accent_background_color a Property (catalog domain + ORM), migracion alembic, threading en build_property_db_record/build_property_dict.",
+          "16-B Render template config + seed: anadir 'side_banner' a SUPPORTED_LAYOUT_VARIANTS, migracion seed con INSERT en render_templates.",
+          "16-C Accent colors hasta PropertyRenderData + fallback: dos fields nuevos en PropertyRenderData, threading en frame_composition._build_render_data, enriquecer render_template_reel_settings/poster_settings con fallback_accent_* desde BrandSettings en ingest_property_into_reel.",
+          "16-D Layout branching: kwarg layout_variant='classic' en build_overlay_layout, conditional outer_margin_x=outer_margin_y=0 cuando side_banner, reduccion de top panel width a ~65% del usable, opcional vertical_banner_box en OverlayLayout.",
+          "16-E FFmpeg colores parametrizables: kwargs top_panel_color/bottom_panel_color en build_overlay_filter (defaults preservan classic), helper apply_alpha_to_hex en formatting, resolve_text_color con override opcional.",
+          "16-F Banner rotado: PIL pre-render del texto (build_status_ribbon_text) sobre fondo accent_background con alpha en preparation._render_vertical_status_banner, anadir vertical_banner_path a PreparedReelAssets, overlay como input ffmpeg adicional en filters.py y poster.py.",
+          "16-G Docs: docs/API.md (nuevo template + dos campos webhook), regenerar docs/http_surface.md y docs/openapi.json."
+        ],
+        "front": [
+          "Sin cambios obligatorios. La UI de Admin > Agency > Defaults ya soporta seleccionar render_template_id desde la lista; el nuevo template aparecera automaticamente al regenerar la lista del back."
+        ],
+        "external": [
+          "Documentar en docs/API.md los dos campos webhook nuevos para integradores WordPress."
+        ]
+      },
+      "acceptance": [
+        "GET /v1/admin/agencies/{id}/render-templates devuelve dos templates: classic (sort_order=0) y side_banner (sort_order=1, status='active')",
+        "PUT /v1/admin/agencies/{id}/defaults con render_template_id='side_banner' round-trip persiste y /reel-profile lo refleja",
+        "Webhook con wppd_accent_text_color='#ffffff' y wppd_accent_background_color='#e22f8c' ingesta sin error y persiste en properties.wppd_accent_*",
+        "Render con layout_variant='side_banner' produce filter graph con drawbox color con HEX accent + alpha overlay (~0.85) y overlay del banner vertical rotado",
+        "Property sin wppd_accent_* cae a BrandSettings.primary_color (verificado en test unit + manifest)",
+        "Render con layout_variant='classic' produce filter graph byte-for-byte identico al baseline actual (regresion cero)",
+        "alembic upgrade head y alembic downgrade -1 verdes en DB limpia para las dos migraciones nuevas",
+        "pytest -q termina verde (baseline 547+); los tests nuevos suman, no quitan",
+        "python -m apps.api --check exit 0 y python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "bash ./init.sh (o equivalente PowerShell de AGENTS.md)",
+        ".venv/bin/python -m pytest tests/unit/catalog/ tests/unit/rendering/ tests/integration/configuration/test_render_templates_router.py tests/integration/rendering/ -q",
+        "Alembic cycle: alembic upgrade head; alembic downgrade -1; alembic upgrade head",
+        "Manual: trigger webhook WordPress con accent colors en una agencia con render_template_id='side_banner', inspeccionar el MP4 y el poster JPG generados; verificar que el banner vertical aparece, paneles tienen el color rebajado, foto a sangre"
+      ],
+      "status": "done"
     }
   ]
 }

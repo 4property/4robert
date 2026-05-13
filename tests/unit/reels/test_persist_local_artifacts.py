@@ -8,6 +8,7 @@ calls hit inline UoW stubs that record kwargs for assertion.
 from __future__ import annotations
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -98,6 +99,7 @@ def _build_context(
     artifact_kind: str = "reel_video",
     requires_render: bool = True,
     existing_published_media: PublishedMediaArtifact | None = None,
+    render_template_id: str = "classic",
 ) -> PropertyContext:
     site_id = "site-a"
     storage_paths = resolve_site_storage_layout(workspace_dir, site_id)
@@ -120,7 +122,7 @@ def _build_context(
         agency_id="agency-1",
         wordpress_source_id="ingestion-1",
     )
-    return PropertyContext(
+    context = PropertyContext(
         workspace_dir=workspace_dir,
         storage_paths=storage_paths,
         tenant=tenant,
@@ -133,6 +135,7 @@ def _build_context(
         publish_target_fingerprint="publish-fp",
         existing_published_media=existing_published_media,
     )
+    return replace(context, render_template_id=render_template_id)
 
 
 def _build_rendered_media(
@@ -172,7 +175,7 @@ def _build_rendered_media(
 
 
 def test_execute_reel_video_promotes_artifacts_and_writes_db(tmp_path: Path) -> None:
-    context = _build_context(tmp_path)
+    context = _build_context(tmp_path, render_template_id="modern")
     with tempfile.TemporaryDirectory(dir=str(tmp_path)) as staging_root:
         staging_dir = Path(staging_root) / "staging"
         rendered = _build_rendered_media(
@@ -228,6 +231,7 @@ def test_execute_reel_video_promotes_artifacts_and_writes_db(tmp_path: Path) -> 
     assert record.source_property_id == 7
     assert record.artifact_kind == "reel_video"
     assert record.render_profile == "for_sale_reel"
+    assert record.render_template_id == "modern"
     assert record.workflow_state == "rendered"
     assert record.media_path  # non-empty relative path text
     assert record.metadata_path  # non-empty relative path text
@@ -248,6 +252,7 @@ def test_execute_reel_video_promotes_artifacts_and_writes_db(tmp_path: Path) -> 
     payload = event["payload"]
     assert payload["workflow_state"] == "rendered"
     assert payload["revision_id"] == "revision-1"
+    assert payload["render_template_id"] == "modern"
     assert payload["mime_type"] == record.mime_type
     assert payload["media_path"]
     assert payload["metadata_path"]

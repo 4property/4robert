@@ -28,6 +28,7 @@ connection the persist adapter opens for the same row.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from pathlib import Path
@@ -253,7 +254,9 @@ def _build_default_social_property_publisher():
 def build_property_media_job(job: Job) -> PropertyMediaJob:
     publish_context_payload = _mapping_to_dict(job.publish_context)
     if job.provider_secret_bundle:
-        publish_context_payload["access_token"] = job.provider_secret_bundle
+        publish_context_payload["access_token"] = _extract_access_token(
+            job.provider_secret_bundle
+        )
 
     return PropertyMediaJob(
         event_id=job.event_id,
@@ -273,6 +276,28 @@ def build_property_media_job(job: Job) -> PropertyMediaJob:
 
 def _mapping_to_dict(value: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): item for key, item in dict(value).items()}
+
+
+def _extract_access_token(provider_secret_bundle: str) -> str:
+    """Extract the access token from a persisted provider secret bundle.
+
+    Jobs enqueued by ``ingest_wordpress_property`` and ``regenerate_reel``
+    serialise the bundle as JSON ``{"access_token": "...", "provider": "..."}``
+    in ``jobs.provider_secrets_encrypted``. Older or scripted_render jobs
+    may store the raw token (or an empty string) directly. Without this
+    unwrap step the orchestrator forwarded the full JSON blob as the
+    Bearer token, causing GoHighLevel to return ``401 Invalid JWT``.
+    """
+
+    try:
+        bundle = json.loads(provider_secret_bundle)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return provider_secret_bundle
+    if isinstance(bundle, dict):
+        token = bundle.get("access_token")
+        if token:
+            return str(token)
+    return provider_secret_bundle
 
 
 __all__ = ["ReelPipeline", "build_property_media_job"]

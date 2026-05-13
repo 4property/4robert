@@ -77,7 +77,12 @@ def clamp_int(value: object, default: int = 0) -> int:
 
 
 def normalize_caption(value: object, fallback: str = "") -> str:
-    caption = clean_whitespace(str(value or ""))
+    # Decode HTML entities first so terminator detection (`caption[-1] in ".!?"`)
+    # and the "Key features" prefix stripping operate on the human-readable
+    # text, not on `&#33;`/`&amp;`/`&quot;` etc. emitted upstream by WordPress
+    # (feature 12 `unescape_html_entities_everywhere`). `html.unescape` is
+    # idempotent on already-decoded text.
+    caption = html.unescape(clean_whitespace(str(value or "")))
     caption = caption.strip("\"'")
     caption = re.sub(
         r"^(?:key\s+features|features)\s*:\s*",
@@ -255,7 +260,8 @@ Rules:
 - "showcase_score" must be an integer between 0 and 100.
 - "space_id" must identify the exact physical space shown. Photos of the same room or same outdoor area must use the same space_id.
 - Different bedrooms must use different space_id values. Different bathrooms must use different space_id values.
-- Reject maps, floor plans, satellite screenshots, brochure graphics, and non-photo assets. 
+- Never select a floor plan, house plan, site plan, map, satellite screenshot, brochure graphic, or other non-photo asset.
+- Do not confuse an open-plan living/kitchen space with a floor plan drawing.
 - Aerial drone photos may be accepted only if they clearly show the property or grounds.
 - If the image is any rejected non-photo asset, set:
   - "area" to "other"

@@ -54,6 +54,7 @@ def test_ingest_wordpress_property_enqueues_job_with_provider_secret_bundle() ->
     assert enqueued.publish_context["provider"] == "gohighlevel"
     assert enqueued.publish_context["location_id"] == "loc-1"
     assert enqueued.publish_context["platforms"] == ["tiktok"]
+    assert enqueued.publish_context["render_template_id"] == "classic"
 
 
 def test_ingest_wordpress_property_supersedes_previous_jobs() -> None:

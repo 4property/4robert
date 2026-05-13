@@ -100,6 +100,7 @@ class LoggingTests(unittest.TestCase):
                     workspace_dir=workspace_dir,
                     persistent_logging_enabled=True,
                     persistent_log_directory="logs",
+                    process_role="worker",
                 )
 
                 logger = logging.getLogger("tests.configure_logging")
@@ -123,6 +124,7 @@ class LoggingTests(unittest.TestCase):
 
             application_content = application_log.read_text(encoding="utf-8")
             self.assertIn("23/04/2026", application_content)
+            self.assertIn("| worker | MainThread | tests.configure_logging |", application_content)
             self.assertIn("application entry", application_content)
             self.assertIn("warning entry", warnings_log.read_text(encoding="utf-8"))
             self.assertIn("error entry", warnings_log.read_text(encoding="utf-8"))

@@ -37,6 +37,7 @@ _DEFAULT_REEL_PROFILE_PLATFORMS = (
     "youtube",
     "facebook",
     "gbp",
+    "pinterest",
 )
 
 
