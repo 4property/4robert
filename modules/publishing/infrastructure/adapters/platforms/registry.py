@@ -1,14 +1,27 @@
 ﻿from __future__ import annotations
 
-from modules.publishing.infrastructure.adapters.platforms.facebook import PLATFORM_CONFIG as FACEBOOK_PLATFORM_CONFIG
+from modules.publishing.infrastructure.adapters.platforms.facebook import (
+    PLATFORM_CONFIG as FACEBOOK_PLATFORM_CONFIG,
+)
 from modules.publishing.infrastructure.adapters.platforms.google_business_profile import (
     PLATFORM_CONFIG as GOOGLE_BUSINESS_PROFILE_PLATFORM_CONFIG,
 )
-from modules.publishing.infrastructure.adapters.platforms.instagram import PLATFORM_CONFIG as INSTAGRAM_PLATFORM_CONFIG
-from modules.publishing.infrastructure.adapters.platforms.linkedin import PLATFORM_CONFIG as LINKEDIN_PLATFORM_CONFIG
+from modules.publishing.infrastructure.adapters.platforms.instagram import (
+    PLATFORM_CONFIG as INSTAGRAM_PLATFORM_CONFIG,
+)
+from modules.publishing.infrastructure.adapters.platforms.linkedin import (
+    PLATFORM_CONFIG as LINKEDIN_PLATFORM_CONFIG,
+)
 from modules.publishing.infrastructure.adapters.platforms.models import SocialPlatformConfig
-from modules.publishing.infrastructure.adapters.platforms.tiktok import PLATFORM_CONFIG as TIKTOK_PLATFORM_CONFIG
-from modules.publishing.infrastructure.adapters.platforms.youtube import PLATFORM_CONFIG as YOUTUBE_PLATFORM_CONFIG
+from modules.publishing.infrastructure.adapters.platforms.pinterest import (
+    PLATFORM_CONFIG as PINTEREST_PLATFORM_CONFIG,
+)
+from modules.publishing.infrastructure.adapters.platforms.tiktok import (
+    PLATFORM_CONFIG as TIKTOK_PLATFORM_CONFIG,
+)
+from modules.publishing.infrastructure.adapters.platforms.youtube import (
+    PLATFORM_CONFIG as YOUTUBE_PLATFORM_CONFIG,
+)
 
 _PLATFORM_CONFIG_SEQUENCE = (
     TIKTOK_PLATFORM_CONFIG,
@@ -17,6 +30,7 @@ _PLATFORM_CONFIG_SEQUENCE = (
     YOUTUBE_PLATFORM_CONFIG,
     FACEBOOK_PLATFORM_CONFIG,
     GOOGLE_BUSINESS_PROFILE_PLATFORM_CONFIG,
+    PINTEREST_PLATFORM_CONFIG,
 )
 
 PLATFORM_CONFIGS = {

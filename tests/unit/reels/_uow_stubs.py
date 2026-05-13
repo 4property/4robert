@@ -7,13 +7,29 @@ from typing import Any
 
 
 class StubAgencies:
-    def __init__(self, *, present: bool = True) -> None:
+    """In-memory stand-in for ``AgencyRepository``.
+
+    Exposes the same ``get_by_id`` signature the real repo uses. The
+    optional ``timezone`` kwarg (feature 14) lets tests assert that the
+    use case forwards the agency's IANA timezone to
+    ``compute_next_publish_slot``.
+    """
+
+    def __init__(
+        self,
+        *,
+        present: bool = True,
+        timezone: str = "UTC",
+    ) -> None:
         self.present = present
+        self.timezone = str(timezone or "UTC")
+        self.calls: list[str] = []
 
     def get_by_id(self, agency_id: str) -> Any:
+        self.calls.append(str(agency_id or ""))
         if not self.present:
             return None
-        return SimpleNamespace(agency_id=agency_id)
+        return SimpleNamespace(agency_id=agency_id, timezone=self.timezone)
 
 
 class StubReelQuery:
@@ -103,9 +119,11 @@ class StubSocialTemplates:
 
 
 class StubJobs:
-    def __init__(self) -> None:
+    def __init__(self, *, active_job: Any = None) -> None:
         self.supersede_calls: list[dict[str, Any]] = []
         self.enqueue_calls: list[Any] = []
+        self.find_active_calls: list[dict[str, Any]] = []
+        self.active_job = active_job
 
     def supersede_queued_jobs(
         self,
@@ -124,6 +142,22 @@ class StubJobs:
             }
         )
         return ()
+
+    def find_active_job_for_property(
+        self,
+        *,
+        external_source_id: str,
+        property_id: int | None,
+        kind: str = "reel_publish",
+    ) -> Any:
+        self.find_active_calls.append(
+            {
+                "external_source_id": external_source_id,
+                "property_id": property_id,
+                "kind": kind,
+            }
+        )
+        return self.active_job
 
     def enqueue_job(self, request: Any) -> None:
         self.enqueue_calls.append(request)
@@ -146,6 +180,8 @@ class StubWebhookEvents:
 def build_uow(
     *,
     agency_present: bool = True,
+    agency_timezone: str = "UTC",
+    agencies: StubAgencies | None = None,
     queries: StubReelQuery | None = None,
     states: StubReelStates | None = None,
     properties: StubProperties | None = None,
@@ -158,7 +194,10 @@ def build_uow(
     webhook_events: StubWebhookEvents | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        tenancy=SimpleNamespace(agencies=StubAgencies(present=agency_present)),
+        tenancy=SimpleNamespace(
+            agencies=agencies
+            or StubAgencies(present=agency_present, timezone=agency_timezone),
+        ),
         reels=SimpleNamespace(
             states=states or StubReelStates(),
             queries=queries or StubReelQuery(),

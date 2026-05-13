@@ -52,6 +52,7 @@ def _row_to_reel_state(row) -> ReelState:
         content_snapshot=_jsonb_to_mapping(row.content_snapshot),
         publish_target_fingerprint=str(row.publish_target_fingerprint or ""),
         publish_target_snapshot=_jsonb_to_mapping(row.publish_target_snapshot),
+        render_template_id=str(row.render_template_id or "classic"),
         selected_image_folder=str(row.selected_image_folder or ""),
         artifact_kind=str(row.artifact_kind or ""),
         local_artifact_path=str(row.local_artifact_path or ""),
@@ -82,7 +83,7 @@ def _relative_to_base(path: Path, base_dir: Path) -> str:
 _REEL_COLUMNS = (
     "agency_id, ingestion_source_id, external_source_id, source_property_id, "
     "content_fingerprint, content_snapshot, publish_target_fingerprint, "
-    "publish_target_snapshot, selected_image_folder, artifact_kind, "
+    "publish_target_snapshot, render_template_id, selected_image_folder, artifact_kind, "
     "local_artifact_path, local_metadata_path, render_profile, "
     "local_manifest_path, local_video_path, render_status, publish_status, "
     "workflow_state, publish_details, current_revision_id, "
@@ -125,8 +126,9 @@ class ReelStateRepository(ModuleRepository):
                 ":agency_id, :ingestion_source_id, :external_source_id, "
                 ":source_property_id, :content_fingerprint, "
                 "CAST(:content_snapshot AS jsonb), :publish_target_fingerprint, "
-                "CAST(:publish_target_snapshot AS jsonb), :selected_image_folder, "
-                ":artifact_kind, :local_artifact_path, :local_metadata_path, "
+                "CAST(:publish_target_snapshot AS jsonb), :render_template_id, "
+                ":selected_image_folder, :artifact_kind, :local_artifact_path, "
+                ":local_metadata_path, "
                 ":render_profile, :local_manifest_path, :local_video_path, "
                 ":render_status, :publish_status, :workflow_state, "
                 "CAST(:publish_details AS jsonb), :current_revision_id, "
@@ -138,6 +140,7 @@ class ReelStateRepository(ModuleRepository):
                 "content_snapshot = EXCLUDED.content_snapshot, "
                 "publish_target_fingerprint = EXCLUDED.publish_target_fingerprint, "
                 "publish_target_snapshot = EXCLUDED.publish_target_snapshot, "
+                "render_template_id = EXCLUDED.render_template_id, "
                 "selected_image_folder = EXCLUDED.selected_image_folder, "
                 "artifact_kind = EXCLUDED.artifact_kind, "
                 "local_artifact_path = EXCLUDED.local_artifact_path, "
@@ -150,7 +153,8 @@ class ReelStateRepository(ModuleRepository):
                 "workflow_state = EXCLUDED.workflow_state, "
                 "publish_details = EXCLUDED.publish_details, "
                 "current_revision_id = EXCLUDED.current_revision_id, "
-                "last_published_provider_external_id = EXCLUDED.last_published_provider_external_id, "
+                "last_published_provider_external_id = "
+                "EXCLUDED.last_published_provider_external_id, "
                 "updated_at = EXCLUDED.updated_at"
             ),
             {
@@ -162,6 +166,7 @@ class ReelStateRepository(ModuleRepository):
                 "content_snapshot": _mapping_to_jsonb(state.content_snapshot),
                 "publish_target_fingerprint": state.publish_target_fingerprint,
                 "publish_target_snapshot": _mapping_to_jsonb(state.publish_target_snapshot),
+                "render_template_id": state.render_template_id or "classic",
                 "selected_image_folder": state.selected_image_folder,
                 "artifact_kind": state.artifact_kind,
                 "local_artifact_path": state.local_artifact_path,
@@ -209,6 +214,7 @@ class ReelStateRepository(ModuleRepository):
                 content_snapshot=existing.content_snapshot,
                 publish_target_fingerprint=existing.publish_target_fingerprint,
                 publish_target_snapshot=existing.publish_target_snapshot,
+                render_template_id=existing.render_template_id,
                 selected_image_folder=existing.selected_image_folder,
                 artifact_kind=existing.artifact_kind,
                 local_artifact_path=existing.local_artifact_path,
@@ -257,6 +263,7 @@ class ReelStateRepository(ModuleRepository):
                 content_snapshot=existing.content_snapshot,
                 publish_target_fingerprint=existing.publish_target_fingerprint,
                 publish_target_snapshot=existing.publish_target_snapshot,
+                render_template_id=existing.render_template_id,
                 selected_image_folder=existing.selected_image_folder,
                 artifact_kind=existing.artifact_kind,
                 local_artifact_path=existing.local_artifact_path,
@@ -325,6 +332,7 @@ class ReelStateRepository(ModuleRepository):
                 content_snapshot=existing.content_snapshot,
                 publish_target_fingerprint=existing.publish_target_fingerprint,
                 publish_target_snapshot=existing.publish_target_snapshot,
+                render_template_id=existing.render_template_id,
                 selected_image_folder=existing.selected_image_folder,
                 artifact_kind=artifact_kind,
                 local_artifact_path=relative_artifact,

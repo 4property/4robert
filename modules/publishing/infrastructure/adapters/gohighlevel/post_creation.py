@@ -36,6 +36,7 @@ class GoHighLevelPostCreationMixin:
         title: str | None,
         social_post_type: str,
         target_url: str | None,
+        scheduled_at: str | None = None,
     ):
         return self._run_with_retry(
             lambda: self._create_post(
@@ -49,6 +50,7 @@ class GoHighLevelPostCreationMixin:
                 title=title,
                 social_post_type=social_post_type,
                 target_url=target_url,
+                scheduled_at=scheduled_at,
             ),
             location_id=location_id,
             operation_name="Creating GoHighLevel social post",
@@ -68,6 +70,7 @@ class GoHighLevelPostCreationMixin:
         title: str | None,
         social_post_type: str,
         target_url: str | None,
+        scheduled_at: str | None = None,
     ):
         logger.info(
             format_console_block(
@@ -81,6 +84,7 @@ class GoHighLevelPostCreationMixin:
                 ),
                 format_detail_line("Post payload title field", "Not sent"),
                 format_detail_line("Uploaded media name", uploaded_media.file_name),
+                format_detail_line("Scheduled at", scheduled_at or "<immediate>"),
             )
         )
         created_post = self.social_service.create_social_post(
@@ -94,6 +98,7 @@ class GoHighLevelPostCreationMixin:
             title=title,
             social_post_type=social_post_type,
             target_url=target_url,
+            scheduled_at=scheduled_at,
         )
         self._validate_created_post(created_post)
         return self._verify_created_post(

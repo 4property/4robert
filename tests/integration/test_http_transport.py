@@ -9,6 +9,7 @@ without leaking state.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -85,6 +86,48 @@ def _derive_cryptojs_key_and_iv(*, password: bytes, salt: bytes) -> tuple[bytes,
     return derived[:32], derived[32:48]
 
 
+async def _call_options_preflight(
+    app,
+    *,
+    path: str,
+    headers: dict[str, str],
+) -> tuple[int, dict[str, str]]:
+    messages: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        messages.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "OPTIONS",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": b"",
+            "headers": [
+                (name.encode("ascii"), value.encode("ascii"))
+                for name, value in headers.items()
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 8001),
+        },
+        receive,
+        send,
+    )
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    response_headers = {
+        name.decode("latin-1").lower(): value.decode("latin-1")
+        for name, value in start["headers"]
+    }
+    return int(start["status"]), response_headers
+
+
 _ADMIN_BEARER = {"Authorization": "Bearer test-admin-token"}
 
 
@@ -152,6 +195,39 @@ class HttpTransportIntegrationTests(unittest.TestCase):
                     client.get("/health").json(),
                     {"status": "ready", "dispatcher_accepting_jobs": False},
                 )
+
+    def test_cors_allows_private_network_preflight_for_local_ghl_embed(self) -> None:
+        with temporary_workspace() as workspace_dir:
+            app = build_api_app(
+                workspace_dir=workspace_dir,
+                database_locator=DATABASE_URL,
+                admin_api_enabled=True,
+                admin_api_token="test-admin-token",
+                admin_api_disable_auth_for_testing=False,
+                admin_agency_token_secret="test-agency-secret-for-cors-suite",
+                gohighlevel_app_shared_secret="test-shared-secret",
+                site_secrets={},
+                enable_docs=False,
+                security_disabled=True,
+                job_max_attempts=3,
+                readiness_provider=lambda: {"ready": True},
+            )
+            status_code, headers = asyncio.run(
+                _call_options_preflight(
+                    app,
+                    path="/v1/sessions/gohighlevel/context",
+                    headers={
+                        "origin": "https://app.gohighlevel.com",
+                        "access-control-request-method": "POST",
+                        "access-control-request-headers": "content-type",
+                        "access-control-request-private-network": "true",
+                    },
+                )
+            )
+
+            self.assertEqual(status_code, 200)
+            self.assertEqual(headers["access-control-allow-origin"], "*")
+            self.assertEqual(headers["access-control-allow-private-network"], "true")
 
     # â”€â”€ Webhook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

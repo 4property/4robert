@@ -8,14 +8,14 @@ from fastapi.testclient import TestClient
 from apps.api.health_router import create_health_router
 
 
-def _build_app(*, ready: bool, accepting_jobs: bool) -> TestClient:
+def _build_app(*, ready: bool, accepting_jobs: bool, worker_count: int = 3) -> TestClient:
     app = FastAPI()
     app.include_router(
         create_health_router(
             workspace_dir="/tmp",  # noqa: S108 — value is bypassed by readiness_provider
             database_locator="sqlite:///:memory:",
             site_secrets={},
-            worker_count=1,
+            worker_count=worker_count,
             security_disabled=True,
             dispatcher_accepting_jobs=lambda: accepting_jobs,
             readiness_provider=lambda: {"ready": ready},
@@ -36,6 +36,7 @@ def test_health_returns_ready_when_runtime_is_ready_and_dispatcher_accepting() -
     assert response.json() == {
         "status": "ready",
         "dispatcher_accepting_jobs": True,
+        "configured_worker_count": 3,
     }
 
 
@@ -46,6 +47,7 @@ def test_health_ready_alias_returns_same_payload() -> None:
     assert response.json() == {
         "status": "ready",
         "dispatcher_accepting_jobs": True,
+        "configured_worker_count": 3,
     }
 
 
@@ -56,6 +58,7 @@ def test_health_returns_not_ready_when_runtime_is_not_ready() -> None:
     assert response.json() == {
         "status": "not_ready",
         "dispatcher_accepting_jobs": True,
+        "configured_worker_count": 3,
     }
 
 
@@ -66,4 +69,5 @@ def test_health_reflects_paused_dispatcher_state() -> None:
     assert response.json() == {
         "status": "ready",
         "dispatcher_accepting_jobs": False,
+        "configured_worker_count": 3,
     }

@@ -30,7 +30,7 @@ def test_issue_and_decode_round_trip() -> None:
     assert isinstance(token, str) and token
     assert expires_at == now + timedelta(seconds=3600)
 
-    claims = decode_agency_token(token, secret=secret)
+    claims = decode_agency_token(token, secret=secret, now=now)
     assert claims.agency_id == "agency-1"
     assert claims.location_id == "loc-1"
     assert claims.user_id == "user-1"

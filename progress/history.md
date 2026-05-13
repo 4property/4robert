@@ -452,3 +452,305 @@ Esperando review. Informe en `progress/impl_5_publishing_connections_router.md`.
 - **Decisiones clave:** Pydantic estricto preservado en el back (sin aceptar campos legacy); los 7 toggles huerfanos de Automation se persisten en `defaults.settings` con keys namespaced (`automation.<key>`); `platforms` UI sigue en Automation pero se guarda via `/defaults`; cierre cross-repo del contrato HTTP iniciado por feature 4 de Phase 3.
 - **Cierre Phase 4:** ambas features de Phase 4 (id 5 y 6) cerradas. Phase 4 DONE 2026-05-07.
 - **Documentos:** `progress/impl_6_fix_frontend_backend_payload_contract_back.md`, `progress/review_6_fix_frontend_backend_payload_contract.md`, `4reels front/progress/impl_6_fix_frontend_backend_payload_contract_front.md`.
+
+## 2026-05-12 — Sesión cierre Phase 4 (features 7, 8 + saneamiento entorno)
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+- **Feature en curso:** 8 `pinterest_social_platform_support`
+- **Inicio:** 2026-05-12
+- **Agente:** Codex
+- **Modulo afectado:** Publishing / Configuration / Tenancy
+- **Toca schema?:** No
+
+## Plan
+
+- Añadir Pinterest al registro de plataformas GoHighLevel.
+- Incluir Pinterest en defaults de publicación y perfil agregado.
+- Cubrir social-accounts/defaults con tests focalizados.
+- Verificar con pytest focalizado y readiness si el entorno lo permite.
+
+## Bitacora
+
+- `bash ./init.sh` arranca con Bash pero no queda verde: detecta directorios legacy (`services`, `application`, `repositories`, `core`, `domain`), `apps.api --check` y `apps.worker --check` fallan, y el venv no tiene `pytest` instalado aunque el script imprime "pytest verde".
+- `feature_list.json` no tiene tareas pending; features 1-6 estan `done`.
+- `.env` sincronizado con `.env.example`: rutas `/v1`, claves `WORKER_*`, `ADMIN_AGENCY_TOKEN_*`, seguridad webhook/admin activa y `WEBHOOK_ALLOWED_HOSTS` limitado a `testserver,localhost,127.0.0.1`.
+- Docker Postgres comprobado: contenedor `cpih-postgres-test` activo en `0.0.0.0:5433`, `pg_isready` OK para `miapp_test`.
+- Base de datos legacy en revision Alembic retirada `20260429_0003`; se creo backup `deploy/backups/miapp_test_pre_20260501_schema.dump`.
+- Se ejecuto migracion in-place `deploy/migrate_legacy_schema_to_20260501.py`; Alembic queda en `20260501_0001 (head)` y readiness API/worker pasan.
+- Se limpiaron directorios legacy que solo contenian `__pycache__/*.pyc`.
+- Alcance ajustado por usuario: dejar frontend por ahora; no cerrar ni corregir el test cross-repo `tests/integration/test_http_surface_contract.py`.
+- Verificacion backend-only final:
+  - `.venv/bin/alembic current` -> `20260501_0001 (head)`.
+  - `.venv/bin/python -m apps.api --check` -> runtime/prod ready.
+  - `.venv/bin/python -m apps.worker --check` -> OK.
+  - `.venv/bin/python -m pytest -q --ignore=tests/integration/test_http_surface_contract.py` -> 433 passed, 14 warnings.
+- 2026-05-11: Diagnostico error frontend `Connect GoHighLevel`: `GET /health/live` en `http://127.0.0.1:8001` responde OK y CORS normal responde con `access-control-allow-origin: *`, pero la preflight de Chrome con `Access-Control-Request-Private-Network: true` falla con `400 Disallowed CORS private-network`.
+- 2026-05-11: Se aplica fix backend limitado a CORS private-network para permitir el flujo local desde iframe HighLevel HTTPS hacia backend local durante desarrollo.
+- 2026-05-11: Verificacion del fix: test nuevo `test_cors_allows_private_network_preflight_for_local_ghl_embed` pasa; instancia temporal en `127.0.0.1:8002` responde `200 OK` con `access-control-allow-private-network: true`. `apps.api --check` y `apps.worker --check` salen con codigo 0.
+
+## Proximo paso
+
+- Pendiente si se retoma frontend: resolver/ejecutar `tests/integration/test_http_surface_contract.py` con `FRONTEND_REPO_ROOT` valido.
+- Pendiente decision leader sobre feature 7 `ghl_probe_fb_gbp`: emitir OAuth Marketplace token con scopes ampliados vs cambiar copy del front.
+
+## 2026-05-11 - Feature 7 `ghl_probe_fb_gbp` (implementer)
+
+- Bug reportado: `POST /v1/admin/agencies/{agency_id}/ghl-connection/test` devuelve 4 cuentas en lugar de 6 (faltan Facebook Page y Google Business Profile que el usuario tiene conectadas en la UI de GHL).
+- Investigacion API live (location `v8H1XNB3YCQmVHRhqDoM`, Location API key 40 chars):
+  - `GET /social-media-posting/{locationId}/accounts` -> 200, 4 cuentas (IG/LinkedIn/TikTok/YouTube), `groups: []`. Parametros `includeAll/includeGroups/all` -> 422.
+  - `GET /social-media-posting/{locationId}/accounts?platform=facebook|google` -> 200 con `accounts: []`.
+  - `GET /social-media-posting/oauth/{facebook|google|instagram|tiktok|linkedin|youtube}/accounts?locationId=...` -> **401 "The token is not authorized for this scope."** (rutas existen pero el token no tiene scope).
+  - Variantes `/oauth/{locationId}/{platform}/...`, `/oauth/{platform}/pages`, `/oauth/{platform}/locations`, `/locations/{id}/integrations`, `/integrations` -> 404.
+- Conclusion: bloqueo por scope/token, no por codigo. La ruta canonica `/social-media-posting/oauth/{platform}/accounts` esta pero requiere OAuth Marketplace token con scopes `socialplanner/oauth.readonly` (y/o `socialplanner/account.readonly`).
+- Resultado: feature `id: 7` anadida a `feature_list.json` con status `blocked`. **No se modifica codigo ni tests** — cualquier llamada con el token actual seguiria devolviendo 401. Informe completo (tabla de probes con status codes, causa raiz, workarounds) en `progress/impl_ghl_probe_fb_gbp.md`.
+- 2026-05-12: Se abre feature 8 `pinterest_social_platform_support` para reconocer Pinterest como plataforma social conectada/publicable via GoHighLevel. `bash ./init.sh` inicial arranca, pero `apps.api --check` y `apps.worker --check` siguen avisando rojo por config previa; pytest queda en ejecucion al empezar la implementacion.
+- 2026-05-12: Pinterest anadido al registro de plataformas, defaults de publicacion, perfil agregado, admin agencies, docs y tests focalizados.
+- 2026-05-12: Verificacion focalizada verde:
+  - `.venv/bin/python -m pytest tests/unit/publishing/test_platform_registry.py tests/unit/publishing/test_inspect_agency_social_accounts.py tests/integration/publishing/test_social_accounts_router.py tests/integration/configuration/test_defaults_router.py -q` -> 14 passed.
+  - `FRONTEND_REPO_ROOT=/opt/projects/4Reels-Frontend .venv/bin/python -m pytest tests/integration/test_http_surface_contract.py::test_frontend_api_requests_target_existing_backend_routes -q` -> 1 passed.
+- 2026-05-12: `bash ./init.sh` final con Postgres accesible: readiness verde (`apps.api --check`, `apps.worker --check`) y proceso sale 0, pero la salida de pytest contiene 3 fallos preexistentes/no relacionados:
+  - `test_http_surface_contract` falla sin `FRONTEND_REPO_ROOT` porque el default Windows no existe en este workspace.
+  - Dos tests de `test_http_transport.py` esperan payload minimo de `/health`, pero el codigo actual devuelve tambien `configured_worker_count`.
+
+## 2026-05-12 — Feature 12 `unescape_html_entities_everywhere` cerrada
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+## Feature en curso: 12 — `unescape_html_entities_everywhere`
+
+- **Modulo afectado**: `modules/rendering/`, `modules/publishing/`, `modules/reels/` (content_generator vive aqui pese a la mencion del JSON a `modules/rendering/`).
+- **Toca schema?**: No (`schema: "No"` en feature_list.json).
+- **Agent**: implementer (Opus 4.7 1M).
+
+## Plan
+
+1. Aplicar `html.unescape()` al final de `render_template_with_property()` en `modules/reels/application/content_generator.py` para limpiar entidades remanentes en los valores sustituidos del template (title, area, etc.).
+2. Aplicar `html.unescape()` al inicio del input de `normalize_caption()` en `modules/rendering/infrastructure/ai_photo_selection/prompting.py:79` para que las captions persistidas en cache/manifest queden decodificadas tanto si vienen de Gemini como del fallback `excerpt_html`.
+3. Aplicar `html.unescape()` a `description` y `title` justo antes de armar `json_body` en `GoHighLevelSocialService.create_social_post()` en `modules/publishing/infrastructure/adapters/gohighlevel/social_service.py` para que el `summary` del POST a GHL salga limpio aunque el caller envie entidades crudas.
+4. Tests: 6+ casos cubriendo decimal (`&#8217;`), hex (`&#x2019;`), named (`&amp;`, `&quot;`), anidados (`&amp;amp;` -> `&amp;` -> `&` segun spec de `html.unescape`), idempotencia (no re-decodificar texto ya limpio), y string vacio/None.
+5. Verificacion: `pytest tests/unit/rendering/ tests/unit/publishing/ -q` (focal) + `FRONTEND_REPO_ROOT=/opt/projects/4Reels-Frontend bash ./init.sh` final.
+
+## Bitacora
+
+- 2026-05-12 (sesion implementer): feature_list.json marcado `in_progress`. Inicio de la implementacion.
+- 2026-05-12: Mapeados los 3 puntos finales. `extract_rendered_text` en `modules/catalog/domain/_property_conversions.py` no decodifica entidades, asi que el problema empieza en `Property.from_api_payload`; el wrapper en 3 puntos es la solucion minima sin tocar el dominio.
+- 2026-05-12: `html` ya importado en `prompting.py` (line 11). En `content_generator.py` y `social_service.py` hay que anadir el import.
+- 2026-05-12: Baseline `pytest tests/unit/rendering/ tests/unit/publishing/ -q` -> 83 passed.
+- 2026-05-12: Tests escritos primero (21 casos en 3 archivos). 15 fallan en rojo contra el codigo sin tocar como esperado.
+- 2026-05-12: Aplicado `html.unescape()` en los 3 puntos: `content_generator.render_template_with_property`, `prompting.normalize_caption`, `social_service.create_social_post`. Imports anadidos donde faltaban.
+- 2026-05-12: Ajustado un test (`normalize_caption` con named entities terminales) para reflejar la interaccion legacy con `strip("\"'")`, documentado en el comentario del test. No es regresion: es comportamiento preexistente de `normalize_caption`.
+- 2026-05-12: `pytest tests/unit/rendering/ tests/unit/publishing/ -q` -> 97 passed (83 baseline + 14 nuevos). `pytest tests/unit/reels/test_content_generator_unescape.py -q` -> 7 passed. `tests/test_gemini_photo_selection.py` (usa `normalize_caption`) -> 15 passed sin cambios.
+- 2026-05-12: `FRONTEND_REPO_ROOT=/opt/projects/4Reels-Frontend bash ./init.sh` -> exit 0. 471 passed, 2 failed (los preexistentes `test_http_transport.py::test_health_endpoints_*` documentados por el leader, fuera de scope). El tercer fallo preexistente (`test_http_surface_contract.py`) desaparece al exportar `FRONTEND_REPO_ROOT`.
+- 2026-05-12: Impl report escrito en `progress/impl_12_unescape_html_entities_everywhere.md`. Feature pendiente de review.
+- 2026-05-12: NO se marca `done` (paso 10 del protocolo, lo hace el implementer despues del veredicto del reviewer en sesion posterior).
+
+## 2026-05-12 — Feature 9 `agency_default_descriptions_ui` cerrada (decisión leader: KEEP `caption_template`)
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+## Feature en curso: 9 - agency_default_descriptions_ui
+
+**Modulo afectado**: `modules/configuration/` (domain + transport) + un import
+desde `modules/reels/application/content_generator.py`.
+
+**Toca schema?**: NO (decision leader: KEEP `caption_template` como dead code;
+se limpiara en una feature futura aparte si procede).
+
+**Plan**:
+- [x] Anadir validacion de variables permitidas en `description_template` en el PUT.
+- [x] Anadir tests de integracion (5 nuevos: 422 con desconocida, 200 con permitidas,
+      200 sin variables, 200 con llaves literales, 422 multi-plataforma).
+- [x] Anadir test unit que pina las 16 keys del catalogo + sync con runtime.
+- [x] Documentar las variables permitidas y el codigo de error en `docs/API.md`.
+- [x] Constante unica para las variables permitidas, importada por router y
+      por content_generator (single source of truth).
+
+**Decisiones**:
+- Constante `ALLOWED_TEMPLATE_VARIABLES` vive en
+  `modules/configuration/domain/social_templates_variables.py`. Razon: la
+  regla del back prohibe que `modules/<bc>/transport/` importe de
+  `modules/<otro-bc>/application/`. Pero `modules/<otro-bc>/application/` SI
+  puede importar de `modules/<bc>/domain/`. Ergo el domain del bounded
+  context dueno del contrato (configuration, dueno de
+  `agency_social_templates`) es la unica colocacion legal. `content_generator`
+  la importa desde alli (linea 16 del fichero, solo `TEMPLATE_VARIABLE_PATTERN`
+  porque la constante de nombres no se usa en runtime).
+- Codigo de error: `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE`. Status code: 422.
+- Validacion en el router (no `field_validator`). Razon: para devolver shape
+  canonico `{error, code, hint, details}` con codigo controlado. Si la
+  validacion vive en `field_validator` Pydantic, FastAPI devuelve un 422 pero
+  con el shape de Pydantic v2 (`{"detail": [...]}`), no el nuestro.
+
+**Bitacora**:
+- Leida la spike `progress/explore_feature_9_social_templates_state.md`.
+- Leidas conventions (regla de capas: transport no importa de application de otro modulo).
+- Marcada feature 9 como `in_progress`.
+- Implementacion completada: 4 archivos creados/modificados (domain, payload,
+  router, content_generator) + 2 archivos de tests + `docs/API.md`.
+- Tests: 7 nuevos unit + 5 nuevos integration, todos en verde.
+- `tests/unit/configuration/` + `tests/integration/configuration/`: 100 passed.
+- `tests/unit/reels/`: 55 passed (no regresion del cambio en `content_generator`).
+- `./init.sh` exit 0: 483 passed, 2 failures preexistentes de `/health` que
+  el leader ya advirtio que no bloquean.
+- `apps.api --check` / `apps.worker --check`: ambos exit 0.
+- Informe en `progress/impl_9_agency_default_descriptions_ui.md`.
+- Estado: pendiente de review.
+
+## 2026-05-13 — Feature 10 `agency_logo_upload` cerrada
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+## Feature en curso: 10 — agency_logo_upload
+
+- Modulo afectado: `modules/configuration/`, `modules/rendering/`, `modules/reels/`, `shared/storage/`
+- Toca schema: NO (columnas ya existen, `Text NOT NULL DEFAULT ""`)
+- Estado: implementacion completa, **review pendiente**
+
+### Plan
+
+1. Crear helper FS-agnostico `resolve_agency_branding_destination(...)` en
+   `shared/storage/site_layout.py` para alojar uploads de logo (layout
+   por agencia, no por site/slug). [DONE]
+2. Crear endpoint `POST /v1/admin/agencies/{agency_id}/brand/logo` con
+   multipart/form-data, validacion JPG/PNG (content_type + extension) y
+   tamaño <= 5 MB. Persistir a disco bajo el helper. Retornar
+   `{object_key, url}` donde `url` apunta a un GET admin de descarga.
+   [DONE]
+3. Anyadir GET handler para servir el binario subido (patron similar a
+   `stream_admin_agency_reel_image`). [DONE]
+4. Cablear preferencia en rendering:
+   - Cargar `BrandSettings` del agency cuando se construye `PropertyContext`
+     en `ingest_property_into_reel`. [DONE]
+   - Resolver `object_key` a un Path local y pasarlo via
+     `PropertyContext.agency_logo_local_path` → `PropertyRenderData`. [DONE]
+   - En `prepare_cover_logo_image`, preferir el override local sobre el
+     webhook URL. Si el path no existe, fallback al URL. [DONE]
+5. Tests:
+   - Unit `tests/unit/rendering/test_branding_preference.py` con cuatro
+     escenarios (override valido, override sin URL, override stale → fallback
+     al URL, ni override ni URL → None). [DONE]
+   - Integration `tests/integration/configuration/test_brand_logo_router.py`
+     con: JPG valido, PNG valido, content_type incorrecto (415),
+     extension incorrecta (422), mismatch type/extension (422), >5MB (413),
+     empty (422), sin auth (401/403), agency desconocida (404),
+     GET file 404. [DONE - 10 tests passed]
+6. `docs/API.md`: nueva seccion "Brand logo upload (feature 10)" con
+   request/response, tabla de errores, contrato de deletion via empty
+   string. [DONE]
+
+### Decisiones leader aplicadas
+
+- NO modificar `BrandSettingsUpsertPayload`.
+- NO migracion alembic.
+- Borrar logo = `logo_object_key: ""`, NO `null`.
+- Storage FS-only, sin boto3/S3.
+
+### Decisiones propias notables
+
+- Router separado `brand_logo_router.py` en lugar de extender
+  `brand_router.py`: agrupa POST upload + GET stream + constantes.
+- Helper en `shared/storage/site_layout.py` (no en
+  `modules/rendering/infrastructure/runtime/assets.py`) porque
+  `modules/reels/application` no puede importar de otra
+  `infrastructure/`.
+- Multipart parseado con `email.parser` de stdlib en lugar de anyadir
+  `python-multipart` como dep (la regla prohibe deps nuevas).
+- `object_key = agencies/<safe_agency>/logo-<sha1-12><ext>` donde el
+  digest es sobre los bytes → idempotente.
+
+### Bitacora
+
+- Hora inicio: 2026-05-13.
+- Spike leido: `progress/explore_feature_10_agency_logo_upload_state.md`.
+- `feature_list.json`: feature 10 → `in_progress`.
+- Implementacion + tests + docs + impl report: completos.
+- `pytest tests/unit/configuration/ tests/integration/configuration/ tests/unit/rendering/`:
+  170 passed.
+- `FRONTEND_REPO_ROOT=/opt/projects/4Reels-Frontend bash ./init.sh`:
+  497 passed, 2 failed (preexistentes de `/health`, no introducidos por
+  esta feature).
+- `apps.api --check` y `apps.worker --check`: exit 0.
+- Informe: `progress/impl_10_agency_logo_upload.md`.
+- Pendiente: revision por el reviewer (no marco `done`).
+
+## 2026-05-13 — Feature 11 `wire_automation_publish_window_to_ghl_schedule` cerrada (cierre del batch Phase 4)
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+## Feature en curso: 11 — wire_automation_publish_window_to_ghl_schedule
+
+- **Estado**: implementado (pendiente de revisión).
+- **Módulo afectado**: `modules/configuration/`, `modules/reels/`, `modules/publishing/`, `modules/delivery/`.
+- **¿Toca schema?**: No.
+- **Plan ejecutado**:
+  1. Nuevo use case puro `compute_next_publish_slot(rules, now_utc)` en `modules/configuration/application/use_cases/`. 26 tests verdes en `tests/unit/configuration/test_compute_next_publish_slot.py`.
+  2. Threading completo: `regenerate_reel.py` calcula `scheduled_at`, lo añade a `publish_context`; `SocialPublishContext`, `MultiPlatformPublishRequest` y `social_service.create_social_post` lo propagan; GHL recibe `scheduleDate` + `status="scheduled"`.
+  3. Idempotent replay: `ActiveJob` y `find_active_job_for_property` ampliados con `publish_context_json`; el `scheduled_at` se recupera del JSON parseado.
+  4. Response del approve: `RegenerateReelResult.scheduled_at`; handler emite `body["scheduled_at"]` siempre (con `null` cuando aplica) si `publish_enqueued=True`.
+  5. Tests unit + integration verdes (26 + 13 + 12 + 24 = 75 nuevos + actualizados).
+- **Verificación**:
+  - `pytest tests/unit/configuration/ tests/unit/publishing/ tests/unit/reels/ tests/integration/reels/ tests/integration/publishing/ -q` → verde.
+  - `FRONTEND_REPO_ROOT=/opt/projects/4Reels-Frontend bash ./init.sh` → exit 0; solo los 2 fallos preexistentes de `/health` en `tests/integration/test_http_transport.py`.
+  - `python -m apps.api --check` y `python -m apps.worker --check` → exit 0.
+- **Entregables**:
+  - `progress/impl_11_wire_automation_publish_window_to_ghl_schedule.md` con archivos modificados/creados, decisiones, output focal de pytest y edge cases del use case puro.
+  - `feature_list.json` feature 11 → `in_progress`.
+  - `docs/API.md` actualizado con el campo `scheduled_at` y la semántica del `scheduleDate` del body GHL.
+- **Próximo paso**: lanzar `reviewer`.
+
+## 2026-05-13 — Feature 16 `side_banner_render_template` cerrada (APPROVED por reviewer pass-2)
+
+- **Feature**: 16 — `side_banner_render_template` (Phase 4)
+- **Modulos afectados**: catalog, configuration, rendering, reels, alembic, shared/errors
+- **Toca schema?**: Si (2 migraciones nuevas: 0003 properties accent colors + 0004 seed side_banner render template)
+- **Plan ejecutado** (7 sub-tareas serializadas 16-A..16-G):
+  1. **16-A** Schema + ingestion accent colors: `Property` dataclass + ORM + migracion alembic 0003 + extraccion en `from_api_payload`.
+  2. **16-B** Render template config + seed: `SUPPORTED_LAYOUT_VARIANTS = {"classic", "side_banner"}` + migracion alembic 0004 con INSERT en `render_templates`.
+  3. **16-C** Threading accent colors hasta `PropertyRenderData` + fallback `BrandSettings.primary_color` enriquecido en `ingest_property_into_reel.py` (via `uow.configuration.brand` singular, no `brands` como decia el spike).
+  4. **16-D** Layout branching por `layout_variant` (kwarg en `build_overlay_layout`, `outer_margin=0` y top panel ~65% cuando `side_banner`).
+  5. **16-E** FFmpeg colores parametrizables (`top_panel_color`, `bottom_panel_color`, `text_override_color`, `vertical_banner_*`) + helper `apply_alpha_to_hex` + `resolve_text_color` con override.
+  6. **16-F** Banner vertical rotado via ffmpeg puro (`drawbox+drawtext+transpose=1`); PIL evitado por no estar en requirements.
+  7. **16-G** Tests integration end-to-end + `docs/API.md` con nuevo template + dos campos webhook.
+- **Pass 2 - nits del reviewer 1a vuelta** (4 nits resueltos):
+  - Nit 1 VERDE: import `apply_alpha_to_hex` movido al top en `poster.py:24`.
+  - Nit 2 VERDE: helper `is_valid_hex_color()` en `shared/errors/validation.py` + warning-but-fallback en `ingest_property_into_reel.py:140`.
+  - Nit 3 VERDE: golden snapshot del filter graph classic en `tests/unit/rendering/test_overlay_filter_classic_snapshot.py` (2 tests deterministicos).
+  - Nit 4 AMARILLO documentado: drift en `docs/openapi.json` + `docs/http_surface.md` consolidado conscientemente (+4 routes, 2 de feature 16/15 + 2 de feature 10 pre-existente; atribucion verificable).
+- **Verificacion final**:
+  - `pytest -q` → 640 passed, 3 failed (los 3 pre-existentes sobre `configured_worker_count` en `/health`, NO relacionados; baseline 547 → +93 tests nuevos sumados a lo largo de pass-1 + pass-2).
+  - `bash ./init.sh` → exit 0.
+  - `python -m apps.api --check` y `python -m apps.worker --check` → exit 0.
+  - Alembic cycle (0003 + 0004) `upgrade head` / `downgrade -1` x2 / `upgrade head` → verde. `alembic check` → schema y ORM en sync.
+- **Entregables**:
+  - `progress/explore_feature_16_side_banner_template.md` (plan maestro consolidado).
+  - `progress/explore_feature_16_ingestion_accent_colors.md` (sub-spike A).
+  - `progress/explore_feature_16_layout_side_banner.md` (sub-spike B).
+  - `progress/impl_16_side_banner.md` (informe del implementer, pass-1 + pass-2).
+  - `progress/review_16_side_banner.md` (review pass-1 con 4 nits + pass-2 final APPROVED).
+  - 2 migraciones alembic: `20260513_0003_add_property_accent_colors.py`, `20260513_0004_seed_side_banner_render_template.py`.
+  - Helper nuevo: `shared/errors/validation.py::is_valid_hex_color`.
+  - `docs/API.md`, `docs/http_surface.md`, `docs/openapi.json` actualizados.
+- **Decisiones de diseno** (alineadas con usuario en la sesion):
+  - Alcance: reel + poster (mismo `layout_variant`).
+  - Color toning: alpha overlay `@0.85` en drawbox (rebajar sin remapear HSL).
+  - Banner texto: dinamico via `build_status_ribbon_text(property_data)`.
+  - Fallback color: `BrandSettings.primary_color` de la agencia.
+  - Naming: `template_id="side_banner"`, `display_name="Side Banner"`, `sort_order=1`.
+- **Veredicto reviewer pass-2**: APPROVED sin reservas. Cero regresiones, cero imports inter-modulo prohibidos, cero tests eliminados.
+- **Cierre**: feature 16 `status: "done"` en `feature_list.json`.

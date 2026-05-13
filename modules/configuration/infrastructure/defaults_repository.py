@@ -19,7 +19,8 @@ class ReelDefaultsRepository(ModuleRepository):
         row = self.session.execute(
             text(
                 "SELECT agency_id, platforms, duration_seconds, music_id, "
-                "intro_enabled, caption_template, settings, created_at, updated_at "
+                "intro_enabled, caption_template, render_template_id, settings, "
+                "created_at, updated_at "
                 "FROM agency_reel_defaults WHERE agency_id = :agency_id"
             ),
             {"agency_id": agency_id},
@@ -33,6 +34,7 @@ class ReelDefaultsRepository(ModuleRepository):
             music_id=str(row.music_id or ""),
             intro_enabled=bool(row.intro_enabled),
             caption_template=str(row.caption_template or ""),
+            render_template_id=str(row.render_template_id or "classic"),
             settings=jsonb_to_mapping(row.settings),
             created_at=isoformat(row.created_at) or "",
             updated_at=isoformat(row.updated_at) or "",
@@ -47,6 +49,7 @@ class ReelDefaultsRepository(ModuleRepository):
         music_id: str | None = None,
         intro_enabled: bool | None = None,
         caption_template: str | None = None,
+        render_template_id: str | None = None,
         settings: Mapping[str, Any] | None = None,
     ) -> ReelDefaults:
         existing = self.get(agency_id)
@@ -57,7 +60,15 @@ class ReelDefaultsRepository(ModuleRepository):
             else (
                 list(existing.platforms)
                 if existing
-                else ["tiktok", "instagram", "linkedin", "youtube", "facebook", "gbp"]
+                else [
+                    "tiktok",
+                    "instagram",
+                    "linkedin",
+                    "youtube",
+                    "facebook",
+                    "gbp",
+                    "pinterest",
+                ]
             )
         )
         merged = {
@@ -78,6 +89,12 @@ class ReelDefaultsRepository(ModuleRepository):
             "caption_template": caption_template
             if caption_template is not None
             else (existing.caption_template if existing else ""),
+            "render_template_id": (
+                str(render_template_id or "").strip()
+                if render_template_id is not None
+                else (existing.render_template_id if existing else "classic")
+            )
+            or "classic",
             "settings": mapping_to_jsonb(
                 settings
                 if settings is not None
@@ -88,17 +105,18 @@ class ReelDefaultsRepository(ModuleRepository):
             text(
                 "INSERT INTO agency_reel_defaults ("
                 "agency_id, platforms, duration_seconds, music_id, intro_enabled, "
-                "caption_template, settings, created_at, updated_at"
+                "caption_template, render_template_id, settings, created_at, updated_at"
                 ") VALUES ("
                 ":agency_id, :platforms, :duration_seconds, :music_id, "
-                ":intro_enabled, :caption_template, CAST(:settings AS jsonb), "
-                ":created_at, :updated_at"
+                ":intro_enabled, :caption_template, :render_template_id, "
+                "CAST(:settings AS jsonb), :created_at, :updated_at"
                 ") ON CONFLICT (agency_id) DO UPDATE SET "
                 "platforms = EXCLUDED.platforms, "
                 "duration_seconds = EXCLUDED.duration_seconds, "
                 "music_id = EXCLUDED.music_id, "
                 "intro_enabled = EXCLUDED.intro_enabled, "
                 "caption_template = EXCLUDED.caption_template, "
+                "render_template_id = EXCLUDED.render_template_id, "
                 "settings = EXCLUDED.settings, "
                 "updated_at = EXCLUDED.updated_at"
             ),

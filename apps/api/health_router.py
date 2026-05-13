@@ -4,7 +4,7 @@ Exposes three endpoints:
 
 - ``GET /health/live`` — liveness probe. Always returns ``{"status": "ok"}``.
 - ``GET /health`` — readiness probe (alias of ``/health/ready``). Returns the
-  minimal payload ``{"status": "ready"|"not_ready", "dispatcher_accepting_jobs": bool}``.
+  minimal payload ``{"status": "ready"|"not_ready", "dispatcher_accepting_jobs": bool, "configured_worker_count": int}``.
 - ``GET /health/ready`` — same body as ``/health``.
 
 The dispatcher state is supplied via the ``dispatcher_accepting_jobs``
@@ -63,7 +63,7 @@ def create_health_router(
         summary="Readiness probe",
         description=(
             "Returns 200 once the runtime can accept work, 503 otherwise. "
-            "Body shape: `{status, dispatcher_accepting_jobs}`."
+            "Body shape: `{status, dispatcher_accepting_jobs, configured_worker_count}`."
         ),
     )
     async def health() -> JSONResponse:
@@ -122,6 +122,7 @@ def _build_readiness_response(
     payload: dict[str, object] = {
         "status": "ready" if readiness.get("ready") else "not_ready",
         "dispatcher_accepting_jobs": accepting_jobs,
+        "configured_worker_count": worker_count,
     }
     status_code = 200 if readiness.get("ready") else 503
     return JSONResponse(status_code=status_code, content=payload)

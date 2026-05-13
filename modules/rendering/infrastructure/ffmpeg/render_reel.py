@@ -87,6 +87,7 @@ def prepare_render_assets(
     settings: PropertyReelTemplate,
     working_dir: Path,
     prepared_assets: PreparedReelAssets | None,
+    layout_variant: str = "classic",
 ) -> PreparedReelAssets:
     if prepared_assets is not None:
         property_data.selected_slides = tuple(
@@ -100,6 +101,7 @@ def prepare_render_assets(
         property_data,
         template=settings,
         working_dir=working_dir,
+        layout_variant=layout_variant,
     )
 
 
@@ -111,6 +113,7 @@ def generate_property_reel_from_data(
     template: PropertyReelTemplate | None = None,
     prepared_assets: PreparedReelAssets | None = None,
     working_dir: str | Path | None = None,
+    layout_variant: str = "classic",
 ) -> Path:
     workspace_dir = Path(base_dir).expanduser().resolve()
     settings = template or PropertyReelTemplate()
@@ -141,6 +144,7 @@ def generate_property_reel_from_data(
             settings=settings,
             working_dir=temp_dir,
             prepared_assets=prepared_assets,
+            layout_variant=layout_variant,
         )
         original_slides = tuple(
             PropertyReelSlide(image_path=slide.original_path, caption=slide.caption)
@@ -167,6 +171,7 @@ def generate_property_reel_from_data(
             has_ber_badge=prepared_assets.ber_icon_path is not None,
             has_agency_logo=reserve_agency_logo_space,
             cover_caption=None,
+            layout_variant=layout_variant,
         )
         for warning in overlay_layout.warnings:
             logger.warning(
@@ -190,6 +195,7 @@ def generate_property_reel_from_data(
             segment_durations=segment_durations,
             reserve_agency_logo_space=reserve_agency_logo_space,
             temp_dir=temp_dir,
+            layout_variant=layout_variant,
         )
         mux_audio_candidates(
             ffmpeg_binary=ffmpeg_binary,
@@ -230,7 +236,23 @@ def render_silent_reel(
     segment_durations: list[float],
     reserve_agency_logo_space: bool,
     temp_dir: Path,
+    layout_variant: str = "classic",
 ) -> tuple[Path, float]:
+    # Feature 16: side_banner ships per-property accent colors with a
+    # transparent panel overlay and a vertical status banner asset.
+    # Default values keep classic byte-for-byte.
+    from modules.rendering.infrastructure.formatting import apply_alpha_to_hex
+    panel_color = (
+        apply_alpha_to_hex(property_data.accent_background_color, alpha=0.55)
+        if layout_variant == "side_banner"
+        else None
+    )
+    text_override = (
+        property_data.accent_text_color
+        if layout_variant == "side_banner"
+        else None
+    )
+
     segments_dir = temp_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
     segment_paths: list[Path] = []
@@ -245,6 +267,13 @@ def render_silent_reel(
             slide_input_paths.append(prepared_assets.cover_logo_path)
         if prepared_assets.ber_icon_path is not None:
             slide_input_paths.append(prepared_assets.ber_icon_path)
+        vertical_banner_input_index: int | None = None
+        if (
+            layout_variant == "side_banner"
+            and prepared_assets.vertical_banner_path is not None
+        ):
+            vertical_banner_input_index = len(slide_input_paths)
+            slide_input_paths.append(prepared_assets.vertical_banner_path)
         run_ffmpeg_command(
             build_segment_render_command(
                 ffmpeg_binary=ffmpeg_binary,
@@ -262,6 +291,13 @@ def render_silent_reel(
                     include_ber_icon=prepared_assets.ber_icon_path is not None,
                     render_agency_logo=prepared_assets.cover_logo_path is not None,
                     apply_fade_in=index != 1,
+                    layout_variant=layout_variant,
+                    top_panel_color=panel_color,
+                    bottom_panel_color=panel_color,
+                    text_override_color=text_override,
+                    vertical_banner_input_index=vertical_banner_input_index,
+                    vertical_banner_x=prepared_assets.vertical_banner_x,
+                    vertical_banner_y=prepared_assets.vertical_banner_y,
                 ),
                 output_path=segment_path,
             ),

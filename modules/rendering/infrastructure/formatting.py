@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import textwrap
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 from typing import Any
@@ -39,6 +40,19 @@ _NORMALIZED_STATUS_PATTERN = re.compile(r"[\s_-]+")
 _SIMILAR_REQUIRED_STATUSES = frozenset({"sale agreed", "let agreed", "sold", "let"})
 _HTML_BREAK_PATTERN = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+_MOJIBAKE_MARKERS = ("Ã", "Â", "â€", "â€™", "â€œ", "â€", "â€“", "â€”", "â‚¬")
+_MOJIBAKE_REPLACEMENTS = {
+    "â€™": "’",
+    "â€˜": "‘",
+    "â€œ": "“",
+    "â€": "”",
+    "â€“": "–",
+    "â€”": "—",
+    "â€¦": "…",
+    "â‚¬": "€",
+    "Â²": "²",
+    "Â": "",
+}
 _PROPERTY_SIZE_WITH_UNIT_PATTERN = re.compile(
     r"^(?P<value>\d+(?:[.,]\d+)?)\s*(?:m²|mÂ²|m2|sqm|sq\.?\s*m)$",
     re.IGNORECASE,
@@ -56,6 +70,7 @@ OVERLAY_FONT_SIZE_RULES: dict[str, tuple[float, int, float, int]] = {
 
 
 def escape_drawtext_text(value: str) -> str:
+    value = _normalize_overlay_text(value)
     sanitized = (
         value.replace("\r\n", " ")
         .replace("\r", " ")
@@ -77,8 +92,57 @@ def escape_filter_path(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace(":", r"\:")
 
 
-def resolve_text_color(block: str) -> str:
+def resolve_text_color(block: str, override_color: str | None = None) -> str:
+    if override_color is not None:
+        normalized = override_color.strip()
+        if normalized:
+            return _format_hex_for_drawtext(normalized)
     return OVERLAY_TEXT_COLORS.get(block, OVERLAY_TEXT_COLOR_PRIMARY)
+
+
+def apply_alpha_to_hex(hex_color: str | None, alpha: float = 0.85) -> str | None:
+    """Convert a HEX color to ffmpeg ``drawbox`` ``0xRRGGBB@A`` notation.
+
+    The side_banner render template tones down the per-property accent
+    panels by overlaying them with a fixed alpha. This helper centralises
+    the conversion so every caller writes the same filter snippet.
+
+    Accepts inputs with or without a leading ``#`` and tolerates 3-char
+    shorthand (e.g. ``"#fff"`` becomes ``0xffffff``). Returns ``None``
+    when the input is empty or not a recognisable HEX color so callers
+    can fall back to a default. The alpha is clamped to [0, 1].
+    """
+    if hex_color is None:
+        return None
+    cleaned = hex_color.strip().lstrip("#")
+    if not cleaned:
+        return None
+    if len(cleaned) == 3 and all(ch in "0123456789abcdefABCDEF" for ch in cleaned):
+        cleaned = "".join(ch * 2 for ch in cleaned)
+    if len(cleaned) != 6 or any(
+        ch not in "0123456789abcdefABCDEF" for ch in cleaned
+    ):
+        return None
+    clamped_alpha = max(0.0, min(1.0, float(alpha)))
+    return f"0x{cleaned.lower()}@{clamped_alpha:.2f}"
+
+
+def _format_hex_for_drawtext(value: str) -> str:
+    """Normalize a HEX string for use as a ``drawtext`` ``fontcolor`` value."""
+    candidate = value.strip()
+    if candidate.lower().startswith("0x") or candidate.lower().startswith("#"):
+        candidate_clean = candidate.lstrip("#").removeprefix("0x").removeprefix("0X")
+    else:
+        candidate_clean = candidate
+    if len(candidate_clean) == 3 and all(
+        ch in "0123456789abcdefABCDEF" for ch in candidate_clean
+    ):
+        candidate_clean = "".join(ch * 2 for ch in candidate_clean)
+    if len(candidate_clean) == 6 and all(
+        ch in "0123456789abcdefABCDEF" for ch in candidate_clean
+    ):
+        return f"0x{candidate_clean.lower()}"
+    return value
 
 
 def resolve_font_size_bounds(
@@ -108,14 +172,32 @@ def build_fit_inside_rgba_filter(
     height: int,
     *,
     include_setsar: bool = False,
+    fill: bool = False,
+    circular_mask: bool = False,
 ) -> str:
-    filter_parts = [
-        f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease",
-        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0",
-    ]
+    if fill:
+        filter_parts = [
+            f"scale=w={width}:h={height}:force_original_aspect_ratio=increase",
+            f"crop={width}:{height}",
+        ]
+    else:
+        filter_parts = [
+            f"scale=w={width}:h={height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0.0",
+        ]
     if include_setsar:
         filter_parts.append("setsar=1")
     filter_parts.append("format=rgba")
+    if circular_mask:
+        radius = max(1, min(width, height) // 2)
+        center_x = (width - 1) / 2
+        center_y = (height - 1) / 2
+        filter_parts.append(
+            "geq="
+            "r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+            f"a='if(lte((X-{center_x:.1f})*(X-{center_x:.1f})+"
+            f"(Y-{center_y:.1f})*(Y-{center_y:.1f})\\,{radius * radius})\\,255\\,0)'"
+        )
     return ",".join(filter_parts)
 
 
@@ -154,8 +236,40 @@ def format_price(value: str | None) -> str | None:
 def clean_text(value: Any) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
+    text = _normalize_overlay_text(str(value))
     return text or None
+
+
+def _normalize_overlay_text(value: str) -> str:
+    text = html.unescape(value)
+    for _ in range(3):
+        if not any(marker in text for marker in _MOJIBAKE_MARKERS):
+            break
+        for encoding in ("cp1252", "latin-1"):
+            try:
+                repaired = text.encode(encoding).decode("utf-8")
+            except UnicodeError:
+                continue
+            if repaired == text:
+                break
+            text = repaired
+            break
+        else:
+            break
+    return (
+        _replace_mojibake_fragments(text)
+        .replace("\xa0", " ")
+        .replace("\u200b", "")
+        .replace("\ufeff", "")
+        .strip()
+    )
+
+
+def _replace_mojibake_fragments(value: str) -> str:
+    text = value
+    for broken, repaired in _MOJIBAKE_REPLACEMENTS.items():
+        text = text.replace(broken, repaired)
+    return text
 
 
 def format_property_size(value: str | None) -> str | None:
@@ -326,7 +440,11 @@ def _normalize_positive_count(value: Any) -> int | None:
     return numeric_value
 
 
-def build_property_header_details_line(property_data: PropertyRenderData) -> str | None:
+def build_property_header_details_line(
+    property_data: PropertyRenderData,
+    *,
+    compact_room_labels: bool = False,
+) -> str | None:
     facts: list[str] = []
 
     property_size = format_property_size_header(property_data.property_size)
@@ -336,12 +454,14 @@ def build_property_header_details_line(property_data: PropertyRenderData) -> str
     bedrooms = _normalize_positive_count(property_data.bedrooms)
     if bedrooms is not None:
         bedroom_label = "bed" if bedrooms == 1 else "beds"
-        facts.append(f"{bedrooms} {bedroom_label}")
+        separator = "" if compact_room_labels else " "
+        facts.append(f"{bedrooms}{separator}{bedroom_label}")
 
     bathrooms = _normalize_positive_count(property_data.bathrooms)
     if bathrooms is not None:
         bathroom_label = "bath" if bathrooms == 1 else "baths"
-        facts.append(f"{bathrooms} {bathroom_label}")
+        separator = "" if compact_room_labels else " "
+        facts.append(f"{bathrooms}{separator}{bathroom_label}")
 
     if not facts:
         return None
@@ -453,6 +573,25 @@ def build_display_price(property_data: PropertyRenderData) -> str | None:
     return format_price(property_data.price)
 
 
+def has_positive_price(property_data: PropertyRenderData) -> bool:
+    cleaned_price = clean_text(property_data.price)
+    if not cleaned_price:
+        return False
+    candidate = (
+        cleaned_price.replace(",", "")
+        .replace("€", "")
+        .replace("$", "")
+        .replace("£", "")
+        .strip()
+    )
+    if not candidate:
+        return False
+    try:
+        return Decimal(candidate) > 0
+    except InvalidOperation:
+        return False
+
+
 def _normalize_listing_status(value: str | None) -> str:
     cleaned_value = clean_text(value)
     if not cleaned_value:
@@ -472,13 +611,14 @@ def _extract_site_display_url(url: str | None) -> str | None:
 __all__ = [
     "OVERLAY_FONT_SIZE_RULES", "OVERLAY_TEXT_COLORS",
     "OVERLAY_TEXT_COLOR_PRIMARY", "OVERLAY_TEXT_COLOR_SUBTITLE",
-    "WrappedTextResult", "build_fit_inside_rgba_filter", "build_agent_lines",
+    "WrappedTextResult", "apply_alpha_to_hex",
+    "build_fit_inside_rgba_filter", "build_agent_lines",
     "build_display_price", "build_property_header_details_line",
     "build_property_header_viewing_times_line", "build_property_facts_line",
     "build_property_overlay_facts_line", "build_similar_required_subtitle",
     "build_status_ribbon_text", "clean_text", "escape_drawtext_text",
     "escape_filter_path", "fit_wrapped_lines", "format_price",
-    "format_property_size_header", "format_property_size",
+    "format_property_size_header", "format_property_size", "has_positive_price",
     "format_viewing_times", "resolve_agency_logo_box_size",
     "resolve_agent_image_size", "resolve_ber_icon_size",
     "resolve_font_size_bounds", "resolve_text_color", "wrap_lines",

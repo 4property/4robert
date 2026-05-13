@@ -49,6 +49,9 @@ def build_property_reel_manifest_from_data(
     *,
     template: PropertyReelTemplate | None = None,
     render_profile: str | None = None,
+    render_template_id: str | None = None,
+    render_template_settings_hash: str | None = None,
+    poster_template: PropertyReelTemplate | None = None,
     prepared_assets: PreparedReelAssets | None = None,
     working_dir: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -106,7 +109,8 @@ def build_property_reel_manifest_from_data(
     duration_delta = round(actual_total_duration - settings.total_duration_seconds, 3)
     if abs(duration_delta) > 0.001:
         logger.warning(
-            "Configured reel duration %.3fs does not match actual duration %.3fs for %s (delta %.3fs).",
+            "Configured reel duration %.3fs does not match actual duration %.3fs "
+            "for %s (delta %.3fs).",
             settings.total_duration_seconds,
             actual_total_duration,
             property_data.slug,
@@ -184,7 +188,12 @@ def build_property_reel_manifest_from_data(
         "site_id": property_data.site_id,
         "property_id": property_data.property_id,
         "render_profile": render_profile,
+        "render_template_id": render_template_id or "classic",
+        "render_template_settings_hash": render_template_settings_hash or "",
         "render_settings": property_reel_template_to_dict(settings),
+        "poster_render_settings": property_reel_template_to_dict(
+            poster_template or PropertyReelTemplate()
+        ),
         "slug": property_data.slug,
         "title": property_data.title,
         "link": property_data.link,
@@ -242,6 +251,9 @@ def write_property_reel_manifest_from_data(
     output_path: str | Path | None = None,
     template: PropertyReelTemplate | None = None,
     render_profile: str | None = None,
+    render_template_id: str | None = None,
+    render_template_settings_hash: str | None = None,
+    poster_template: PropertyReelTemplate | None = None,
     prepared_assets: PreparedReelAssets | None = None,
     working_dir: str | Path | None = None,
 ) -> Path:
@@ -252,6 +264,9 @@ def write_property_reel_manifest_from_data(
         property_data,
         template=settings,
         render_profile=render_profile,
+        render_template_id=render_template_id,
+        render_template_settings_hash=render_template_settings_hash,
+        poster_template=poster_template,
         prepared_assets=prepared_assets,
         working_dir=working_dir,
     )

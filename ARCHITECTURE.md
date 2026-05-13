@@ -180,6 +180,57 @@ Today's events: `media_rendered`, `review_requested`, `publish_completed`,
 `publish_failed`, `publish_skipped`. Adding a new consumer is an additive
 change — it reads the same table.
 
+## Publishing semantics
+
+The multi-platform publisher in
+[`modules/publishing/infrastructure/adapters/gohighlevel/`](modules/publishing/infrastructure/adapters/gohighlevel/)
+fans out one post per platform in `desired_platforms`. Per-platform
+outcomes are aggregated into a single `aggregate_status` written to
+`reels.publish_status` and `reels.workflow_state`:
+
+| Outcome distribution | `aggregate_status` |
+|---|---|
+| `desired_platforms` is empty | `skipped` |
+| Every desired platform returned `skipped_missing_account` | `failed` |
+| All "effective" desired platforms succeeded (skipped-missing-account platforms ignored) | `published` |
+| Zero successes, ≥1 real failure | `failed` |
+| Some successes, some real failures | `partial` |
+
+`skipped_missing_account` is the outcome returned when GoHighLevel reports
+that the location does not have a connected account for that specific
+platform (for example an agency without a Facebook Page or Google Business
+Profile linked in the social planner). It does **not** count as a failure
+when computing the aggregate: a real-estate agency that has only
+Instagram/TikTok/LinkedIn/YouTube connected publishes successfully on
+those four and the reel is marked `published`, not `failed`.
+
+The all-skipped case (zero connected accounts across the entire desired
+list) stays as `failed` deliberately: it signals a misconfigured agency
+that needs to connect at least one network before approve/publish can
+produce any visible output.
+
+`partial` is reserved for genuine partial failures (e.g. one platform's
+upstream API errored while another succeeded). The frontend renders
+`partial` as a "Published" badge — from the user's perspective the reel
+did go out to at least one network.
+
+## Approve idempotency
+
+`POST /v1/admin/agencies/{agency_id}/reels/{site_id}/{property_id}/approve`
+is idempotent against concurrent or rapid double-click submissions. The
+use case in
+[`modules/reels/application/use_cases/regenerate_reel.py`](modules/reels/application/use_cases/regenerate_reel.py)
+checks for an active `reel_publish` job (`status IN ('queued',
+'processing')`) for the same `(external_source_id, property_id)` before
+enqueuing a new one. If found, it short-circuits and the handler returns
+`200 OK` with the existing `job_id` / `event_id` and an
+`"idempotent_replay": true` flag, without enqueuing a duplicate.
+
+Only when no active job exists does the use case run the supersede +
+enqueue path (the older "supersede any `queued` rows" behaviour now only
+fires when a fresh approve is racing with itself across multiple API
+instances — in normal operation the idempotent lookup wins first).
+
 ## Errors and logging
 
 [`shared/errors/`](shared/errors/) (was `core/errors.py`) defines

@@ -15,8 +15,21 @@ from shared.observability.logging import (
 )
 
 _AUDIT_LOGGER_NAME: Final[str] = "cpihed.audit"
-_PERSISTENT_LOG_FORMAT: Final[str] = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+_PERSISTENT_LOG_FORMAT: Final[str] = (
+    "%(asctime)s | %(levelname)-7s | %(process_role)s | %(threadName)s | %(name)s | %(message)s"
+)
 _PERSISTENT_LOG_DATE_FORMAT: Final[str] = "%d/%m/%Y %H:%M:%S"
+
+
+class ProcessRoleFilter(logging.Filter):
+    def __init__(self, process_role: str) -> None:
+        super().__init__()
+        self._process_role = str(process_role or "app").strip() or "app"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "process_role"):
+            record.process_role = self._process_role
+        return True
 
 
 class PersistentLogFormatter(PlainTextFormatter):
@@ -133,6 +146,7 @@ def configure_logging(
     persistent_log_directory: str = "logs",
     persistent_log_max_bytes: int = 25_000_000,
     persistent_log_backup_count: int = 20,
+    process_role: str = "app",
 ) -> None:
     level_value = getattr(logging, level.upper(), logging.INFO)
     logging.captureWarnings(True)
@@ -176,6 +190,7 @@ def configure_logging(
             encoding="utf-8",
         )
         application_handler.setLevel(logging.DEBUG)
+        application_handler.addFilter(ProcessRoleFilter(process_role))
         application_handler.setFormatter(
             PersistentLogFormatter(
                 _PERSISTENT_LOG_FORMAT,
@@ -192,6 +207,7 @@ def configure_logging(
             encoding="utf-8",
         )
         error_handler.setLevel(logging.ERROR)
+        error_handler.addFilter(ProcessRoleFilter(process_role))
         error_handler.setFormatter(
             PersistentLogFormatter(
                 _PERSISTENT_LOG_FORMAT,
@@ -208,6 +224,7 @@ def configure_logging(
             encoding="utf-8",
         )
         warning_error_daily_handler.setLevel(logging.WARNING)
+        warning_error_daily_handler.addFilter(ProcessRoleFilter(process_role))
         warning_error_daily_handler.setFormatter(
             PersistentLogFormatter(
                 _PERSISTENT_LOG_FORMAT,
@@ -293,6 +310,7 @@ def _json_safe_value(value: object) -> object:
 __all__ = [
     "DailyDirectoryRotatingFileHandler",
     "PersistentLogFormatter",
+    "ProcessRoleFilter",
     "configure_logging",
     "log_persistent_event",
     "resolve_dated_log_directory",

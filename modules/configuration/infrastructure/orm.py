@@ -17,6 +17,36 @@ from sqlalchemy.orm import Mapped, mapped_column
 from shared.db.base import Base
 
 
+class RenderTemplateORM(Base):
+    __tablename__ = "render_templates"
+
+    template_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    preview_images: Mapped[list[dict]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+    layout_variant: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="classic"
+    )
+    reel_settings: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    poster_settings: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AgencyBrandSettingsORM(Base):
     __tablename__ = "agency_brand_settings"
 
@@ -68,6 +98,12 @@ class AgencyReelDefaultsORM(Base):
     caption_template: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=""
     )
+    render_template_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("render_templates.template_id"),
+        nullable=False,
+        server_default="classic",
+    )
     settings: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
@@ -101,6 +137,15 @@ class AgencyAutomationRulesORM(Base):
         ARRAY(Text),
         nullable=False,
         server_default=text("ARRAY['published']::text[]"),
+    )
+    hold_window_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    quiet_hours_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
+    skip_weekends: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
     )
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -152,4 +197,5 @@ __all__ = [
     "AgencyMusicTrackORM",
     "AgencyReelDefaultsORM",
     "AgencySocialTemplateORM",
+    "RenderTemplateORM",
 ]

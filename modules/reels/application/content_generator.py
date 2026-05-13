@@ -8,11 +8,14 @@ Moved from ``application/pipeline/content_generation.py`` during sub-feature
 
 from __future__ import annotations
 
-import re
+import html
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from modules.catalog.domain.wordpress_property import Property
+from modules.configuration.domain.social_templates_variables import (
+    TEMPLATE_VARIABLE_PATTERN,
+)
 from modules.publishing.infrastructure.social_copy.description import (
     build_platform_descriptions_for_property_with_url,
     build_platform_titles_for_property,
@@ -41,7 +44,7 @@ class ContentGenerator(Protocol):
         ...
 
 
-_TEMPLATE_VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
+_TEMPLATE_VARIABLE_PATTERN = TEMPLATE_VARIABLE_PATTERN
 
 
 def _build_property_template_variables(
@@ -51,8 +54,9 @@ def _build_property_template_variables(
 ) -> dict[str, str]:
     """Mapping consumed by the agency's per-network description templates.
 
-    Keys mirror the catalog the frontend Social tab lists in its
-    `{{variable}}` palette.
+    Keys mirror `ALLOWED_TEMPLATE_VARIABLES` exactly; the PUT validator
+    rejects any other placeholder, so an unknown variable never reaches the
+    substitution path at runtime.
     """
     return {
         "property_title": property_item.title or "",
@@ -90,7 +94,14 @@ def render_template_with_property(
     *,
     property_url: str,
 ) -> str:
-    """Substitute `{{variable}}` placeholders inside the agency's template."""
+    """Substitute `{{variable}}` placeholders inside the agency's template.
+
+    WordPress emits HTML entities in ``title.rendered`` and ``content.rendered``
+    (e.g. ``&#8217;``, ``&amp;``, ``&quot;``, ``&#x2019;``). We decode the
+    substituted output here so the rendered caption that flows into the MP4
+    overlay and the GHL POST body never carries raw entities. ``html.unescape``
+    is idempotent on already-decoded text, so re-running the pipeline is safe.
+    """
     if not template:
         return ""
     variables = _build_property_template_variables(property_item, property_url=property_url)
@@ -99,7 +110,8 @@ def render_template_with_property(
         key = match.group(1).strip().lower()
         return str(variables.get(key, match.group(0)))
 
-    return _TEMPLATE_VARIABLE_PATTERN.sub(_replace, template).strip()
+    rendered = _TEMPLATE_VARIABLE_PATTERN.sub(_replace, template).strip()
+    return html.unescape(rendered)
 
 
 class DeterministicPropertyContentGenerator:

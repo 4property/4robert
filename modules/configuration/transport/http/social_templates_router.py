@@ -22,6 +22,10 @@ from modules.configuration.application.use_cases.replace_social_templates import
     ReplaceSocialTemplatesUseCase,
 )
 from modules.configuration.domain import SocialTemplate
+from modules.configuration.domain.social_templates_variables import (
+    ALLOWED_TEMPLATE_VARIABLES,
+    find_unknown_template_variables,
+)
 from modules.configuration.transport.payloads.social_templates import (
     SocialTemplatesReplacePayload,
 )
@@ -53,7 +57,8 @@ def create_social_templates_router(
         description=(
             "Returns the templates map keyed by platform identifier "
             "(`instagram`, `tiktok`, `facebook`, `linkedin`, `youtube`, "
-            "`gbp`). Used by the **Social** tab to render the publish caption."
+            "`gbp`, `pinterest`). Used by the **Social** tab to render the "
+            "publish caption."
         ),
     )
     async def read_admin_agency_social_templates(
@@ -101,6 +106,9 @@ def create_social_templates_router(
         authorization_error = authorize_admin_request(request, admin_access_policy)
         if authorization_error is not None:
             return authorization_error
+        unknown_by_platform = _collect_unknown_template_variables(payload.templates or {})
+        if unknown_by_platform:
+            return _unknown_variable_response(unknown_by_platform)
         try:
             with unit_of_work_factory() as uow:
                 records = replace_social_templates.execute(
@@ -162,6 +170,53 @@ def _serialize_record(record: SocialTemplate) -> dict[str, object]:
         "created_at": record.created_at,
         "updated_at": record.updated_at,
     }
+
+
+def _collect_unknown_template_variables(
+    templates: dict[str, str],
+) -> dict[str, list[str]]:
+    """Return `{platform: [unknown_variable, ...]}` for every offending template.
+
+    Platforms whose template references only allowed variables (or none at
+    all) are omitted. Keys are normalized to the lowercase form the use case
+    will persist, so the error message matches what the admin will see in
+    the response of the next successful GET.
+    """
+    offences: dict[str, list[str]] = {}
+    for raw_platform, template in (templates or {}).items():
+        platform = str(raw_platform or "").strip().lower()
+        if not platform:
+            continue
+        unknown = find_unknown_template_variables(str(template or ""))
+        if unknown:
+            offences[platform] = unknown
+    return offences
+
+
+def _unknown_variable_response(
+    unknown_by_platform: dict[str, list[str]],
+) -> JSONResponse:
+    summary = ", ".join(
+        f"{platform}: {{{{{', '.join(names)}}}}}"
+        for platform, names in unknown_by_platform.items()
+    )
+    allowed_sorted = sorted(ALLOWED_TEMPLATE_VARIABLES)
+    return json_error(
+        422,
+        (
+            "One or more description templates reference unknown variables: "
+            f"{summary}."
+        ),
+        code="SOCIAL_TEMPLATE_UNKNOWN_VARIABLE",
+        hint=(
+            "Use only the supported variables: "
+            f"{', '.join(allowed_sorted)}."
+        ),
+        details={
+            "unknown_variables_by_platform": unknown_by_platform,
+            "allowed_variables": allowed_sorted,
+        },
+    )
 
 
 __all__ = ["create_social_templates_router"]

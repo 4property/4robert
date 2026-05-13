@@ -96,6 +96,13 @@ def test_returns_items_when_upstream_succeeds() -> None:
                                     "platform": "instagram",
                                     "type": "page",
                                     "isExpired": False,
+                                },
+                                {
+                                    "id": "pin-1",
+                                    "name": "Brand Pinterest",
+                                    "platform": "pinterest",
+                                    "type": "board",
+                                    "isExpired": False,
                                 }
                             ]
                         }
@@ -119,8 +126,9 @@ def test_returns_items_when_upstream_succeeds() -> None:
             assert response.status_code == 200
             payload = response.json()
             assert payload["connected"] is True
-            assert payload["count"] == 1
+            assert payload["count"] == 2
             assert payload["items"][0]["id"] == "ac-1"
+            assert payload["items"][1]["platform"] == "pinterest"
             assert payload["location_id"] == "loc-9"
             assert stub_client.closed is True
             assert client_calls and client_calls[0]["args"][0] == "GET"

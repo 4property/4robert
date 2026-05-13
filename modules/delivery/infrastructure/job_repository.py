@@ -9,6 +9,7 @@ encoded in the SQL: a `(external_source_id, property_id)` already in
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from sqlalchemy import bindparam, text
@@ -16,6 +17,23 @@ from sqlalchemy import bindparam, text
 from modules.delivery.domain import Job, JobEnqueueRequest
 from shared.db.repository_base import ModuleRepository, utcnow
 from shared.db.security import decrypt_text, encrypt_text
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveJob:
+    """Lightweight view of a still-active job for idempotency checks.
+
+    ``publish_context_json`` carries the raw JSONB string persisted in
+    ``jobs.publish_context_json``. Callers that need to recover the
+    ``scheduled_at`` slot from a pre-existing job (feature 11 idempotent
+    replay) parse this string. ``None`` means the column was NULL.
+    """
+
+    job_id: str
+    event_id: str
+    status: str
+    created_at: str
+    publish_context_json: str | None = None
 
 
 def _isoformat(value: object | None) -> str | None:
@@ -164,6 +182,64 @@ class JobRepository(ModuleRepository):
             },
         )
         return tuple(str(row.event_id) for row in rows)
+
+    def find_active_job_for_property(
+        self,
+        *,
+        external_source_id: str,
+        property_id: int | None,
+        kind: str = "reel_publish",
+    ) -> ActiveJob | None:
+        """Return the most recent still-active job for `(external_source_id,
+        property_id, kind)`, or ``None`` if none exists.
+
+        "Active" means `status IN ('queued', 'processing')` — i.e. a job
+        that is either waiting to be claimed or already being executed by a
+        worker. Used by the approve flow to short-circuit duplicate
+        requests so a double-click on the Approve button does not enqueue
+        a second job behind a still-running one.
+        """
+        if property_id is None:
+            return None
+        row = self.session.execute(
+            text(
+                "SELECT job_id, event_id, status, created_at, "
+                "publish_context_json FROM jobs "
+                "WHERE external_source_id = :external_source_id "
+                "AND property_id = :property_id "
+                "AND kind = :kind "
+                "AND status IN ('queued', 'processing') "
+                "ORDER BY created_at DESC, job_id DESC LIMIT 1"
+            ),
+            {
+                "external_source_id": external_source_id,
+                "property_id": property_id,
+                "kind": str(kind or "reel_publish").strip().lower(),
+            },
+        ).first()
+        if row is None:
+            return None
+        raw_publish_context = row.publish_context_json
+        if raw_publish_context is None:
+            normalized_publish_context: str | None = None
+        elif isinstance(raw_publish_context, (bytes, bytearray)):
+            normalized_publish_context = bytes(raw_publish_context).decode("utf-8")
+        elif isinstance(raw_publish_context, str):
+            normalized_publish_context = raw_publish_context
+        else:
+            # Postgres jsonb is decoded to dict by SQLAlchemy when the
+            # adapter is configured to do so; re-serialise to JSON so the
+            # ActiveJob contract stays stringly-typed.
+            normalized_publish_context = json.dumps(
+                dict(raw_publish_context), separators=(",", ":")
+            )
+        return ActiveJob(
+            job_id=str(row.job_id),
+            event_id=str(row.event_id or ""),
+            status=str(row.status or ""),
+            created_at=_isoformat(row.created_at) or "",
+            publish_context_json=normalized_publish_context,
+        )
 
     def recover_expired_processing_jobs(self, *, now: str | None = None) -> int:
         active_now = now or utcnow().isoformat()
@@ -362,4 +438,4 @@ class JobRepository(ModuleRepository):
         return tuple(_row_to_job(row) for row in rows)
 
 
-__all__ = ["JobRepository"]
+__all__ = ["ActiveJob", "JobRepository"]

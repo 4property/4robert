@@ -23,6 +23,7 @@ ACTIVE_TABLES = frozenset(
         "agencies",
         "ingestion_sources",
         "provider_connections",
+        "render_templates",
         "agency_brand_settings",
         "agency_reel_defaults",
         "agency_automation_rules",

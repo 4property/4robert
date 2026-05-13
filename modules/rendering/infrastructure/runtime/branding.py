@@ -50,6 +50,25 @@ def prepare_cover_logo_image(
     suppress_if_duplicate: bool = True,
 ) -> Path | None:
     del settings
+    # Agency-uploaded logo wins over the webhook URL. The orchestrator
+    # resolves ``agency_brand_settings.logo_object_key`` to a real local
+    # path and stamps it on ``property_data.agency_logo_local_path``
+    # during ingest. If that file exists, prefer it unconditionally and
+    # skip the duplicate-agent guard (the upload is admin-curated, not
+    # a webhook coincidence).
+    local_override = property_data.agency_logo_local_path
+    if local_override is not None:
+        candidate = Path(local_override)
+        if candidate.exists() and candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+        logger.warning(
+            "Agency logo override for property %s (%s) is missing on disk at %s. "
+            "Falling back to the webhook agency_logo URL.",
+            property_data.property_id,
+            property_data.slug,
+            candidate,
+        )
+
     agency_logo_url = str(property_data.agency_logo_url or "").strip()
     if not agency_logo_url:
         return None

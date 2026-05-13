@@ -8,6 +8,7 @@ during sub-feature 18c. Wraps the social-media-posting endpoints
 
 from __future__ import annotations
 
+import html
 from urllib.parse import quote
 
 from shared.errors import SocialPublishingError
@@ -96,25 +97,46 @@ class GoHighLevelSocialService:
         title: str | None = None,
         social_post_type: str,
         target_url: str | None = None,
+        scheduled_at: str | None = None,
     ) -> CreatedSocialPost:
+        # Final hop before the POST body leaves the process — decode any HTML
+        # entities (`&#8217;`, `&amp;`, `&quot;`, `&#x2019;`) that may still
+        # be sitting in description/title. The deterministic content generator
+        # and `normalize_caption` already decode at their respective layers,
+        # but a defensive decode here keeps the contract with GHL clean even
+        # when callers bypass those layers (feature 12
+        # `unescape_html_entities_everywhere`). `html.unescape` is idempotent.
+        decoded_description = html.unescape(description) if description else description
+        decoded_title = html.unescape(title) if title else title
+        # Feature 11: honour the agency's automation publish window. If
+        # the regenerate use case computed a future ``scheduled_at`` (ISO
+        # 8601 UTC), GoHighLevel expects ``status='scheduled'`` plus the
+        # ``scheduleDate`` field. Without a ``scheduled_at``, keep the
+        # previous behaviour (``status='published'`` for an immediate
+        # post).
+        normalized_scheduled_at = (
+            str(scheduled_at).strip() if scheduled_at is not None else ""
+        )
         json_body: dict[str, object] = {
             "accountIds": [account_id],
-            "summary": description,
+            "summary": decoded_description,
             "media": [
                 {
                     "url": uploaded_media.url,
                     "type": uploaded_media.mime_type,
                 }
             ],
-            "status": "published",
+            "status": "scheduled" if normalized_scheduled_at else "published",
             "type": social_post_type,
             "userId": user_id,
         }
+        if normalized_scheduled_at:
+            json_body["scheduleDate"] = normalized_scheduled_at
         json_body.update(
             self._build_platform_payload(
                 platform=platform,
                 target_url=target_url,
-                title=title,
+                title=decoded_title,
             )
         )
         payload = self.client.request_json(
@@ -179,6 +201,7 @@ class GoHighLevelSocialService:
         description: str,
         title: str | None = None,
         target_url: str | None = None,
+        scheduled_at: str | None = None,
     ) -> CreatedSocialPost:
         return self.create_social_post(
             location_id=location_id,
@@ -191,6 +214,7 @@ class GoHighLevelSocialService:
             title=title,
             social_post_type="reel",
             target_url=target_url,
+            scheduled_at=scheduled_at,
         )
 
     @staticmethod

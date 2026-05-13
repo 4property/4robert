@@ -111,6 +111,9 @@ def create_automation_router(
                         publish_window_end=payload.publish_window_end,
                         publish_days=payload.publish_days,
                         trigger_on_status=payload.trigger_on_status,
+                        hold_window_seconds=payload.hold_window_seconds,
+                        quiet_hours_enabled=payload.quiet_hours_enabled,
+                        skip_weekends=payload.skip_weekends,
                     ),
                 )
         except ValidationError as error:
@@ -162,6 +165,9 @@ def _serialize_automation(
             "publish_window_end": "23:59",
             "publish_days": list(_DEFAULT_PUBLISH_DAYS),
             "trigger_on_status": list(_DEFAULT_TRIGGER_ON_STATUS),
+            "hold_window_seconds": 0,
+            "quiet_hours_enabled": False,
+            "skip_weekends": False,
             "created_at": "",
             "updated_at": "",
         }
@@ -172,6 +178,9 @@ def _serialize_automation(
         "publish_window_end": record.publish_window_end,
         "publish_days": list(record.publish_days),
         "trigger_on_status": list(record.trigger_on_status),
+        "hold_window_seconds": record.hold_window_seconds,
+        "quiet_hours_enabled": record.quiet_hours_enabled,
+        "skip_weekends": record.skip_weekends,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
     }

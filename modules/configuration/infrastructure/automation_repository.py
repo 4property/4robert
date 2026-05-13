@@ -14,8 +14,10 @@ class AutomationRulesRepository(ModuleRepository):
         row = self.session.execute(
             text(
                 "SELECT agency_id, approval_required, publish_window_start, "
-                "publish_window_end, publish_days, trigger_on_status, created_at, "
-                "updated_at FROM agency_automation_rules WHERE agency_id = :agency_id"
+                "publish_window_end, publish_days, trigger_on_status, "
+                "hold_window_seconds, quiet_hours_enabled, skip_weekends, "
+                "created_at, updated_at "
+                "FROM agency_automation_rules WHERE agency_id = :agency_id"
             ),
             {"agency_id": agency_id},
         ).first()
@@ -28,6 +30,9 @@ class AutomationRulesRepository(ModuleRepository):
             publish_window_end=str(row.publish_window_end or ""),
             publish_days=tuple(row.publish_days or ()),
             trigger_on_status=tuple(row.trigger_on_status or ()),
+            hold_window_seconds=int(row.hold_window_seconds or 0),
+            quiet_hours_enabled=bool(row.quiet_hours_enabled),
+            skip_weekends=bool(row.skip_weekends),
             created_at=isoformat(row.created_at) or "",
             updated_at=isoformat(row.updated_at) or "",
         )
@@ -41,6 +46,9 @@ class AutomationRulesRepository(ModuleRepository):
         publish_window_end: str | None = None,
         publish_days: Iterable[str] | None = None,
         trigger_on_status: Iterable[str] | None = None,
+        hold_window_seconds: int | None = None,
+        quiet_hours_enabled: bool | None = None,
+        skip_weekends: bool | None = None,
     ) -> AutomationRules:
         existing = self.get(agency_id)
         timestamp = utcnow()
@@ -74,16 +82,33 @@ class AutomationRulesRepository(ModuleRepository):
                     else ["for_sale", "to_let"]
                 )
             ),
+            "hold_window_seconds": int(
+                hold_window_seconds
+                if hold_window_seconds is not None
+                else (existing.hold_window_seconds if existing else 0)
+            ),
+            "quiet_hours_enabled": bool(
+                quiet_hours_enabled
+                if quiet_hours_enabled is not None
+                else (existing.quiet_hours_enabled if existing else False)
+            ),
+            "skip_weekends": bool(
+                skip_weekends
+                if skip_weekends is not None
+                else (existing.skip_weekends if existing else False)
+            ),
         }
         self.session.execute(
             text(
                 "INSERT INTO agency_automation_rules ("
                 "agency_id, approval_required, publish_window_start, "
                 "publish_window_end, publish_days, trigger_on_status, "
+                "hold_window_seconds, quiet_hours_enabled, skip_weekends, "
                 "created_at, updated_at"
                 ") VALUES ("
                 ":agency_id, :approval_required, :publish_window_start, "
                 ":publish_window_end, :publish_days, :trigger_on_status, "
+                ":hold_window_seconds, :quiet_hours_enabled, :skip_weekends, "
                 ":created_at, :updated_at"
                 ") ON CONFLICT (agency_id) DO UPDATE SET "
                 "approval_required = EXCLUDED.approval_required, "
@@ -91,6 +116,9 @@ class AutomationRulesRepository(ModuleRepository):
                 "publish_window_end = EXCLUDED.publish_window_end, "
                 "publish_days = EXCLUDED.publish_days, "
                 "trigger_on_status = EXCLUDED.trigger_on_status, "
+                "hold_window_seconds = EXCLUDED.hold_window_seconds, "
+                "quiet_hours_enabled = EXCLUDED.quiet_hours_enabled, "
+                "skip_weekends = EXCLUDED.skip_weekends, "
                 "updated_at = EXCLUDED.updated_at"
             ),
             {

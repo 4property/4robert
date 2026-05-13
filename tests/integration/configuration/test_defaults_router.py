@@ -32,6 +32,7 @@ def test_defaults_get_returns_baseline_when_no_record_exists() -> None:
             assert payload["agency_id"] == seeded.agency_id
             assert payload["defaults"]["duration_seconds"] == 30
             assert "instagram" in payload["defaults"]["platforms"]
+            assert "pinterest" in payload["defaults"]["platforms"]
 
 
 def test_defaults_put_persists_platforms_and_settings() -> None:

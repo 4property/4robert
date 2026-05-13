@@ -47,6 +47,13 @@ def build_overlay_filter(
     ber_icon_label: str | None = None,
     output_label: str = "vout",
     layout: OverlayLayout | None = None,
+    layout_variant: str = "classic",
+    top_panel_color: str | None = None,
+    bottom_panel_color: str | None = None,
+    text_override_color: str | None = None,
+    vertical_banner_label: str | None = None,
+    vertical_banner_x: int | None = None,
+    vertical_banner_y: int | None = None,
 ) -> str:
     active_layout = layout or build_overlay_layout(
         property_data,
@@ -61,10 +68,17 @@ def build_overlay_filter(
             logo_image_label is not None if has_agency_logo is None else has_agency_logo
         ),
         cover_caption=cover_caption,
+        layout_variant=layout_variant,
     )
     font_path = escape_filter_path(resolve_font_path(settings.font_path))
     bold_font_path = escape_filter_path(resolve_font_path(settings.bold_font_path))
     subtitle_font_path = escape_filter_path(resolve_font_path(settings.subtitle_font_path))
+
+    # Feature 16: side_banner can override the panel fill colors with a
+    # transparent per-property accent. Defaults preserve the classic
+    # black overlays byte-for-byte.
+    resolved_top_panel_color = top_panel_color or "black@0.38"
+    resolved_bottom_panel_color = bottom_panel_color or "black@0.46"
 
     text_filters: list[str] = []
     if active_layout.bottom_panel is not None and active_layout.bottom_panel.visible:
@@ -72,7 +86,7 @@ def build_overlay_filter(
             (
                 f"drawbox=x={active_layout.bottom_panel.x}:y={active_layout.bottom_panel.y}:"
                 f"w={active_layout.bottom_panel.width}:h={active_layout.bottom_panel.height}:"
-                "color=black@0.46:t=fill"
+                f"color={resolved_bottom_panel_color}:t=fill"
             )
         )
     if active_layout.top_panel is not None and active_layout.top_panel.visible:
@@ -80,7 +94,7 @@ def build_overlay_filter(
             (
                 f"drawbox=x={active_layout.top_panel.x}:y={active_layout.top_panel.y}:"
                 f"w={active_layout.top_panel.width}:h={active_layout.top_panel.height}:"
-                "color=black@0.38:t=fill"
+                f"color={resolved_top_panel_color}:t=fill"
             )
         )
 
@@ -93,7 +107,7 @@ def build_overlay_filter(
                 "drawtext="
                 f"fontfile='{font_file}':"
                 f"text='{escape_drawtext_text(line)}':"
-                f"fontcolor={resolve_text_color(block.block)}:fontsize={block.font_size}:"
+                f"fontcolor={resolve_text_color(block.block, text_override_color)}:fontsize={block.font_size}:"
                 f"x={block.x}:y={block.y + index * block.line_gap}:"
                 "fix_bounds=1"
             )
@@ -168,6 +182,25 @@ def build_overlay_filter(
         )
         current_video_label = "video_with_agency_logo"
 
+    # Feature 16: pre-rendered vertical status banner overlay
+    # (side_banner template). The banner is generated as a PNG by
+    # ``preparation._render_vertical_status_banner`` and exposed as an
+    # extra ffmpeg input; classic renders skip this stage entirely
+    # (``vertical_banner_label is None``).
+    if (
+        vertical_banner_label is not None
+        and vertical_banner_x is not None
+        and vertical_banner_y is not None
+    ):
+        filters.append(
+            (
+                f"[{current_video_label}][{vertical_banner_label}]"
+                f"overlay=x={vertical_banner_x}:y={vertical_banner_y}"
+                "[video_with_vertical_banner]"
+            )
+        )
+        current_video_label = "video_with_vertical_banner"
+
     filters.append(f"[{current_video_label}]null[{output_label}]")
     return ";".join(filters)
 
@@ -194,6 +227,13 @@ def build_filter_complex(
     ber_icon_input_index: int | None = None,
     include_agency_logo: bool | None = None,
     layout: OverlayLayout | None = None,
+    layout_variant: str = "classic",
+    top_panel_color: str | None = None,
+    bottom_panel_color: str | None = None,
+    text_override_color: str | None = None,
+    vertical_banner_input_index: int | None = None,
+    vertical_banner_x: int | None = None,
+    vertical_banner_y: int | None = None,
 ) -> str:
     slide_count = len(slides)
     filter_parts: list[str] = []
@@ -211,6 +251,7 @@ def build_filter_complex(
             else include_agency_logo
         ),
         cover_caption=slides[0].caption if settings.include_intro and slides else None,
+        layout_variant=layout_variant,
     )
 
     agent_box = overlay_layout.agent_image_box
@@ -309,6 +350,12 @@ def build_filter_complex(
         filter_parts.append("[cover][slideshow]concat=n=2:v=1:a=0[video_base]")
     else:
         filter_parts.append("[slideshow]null[video_base]")
+    vertical_banner_label: str | None = None
+    if vertical_banner_input_index is not None:
+        filter_parts.append(
+            f"[{vertical_banner_input_index}:v]format=rgba[vertical_banner]"
+        )
+        vertical_banner_label = "vertical_banner"
     filter_parts.append(
         build_overlay_filter(
             property_data,
@@ -328,6 +375,13 @@ def build_filter_complex(
             ber_icon_label="ber_header_icon" if ber_icon_input_index is not None else None,
             output_label="vout",
             layout=overlay_layout,
+            layout_variant=layout_variant,
+            top_panel_color=top_panel_color,
+            bottom_panel_color=bottom_panel_color,
+            text_override_color=text_override_color,
+            vertical_banner_label=vertical_banner_label,
+            vertical_banner_x=vertical_banner_x,
+            vertical_banner_y=vertical_banner_y,
         )
     )
     return ";".join(filter_parts)

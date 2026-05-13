@@ -56,6 +56,8 @@ class SocialPublishContext:
     platforms: tuple[str, ...]
     approval_required: bool = False
     social_templates: tuple[tuple[str, str], ...] = ()
+    scheduled_at: str | None = None
+    render_template_id: str = "classic"
 
     def to_dict(self, *, include_access_token: bool = True) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -64,6 +66,8 @@ class SocialPublishContext:
             "platforms": list(self.platforms),
             "approval_required": self.approval_required,
             "social_templates": dict(self.social_templates),
+            "scheduled_at": self.scheduled_at,
+            "render_template_id": self.render_template_id,
         }
         if include_access_token:
             payload["access_token"] = self.access_token
@@ -100,6 +104,13 @@ class SocialPublishContext:
             )
         else:
             normalized_templates = ()
+        raw_scheduled_at = payload.get("scheduled_at")
+        if raw_scheduled_at is None:
+            scheduled_at: str | None = None
+        else:
+            normalized_scheduled_at = str(raw_scheduled_at).strip()
+            scheduled_at = normalized_scheduled_at or None
+        render_template_id = str(payload.get("render_template_id") or "").strip()
         return cls(
             provider=provider,
             location_id=location_id,
@@ -107,6 +118,8 @@ class SocialPublishContext:
             platforms=platforms,
             approval_required=approval_required,
             social_templates=normalized_templates,
+            scheduled_at=scheduled_at,
+            render_template_id=render_template_id or "classic",
         )
 
 
@@ -272,12 +285,18 @@ class PropertyContext:
     content_snapshot_json: str = ""
     publish_target_fingerprint: str = ""
     publish_target_snapshot_json: str = ""
+    render_template_id: str = "classic"
+    render_template_settings_hash: str = ""
+    render_template_layout_variant: str = "classic"
+    render_template_reel_settings: dict[str, object] = field(default_factory=dict)
+    render_template_poster_settings: dict[str, object] = field(default_factory=dict)
     pending_publish_platforms: tuple[str, ...] = field(default_factory=tuple)
     requires_asset_preparation: bool = True
     requires_render: bool = True
     requires_external_publish: bool = True
     existing_published_media: PublishedMediaArtifact | None = None
     is_noop: bool = False
+    agency_logo_local_path: Path | None = None
 
     @property
     def requires_photo_selection(self) -> bool:

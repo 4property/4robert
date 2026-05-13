@@ -23,6 +23,9 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from modules.configuration.application.use_cases.compute_next_publish_slot import (
+    compute_next_publish_slot,
+)
 from modules.delivery.domain import JobEnqueueRequest
 from modules.reels.application.use_cases._admin_support import (
     ensure_agency_exists,
@@ -42,6 +45,8 @@ class RegenerateReelResult:
     job_id: str | None = None
     reason: str | None = None
     hint: str | None = None
+    idempotent_replay: bool = False
+    scheduled_at: str | None = None
 
 
 _PREREQ_MISSING_HINT = (
@@ -49,6 +54,34 @@ _PREREQ_MISSING_HINT = (
     "because either the original WordPress payload or the agency's GHL "
     "connection is missing."
 )
+
+
+def _extract_scheduled_at(
+    raw_publish_context_json: str | None,
+) -> str | None:
+    """Pull ``scheduled_at`` out of a persisted publish_context payload.
+
+    Used by the idempotent-replay branch so the approve response keeps
+    the same shape between a fresh enqueue (where ``scheduled_at`` was
+    just computed from automation rules) and a replay of an existing
+    job (where the slot was computed when the job was first enqueued).
+
+    Returns ``None`` for any missing key, empty payload, malformed JSON
+    or pre-feature-11 jobs (which never persisted the field).
+    """
+    if not raw_publish_context_json:
+        return None
+    try:
+        parsed = json.loads(raw_publish_context_json)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    raw_value = parsed.get("scheduled_at")
+    if raw_value is None:
+        return None
+    text_value = str(raw_value).strip()
+    return text_value or None
 
 
 class RegenerateReelUseCase:
@@ -161,6 +194,31 @@ class RegenerateReelUseCase:
                 hint=_PREREQ_MISSING_HINT,
             )
 
+        # Idempotency: if a job is still active for this property (queued or
+        # processing), do not enqueue a duplicate. A double-click on the
+        # Approve button must not produce two parallel publish runs.
+        active_job = uow.delivery.jobs.find_active_job_for_property(
+            external_source_id=normalized_site_id,
+            property_id=normalized_property_id,
+            kind="reel_publish",
+        )
+        if active_job is not None:
+            # Recover the original ``scheduled_at`` (feature 11) from the
+            # persisted JSONB so the response shape is stable across the
+            # fresh-enqueue and idempotent-replay branches. Pre-feature-11
+            # jobs simply will not carry the key — we surface ``None``.
+            replay_scheduled_at = _extract_scheduled_at(
+                getattr(active_job, "publish_context_json", None)
+            )
+            return RegenerateReelResult(
+                publish_enqueued=True,
+                reel=reel_summary,
+                event_id=active_job.event_id or None,
+                job_id=active_job.job_id,
+                idempotent_replay=True,
+                scheduled_at=replay_scheduled_at,
+            )
+
         defaults = uow.configuration.defaults.get(normalized_agency_id)
         automation = uow.configuration.automation.get(normalized_agency_id)
         social_templates_records = (
@@ -171,7 +229,34 @@ class RegenerateReelUseCase:
             if defaults is not None and defaults.platforms
             else self.default_platforms
         )
-        del automation
+        render_template_id = (
+            getattr(defaults, "render_template_id", "classic")
+            if defaults is not None
+            else "classic"
+        )
+        # Feature 11: compute the next valid publish slot from the
+        # automation rules. ``None`` means "publish immediately" — the
+        # downstream social_service falls back to ``status='published'``
+        # without a ``scheduleDate``.
+        #
+        # Feature 14: load the owning agency so we can pass its IANA
+        # ``timezone`` to the pure use case. ``publish_window_start`` /
+        # ``publish_window_end`` are interpreted in agency local time.
+        # Invalid timezone strings fall back to UTC inside the use case.
+        agency = uow.tenancy.agencies.get_by_id(normalized_agency_id)
+        agency_timezone = (
+            agency.timezone
+            if agency is not None and getattr(agency, "timezone", "")
+            else "UTC"
+        )
+        scheduled_slot = compute_next_publish_slot(
+            automation,
+            datetime.now(timezone.utc),
+            agency_timezone=agency_timezone,
+        )
+        scheduled_at_iso: str | None = (
+            scheduled_slot.isoformat() if scheduled_slot is not None else None
+        )
         social_templates = tuple(
             (
                 str(template.platform).strip().lower(),
@@ -187,6 +272,8 @@ class RegenerateReelUseCase:
             "platforms": list(platforms),
             "approval_required": False,
             "social_templates": list(social_templates),
+            "scheduled_at": scheduled_at_iso,
+            "render_template_id": render_template_id or "classic",
         }
         provider_secret_bundle = json.dumps(
             {"access_token": access_token, "provider": "gohighlevel"},
@@ -248,6 +335,7 @@ class RegenerateReelUseCase:
             reel=reel_summary,
             event_id=event_id,
             job_id=job_id,
+            scheduled_at=scheduled_at_iso,
         )
 
     def _load_reel_summary(

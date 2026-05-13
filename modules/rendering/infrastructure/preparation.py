@@ -16,7 +16,11 @@ from pathlib import Path
 
 from shared.errors import PropertyReelError
 from modules.rendering.infrastructure.formatting import (
+    apply_alpha_to_hex,
     build_fit_inside_rgba_filter,
+    build_status_ribbon_text,
+    escape_drawtext_text,
+    escape_filter_path,
     resolve_agent_image_size,
     resolve_ber_icon_size,
 )
@@ -33,6 +37,7 @@ from modules.rendering.infrastructure.runtime import (
     resolve_background_audio_paths,
     resolve_ber_icon_path,
     resolve_ffmpeg_binary,
+    resolve_font_path,
     select_reel_slides,
     should_reserve_agency_logo_space,
 )
@@ -48,6 +53,7 @@ def prepare_reel_render_assets(
     *,
     template: PropertyReelTemplate | None = None,
     working_dir: str | Path,
+    layout_variant: str = "classic",
 ) -> PreparedReelAssets:
     workspace_dir = Path(base_dir).expanduser().resolve()
     settings = template or PropertyReelTemplate()
@@ -125,6 +131,7 @@ def prepare_reel_render_assets(
         input_path=agent_source_path,
         output_path=prepared_agent_path,
         settings=settings,
+        layout_variant=layout_variant,
         property_data=property_data,
     )
 
@@ -159,6 +166,7 @@ def prepare_reel_render_assets(
             has_ber_badge=prepared_ber_icon_path is not None,
             has_agency_logo=reserve_agency_logo_space,
             cover_caption=None,
+            layout_variant=layout_variant,
         )
         if (
             cover_logo_path is not None
@@ -181,6 +189,29 @@ def prepare_reel_render_assets(
         shuffle_candidates=True,
     )
 
+    vertical_banner_path: Path | None = None
+    vertical_banner_x: int | None = None
+    vertical_banner_y: int | None = None
+    if layout_variant == "side_banner":
+        banner_layout = _resolve_vertical_banner_layout(settings)
+        banner_text = build_status_ribbon_text(property_data)
+        if banner_text and banner_layout is not None:
+            vertical_banner_path = overlays_dir / "vertical_status_banner.png"
+            _render_vertical_status_banner(
+                ffmpeg_binary=ffmpeg_binary,
+                output_path=vertical_banner_path,
+                width=banner_layout["width"],
+                height=banner_layout["height"],
+                notch_height=banner_layout["notch_height"],
+                text=banner_text,
+                background_hex=property_data.accent_background_color,
+                text_hex=property_data.accent_text_color,
+                font_path=resolve_font_path(settings.bold_font_path),
+                property_data=property_data,
+            )
+            vertical_banner_x = banner_layout["x"]
+            vertical_banner_y = banner_layout["y"]
+
     return PreparedReelAssets(
         working_dir=prepared_root,
         slides=tuple(prepared_slides),
@@ -191,7 +222,180 @@ def prepare_reel_render_assets(
         background_audio_path=background_audio_candidates[0],
         background_audio_candidates=background_audio_candidates,
         reserve_agency_logo_space=reserve_agency_logo_space,
+        vertical_banner_path=vertical_banner_path,
+        vertical_banner_x=vertical_banner_x,
+        vertical_banner_y=vertical_banner_y,
     )
+
+
+_VERTICAL_BANNER_DEFAULT_BACKGROUND = "#0F172A"
+_VERTICAL_BANNER_DEFAULT_TEXT = "#FFFFFF"
+
+
+def _resolve_vertical_banner_layout(
+    settings: PropertyReelTemplate,
+) -> dict[str, int] | None:
+    """Compute width/height/x/y for the rotated status banner.
+
+    The banner follows the reference template: a wide vertical ribbon
+    dropping from the top edge near the right side, with a triangular
+    point at the bottom. ``height`` includes the transparent notch area.
+    Returns ``None`` when the frame is too small to fit a meaningful
+    banner so the renderer can skip the asset.
+    """
+    banner_width = max(96, round(settings.width * 0.122))
+    notch_height = max(28, round(settings.height * 0.025))
+    body_height = max(360, round(settings.height * 0.281))
+    banner_height = body_height + notch_height
+    if banner_width >= settings.width or banner_height >= settings.height:
+        return None
+    return {
+        "width": banner_width,
+        "height": banner_height,
+        "notch_height": notch_height,
+        "x": min(
+            settings.width - banner_width,
+            max(0, round(settings.width * 0.778)),
+        ),
+        "y": 0,
+    }
+
+
+def _render_vertical_status_banner(
+    *,
+    ffmpeg_binary: str,
+    output_path: Path,
+    width: int,
+    height: int,
+    notch_height: int,
+    text: str,
+    background_hex: str | None,
+    text_hex: str | None,
+    font_path: Path,
+    property_data: PropertyRenderData,
+) -> None:
+    """Render the rotated status banner as a PNG via ffmpeg.
+
+    Creates a horizontal strip (``height x width``) filled with the
+    accent background color, draws the status text centered inside the
+    rectangular body, masks a triangular notch into the future bottom
+    edge, and rotates the image 90° clockwise with ``transpose=1`` so
+    the final asset is ``width x height`` with the text reading like
+    the reference vertical ribbon.
+
+    Falls back to the brand-style default colors (dark navy background,
+    white text) when ``property_data`` does not provide accent colors
+    and no fallback was injected upstream.
+    """
+    background_drawbox = apply_alpha_to_hex(background_hex, alpha=0.85) or apply_alpha_to_hex(
+        _VERTICAL_BANNER_DEFAULT_BACKGROUND, alpha=0.85
+    )
+    text_color = _normalize_drawtext_color(text_hex) or "white"
+    font_path_escaped = escape_filter_path(font_path)
+    horizontal_width = max(2, height)
+    horizontal_height = max(2, width)
+    normalized_notch_height = max(0, min(notch_height, height - 2))
+    body_width = max(2, horizontal_width - normalized_notch_height)
+    center_y = (horizontal_height - 1) / 2
+    half_height = horizontal_height / 2
+    font_size = max(22, round(horizontal_height * 0.58))
+    text_down_shift = max(10, round(width * 0.18))
+    escaped_text = escape_drawtext_text(text)
+    if normalized_notch_height > 0:
+        alpha_mask = (
+            "geq="
+            "r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+            "a='if(lte(X\\,"
+            f"{body_width})+lte(abs(Y-{center_y:.1f})\\,"
+            f"{half_height:.1f}*(1-(X-{body_width})/{normalized_notch_height}))"
+            "\\,255\\,0)'"
+        )
+    else:
+        alpha_mask = "null"
+    horizontal_filter = (
+        "format=rgba,"
+        f"drawbox=x=0:y=0:w={horizontal_width}:h={horizontal_height}:"
+        f"color={background_drawbox}:t=fill,"
+        f"drawtext=fontfile='{font_path_escaped}':text='{escaped_text}':"
+        f"fontcolor={text_color}:fontsize={font_size}:"
+        f"x=({body_width}-text_w)/2+{text_down_shift}:y=(h-text_h)/2:"
+        "fix_bounds=1,"
+        f"{alpha_mask},"
+        "transpose=1,format=rgba"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists() and output_path.stat().st_size > 0:
+        return
+    command = [
+        ffmpeg_binary,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black@0.0:s={horizontal_width}x{horizontal_height}:d=1",
+        "-vf",
+        horizontal_filter,
+        "-frames:v",
+        "1",
+        "-c:v",
+        _PNG_IMAGE_CODEC,
+        str(output_path),
+    ]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise PropertyReelError(
+            f"ffmpeg failed while preparing the side_banner status overlay.\n{stderr}",
+            stage="prepare",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(output_path),
+                "ffmpeg_binary": ffmpeg_binary,
+            },
+            hint=(
+                "Verify ffmpeg is available and the bold reel font is readable on the deployed host."
+            ),
+        )
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise PropertyReelError(
+            "The side_banner status overlay was not written to disk.",
+            stage="prepare",
+            context={
+                "site_id": property_data.site_id,
+                "property_id": property_data.property_id,
+                "output_path": str(output_path),
+            },
+            hint=(
+                "Check ffmpeg permissions on the working directory and the reel font path."
+            ),
+        )
+
+
+def _normalize_drawtext_color(value: str | None) -> str | None:
+    """Convert a HEX color into ffmpeg ``drawtext`` notation.
+
+    ``drawtext`` accepts ``0xRRGGBB`` (no alpha) or named colors. Empty
+    inputs and unrecognized formats return ``None`` so the caller can
+    fall back to a default.
+    """
+    if value is None:
+        return None
+    cleaned = value.strip().lstrip("#")
+    if not cleaned:
+        return None
+    if len(cleaned) == 3 and all(ch in "0123456789abcdefABCDEF" for ch in cleaned):
+        cleaned = "".join(ch * 2 for ch in cleaned)
+    if len(cleaned) != 6 or any(
+        ch not in "0123456789abcdefABCDEF" for ch in cleaned
+    ):
+        return None
+    return f"0x{cleaned.lower()}"
 
 
 def _normalize_slide_image(
@@ -341,6 +545,7 @@ def _normalize_agent_image(
     input_path: Path,
     output_path: Path,
     settings: PropertyReelTemplate,
+    layout_variant: str = "classic",
     property_data: PropertyRenderData,
 ) -> None:
     agent_image_size = resolve_agent_image_size(settings)
@@ -348,6 +553,8 @@ def _normalize_agent_image(
         agent_image_size,
         agent_image_size,
         include_setsar=True,
+        fill=layout_variant == "side_banner",
+        circular_mask=layout_variant == "side_banner",
     )
     _render_single_frame(
         ffmpeg_binary=ffmpeg_binary,

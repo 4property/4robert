@@ -135,6 +135,21 @@ class StubMusic:
         return self.tracks.pop(music_id, None) is not None
 
 
+class StubRenderTemplates:
+    def __init__(self, *, templates: dict[str, Any] | None = None) -> None:
+        self.templates: dict[str, Any] = dict(templates or {})
+        self.list_calls = 0
+        self.get_calls: list[str] = []
+
+    def get(self, template_id: str) -> Any:
+        self.get_calls.append(template_id)
+        return self.templates.get(template_id)
+
+    def list_all(self) -> tuple:
+        self.list_calls += 1
+        return tuple(self.templates.values())
+
+
 def build_uow(
     *,
     agency_present: bool = True,
@@ -143,6 +158,7 @@ def build_uow(
     automation: StubAutomation | None = None,
     social_templates: StubSocialTemplates | None = None,
     music: StubMusic | None = None,
+    render_templates: StubRenderTemplates | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         tenancy=SimpleNamespace(agencies=StubAgencies(present=agency_present)),
@@ -152,6 +168,7 @@ def build_uow(
             automation=automation or StubAutomation(),
             social_templates=social_templates or StubSocialTemplates(),
             music=music or StubMusic(),
+            render_templates=render_templates or StubRenderTemplates(),
         ),
     )
 
@@ -162,6 +179,7 @@ __all__ = [
     "StubBrand",
     "StubDefaults",
     "StubMusic",
+    "StubRenderTemplates",
     "StubSocialTemplates",
     "build_uow",
 ]

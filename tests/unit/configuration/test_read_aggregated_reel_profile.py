@@ -59,6 +59,9 @@ def test_read_aggregated_reel_profile_composes_legacy_shape() -> None:
         publish_window_end="18:00",
         publish_days=("mon",),
         trigger_on_status=("for_sale",),
+        hold_window_seconds=0,
+        quiet_hours_enabled=False,
+        skip_weekends=False,
         created_at="2026-01-05T00:00:00Z",
         updated_at="2026-01-06T00:00:00Z",
     )
