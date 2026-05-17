@@ -28,6 +28,7 @@ class UpdateReelDefaultsInput:
     caption_template: str | None = None
     render_template_id: str | None = None
     settings: Mapping[str, Any] | None = field(default=None)
+    outro_enabled: bool | None = None
 
 
 class UpdateReelDefaultsUseCase:
@@ -75,6 +76,7 @@ class UpdateReelDefaultsUseCase:
             caption_template=data.caption_template,
             render_template_id=data.render_template_id,
             settings=merged_settings,
+            outro_enabled=data.outro_enabled,
         )
 
 

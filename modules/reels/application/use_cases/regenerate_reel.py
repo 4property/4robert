@@ -12,6 +12,20 @@ Prerequisites missing → return a result flagged `publish_enqueued=False`
 with `reason='PUBLISH_PREREQUISITES_MISSING'`. The transport layer
 preserves the legacy contract and returns 200 in that case so the
 frontend can render a consistent state.
+
+Feature 40: ``mode`` parameter selects between the two callers:
+
+* ``'approve_and_regenerate'`` (default) — historical behavior. Used by
+  ``POST .../approve``: stamps ``workflow_state='approved'`` and
+  ``publish_status='pending_publish'`` and replays an active job with
+  ``idempotent_replay=True`` so a double-click cannot enqueue twice.
+* ``'manual_only'`` — used by ``POST .../regenerate`` (feature 40). Does
+  **not** mutate ``workflow_state`` / ``publish_status``. Hard-fails
+  with :class:`RegeneratePublishedForbidden` when the reel is already
+  ``publish_status='published'`` and with :class:`RegenerateAlreadyInFlight`
+  when a ``reel_publish`` job is still ``queued`` / ``processing``. An
+  optional ``manual_reason`` (audit string) is persisted on
+  ``jobs.publish_context_json``.
 """
 
 from __future__ import annotations
@@ -20,7 +34,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from modules.configuration.application.use_cases.compute_next_publish_slot import (
@@ -32,9 +46,80 @@ from modules.reels.application.use_cases._admin_support import (
     reel_not_found_error,
 )
 from shared.db import DatabaseUnitOfWork
+from shared.errors import ApplicationError
 
 if TYPE_CHECKING:
     from modules.reels.infrastructure.reel_query import AgencyReelSummary
+
+
+RegenerateMode = Literal["approve_and_regenerate", "manual_only"]
+
+
+class RegeneratePublishedForbidden(ApplicationError):
+    """Manual re-render rejected because the reel has been published.
+
+    Mapped to **HTTP 409 REGENERATE_PUBLISHED_FORBIDDEN** by the manual
+    regenerate router (feature 40). The approve handler never raises
+    this — its contract is to keep re-publishing approved reels.
+    """
+
+    def __init__(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        publish_status: str,
+    ) -> None:
+        self.code = "REGENERATE_PUBLISHED_FORBIDDEN"
+        super().__init__(
+            "Cannot re-render a reel that has already been published.",
+            context={
+                "agency_id": agency_id,
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+                "publish_status": publish_status,
+            },
+            hint=(
+                "Once a reel reaches ``publish_status='published'`` it "
+                "cannot be re-rendered through the manual regenerate "
+                "endpoint."
+            ),
+        )
+
+
+class RegenerateAlreadyInFlight(ApplicationError):
+    """Manual re-render rejected because another render is already running.
+
+    Mapped to **HTTP 409 REGENERATE_ALREADY_IN_FLIGHT**. Unlike the
+    approve handler — which replays the existing job for idempotence —
+    the manual regenerate endpoint hard-fails so the editor surfaces a
+    clear "wait" state instead of pretending a new render started.
+    """
+
+    def __init__(
+        self,
+        *,
+        agency_id: str,
+        site_id: str,
+        source_property_id: int,
+        job_id: str,
+    ) -> None:
+        self.code = "REGENERATE_ALREADY_IN_FLIGHT"
+        super().__init__(
+            "A render is already in progress for this reel. Wait for it "
+            "to finish.",
+            context={
+                "agency_id": agency_id,
+                "site_id": site_id,
+                "source_property_id": source_property_id,
+                "job_id": job_id,
+            },
+            hint=(
+                "Wait for the current ``reel_publish`` job to drain "
+                "before requesting another render."
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +132,7 @@ class RegenerateReelResult:
     hint: str | None = None
     idempotent_replay: bool = False
     scheduled_at: str | None = None
+    queued_at: str | None = None
 
 
 _PREREQ_MISSING_HINT = (
@@ -103,6 +189,8 @@ class RegenerateReelUseCase:
         agency_id: str,
         site_id: str,
         source_property_id: int,
+        mode: RegenerateMode = "approve_and_regenerate",
+        manual_reason: str | None = None,
     ) -> RegenerateReelResult:
         if (
             uow.reels is None
@@ -132,20 +220,53 @@ class RegenerateReelUseCase:
 
         ingestion_source_id = existing_state.ingestion_source_id
 
-        uow.reels.states.update_workflow_state(
-            agency_id=existing_state.agency_id or normalized_agency_id,
-            ingestion_source_id=ingestion_source_id,
-            external_source_id=normalized_site_id,
-            source_property_id=normalized_property_id,
-            workflow_state="approved",
-        )
-        uow.reels.states.update_publish_status(
-            agency_id=existing_state.agency_id or normalized_agency_id,
-            ingestion_source_id=ingestion_source_id,
-            external_source_id=normalized_site_id,
-            source_property_id=normalized_property_id,
-            status="pending_publish",
-        )
+        # Feature 40: the manual regenerate endpoint hard-fails on two
+        # conditions BEFORE any state mutation or job enqueue:
+        #
+        # 1. ``publish_status == 'published'`` — the reel has already
+        #    been shipped, refuse to re-render.
+        # 2. There is already a ``reel_publish`` job in ``queued`` /
+        #    ``processing`` for the same property — the editor should
+        #    wait for the running render to drain instead of stacking
+        #    a second one. The approve handler keeps its idempotent
+        #    replay behavior (handled further down) so manual mode is
+        #    the only caller that surfaces this 409.
+        if mode == "manual_only":
+            if (existing_state.publish_status or "").strip().lower() == "published":
+                raise RegeneratePublishedForbidden(
+                    agency_id=normalized_agency_id,
+                    site_id=normalized_site_id,
+                    source_property_id=normalized_property_id,
+                    publish_status=existing_state.publish_status,
+                )
+            existing_active_job = uow.delivery.jobs.find_active_job_for_property(
+                external_source_id=normalized_site_id,
+                property_id=normalized_property_id,
+                kind="reel_publish",
+            )
+            if existing_active_job is not None:
+                raise RegenerateAlreadyInFlight(
+                    agency_id=normalized_agency_id,
+                    site_id=normalized_site_id,
+                    source_property_id=normalized_property_id,
+                    job_id=existing_active_job.job_id,
+                )
+
+        if mode == "approve_and_regenerate":
+            uow.reels.states.update_workflow_state(
+                agency_id=existing_state.agency_id or normalized_agency_id,
+                ingestion_source_id=ingestion_source_id,
+                external_source_id=normalized_site_id,
+                source_property_id=normalized_property_id,
+                workflow_state="approved",
+            )
+            uow.reels.states.update_publish_status(
+                agency_id=existing_state.agency_id or normalized_agency_id,
+                ingestion_source_id=ingestion_source_id,
+                external_source_id=normalized_site_id,
+                source_property_id=normalized_property_id,
+                status="pending_publish",
+            )
 
         raw_payload = uow.catalog.properties.get_raw_payload(
             external_source_id=normalized_site_id,
@@ -274,7 +395,24 @@ class RegenerateReelUseCase:
             "social_templates": list(social_templates),
             "scheduled_at": scheduled_at_iso,
             "render_template_id": render_template_id or "classic",
+            # Feature 25: forward the per-reel music override (if any)
+            # so the approve→re-render path preserves the editor's
+            # choice. ``None`` falls back to the agency pool resolver.
+            "override_music_track_id": (
+                getattr(existing_state, "music_id", None) or None
+            ),
         }
+        if mode == "manual_only":
+            # Feature 40: traceability marker so the audit trail can
+            # distinguish manual re-renders from approve-driven ones,
+            # and the optional ``reason`` string travels with the job
+            # for offline log triage. Both keys are always present in
+            # manual mode so consumers can branch on the discriminator
+            # without worrying about presence vs absence.
+            publish_context["regenerate_mode"] = "manual_only"
+            publish_context["manual_reason"] = (
+                str(manual_reason).strip() if manual_reason else None
+            )
         provider_secret_bundle = json.dumps(
             {"access_token": access_token, "provider": "gohighlevel"},
             ensure_ascii=False,
@@ -336,6 +474,7 @@ class RegenerateReelUseCase:
             event_id=event_id,
             job_id=job_id,
             scheduled_at=scheduled_at_iso,
+            queued_at=now,
         )
 
     def _load_reel_summary(
@@ -364,4 +503,10 @@ class RegenerateReelUseCase:
         )
 
 
-__all__ = ["RegenerateReelResult", "RegenerateReelUseCase"]
+__all__ = [
+    "RegenerateAlreadyInFlight",
+    "RegenerateMode",
+    "RegeneratePublishedForbidden",
+    "RegenerateReelResult",
+    "RegenerateReelUseCase",
+]

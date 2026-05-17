@@ -151,7 +151,9 @@ def test_execute_writes_published_state_revision_and_outbox_completed_on_postgre
     )
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seeded = seed_tenant(
+                database.url, site_id="ckp.ie", workspace_dir=workspace_dir
+            )
             connection_id = seed_provider_connection(
                 database.url,
                 agency_id=seeded.agency_id,

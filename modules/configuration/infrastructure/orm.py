@@ -85,7 +85,8 @@ class AgencyReelDefaultsORM(Base):
         ARRAY(Text),
         nullable=False,
         server_default=text(
-            "ARRAY['tiktok','instagram','linkedin','youtube','facebook','gbp']::text[]"
+            "ARRAY['tiktok','instagram','linkedin','youtube','facebook','gbp',"
+            "'pinterest']::text[]"
         ),
     )
     duration_seconds: Mapped[int] = mapped_column(

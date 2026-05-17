@@ -42,6 +42,130 @@ def _mapping_to_jsonb(value: Mapping[str, Any] | None) -> str:
     return json.dumps(dict(value or {}), separators=(",", ":"))
 
 
+def _override_to_jsonb_param(value: Mapping[str, Any] | None) -> str | None:
+    """Serialize the optional ``descriptions_override`` to a JSONB-ready
+    bind parameter.
+
+    Returns ``None`` (mapped to SQL ``NULL``) when the value is ``None``
+    or an empty mapping. Otherwise returns a compact JSON string. The
+    SQL caster uses ``CAST(:descriptions_override AS jsonb)`` which
+    treats a ``NULL`` parameter as a literal SQL ``NULL`` rather than
+    the string ``"null"`` — that matches the column's ``nullable=True``
+    contract and lets ``None`` mean "no override" everywhere.
+    """
+    if value is None:
+        return None
+    coerced = dict(value)
+    if not coerced:
+        return None
+    return json.dumps(coerced, separators=(",", ":"))
+
+
+def _jsonb_to_optional_mapping(raw: Any) -> dict[str, Any] | None:
+    """Decode the optional ``descriptions_override`` JSONB column.
+
+    Mirrors :func:`_jsonb_to_mapping` but returns ``None`` for SQL NULL /
+    empty payloads so the domain dataclass can preserve the
+    "no override" sentinel.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return dict(raw) if raw else None
+    if isinstance(raw, (bytes, bytearray)):
+        text_value = bytes(raw).decode("utf-8")
+        return _jsonb_to_optional_mapping(text_value)
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped:
+            return None
+        parsed = json.loads(stripped)
+        if not parsed:
+            return None
+        return dict(parsed)
+    parsed = dict(raw)
+    return parsed if parsed else None
+
+
+def _jsonb_to_optional_list(raw: Any) -> list[dict[str, Any]] | None:
+    """Decode the optional ``photos_override`` JSONB column (feature 35).
+
+    Returns ``None`` for SQL NULL, the empty list ``[]`` or any payload
+    that is not a non-empty list. Otherwise returns a fresh list of
+    dicts with shallow-coerced entries so downstream code can safely
+    mutate it without leaking back into the SQLAlchemy row state.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, bytearray)):
+        text_value = bytes(raw).decode("utf-8")
+        return _jsonb_to_optional_list(text_value)
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped:
+            return None
+        parsed = json.loads(stripped)
+        return _jsonb_to_optional_list(parsed)
+    if isinstance(raw, list):
+        coerced: list[dict[str, Any]] = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                coerced.append(dict(entry))
+        return coerced or None
+    return None
+
+
+def _photos_override_to_jsonb_param(
+    value: list[dict[str, Any]] | None,
+) -> str | None:
+    """Serialize the optional ``photos_override`` to a JSONB bind param.
+
+    Returns ``None`` (mapped to SQL ``NULL``) when the override is
+    cleared (``None`` or empty list). Otherwise returns the compact JSON
+    text. The SQL caster uses ``CAST(:photos_override AS jsonb)`` which
+    treats a ``NULL`` parameter as a literal SQL ``NULL`` rather than
+    the string ``"null"`` — matching the column's ``nullable=True``
+    contract.
+    """
+    if not value:
+        return None
+    return json.dumps(list(value), separators=(",", ":"))
+
+
+def _subtitles_override_to_jsonb_param(
+    value: list[dict[str, Any]] | None,
+) -> str | None:
+    """Serialize the optional ``subtitles_override`` to a JSONB bind param.
+
+    Feature 36: the column stores a list of cue dicts
+    (``{"index", "text", "in_seconds", "out_seconds"}``). Returns
+    ``None`` (mapped to SQL ``NULL``) when the override is cleared
+    (``None`` or empty list); otherwise returns the compact JSON text.
+    Same shape as :func:`_photos_override_to_jsonb_param` so the
+    persistence contract stays homogeneous across overrides.
+    """
+    if not value:
+        return None
+    return json.dumps(list(value), separators=(",", ":"))
+
+
+def _manifest_override_to_jsonb_param(
+    value: list[dict[str, Any]] | None,
+) -> str | None:
+    """Serialize the optional ``manifest_override`` to a JSONB bind param.
+
+    Feature 37: the column stores a list of slide dicts
+    (``{"slide_id", "position", "duration_seconds", "kind", ...}``).
+    Returns ``None`` (mapped to SQL ``NULL``) when the override is
+    cleared (``None`` or empty list); otherwise returns the compact
+    JSON text. Same shape as the other override params so the
+    persistence contract stays homogeneous.
+    """
+    if not value:
+        return None
+    return json.dumps(list(value), separators=(",", ":"))
+
+
 def _row_to_reel_state(row) -> ReelState:
     return ReelState(
         agency_id=str(row.agency_id or ""),
@@ -70,6 +194,23 @@ def _row_to_reel_state(row) -> ReelState:
         ),
         created_at=_isoformat(row.created_at) or "",
         updated_at=_isoformat(row.updated_at) or "",
+        descriptions_override=_jsonb_to_optional_mapping(
+            getattr(row, "descriptions_override", None)
+        ),
+        music_id=(
+            str(row.music_id)
+            if getattr(row, "music_id", None)
+            else None
+        ),
+        photos_override=_jsonb_to_optional_list(
+            getattr(row, "photos_override", None)
+        ),
+        subtitles_override=_jsonb_to_optional_list(
+            getattr(row, "subtitles_override", None)
+        ),
+        manifest_override=_jsonb_to_optional_list(
+            getattr(row, "manifest_override", None)
+        ),
     )
 
 
@@ -83,7 +224,10 @@ def _relative_to_base(path: Path, base_dir: Path) -> str:
 _REEL_COLUMNS = (
     "agency_id, ingestion_source_id, external_source_id, source_property_id, "
     "content_fingerprint, content_snapshot, publish_target_fingerprint, "
-    "publish_target_snapshot, render_template_id, selected_image_folder, artifact_kind, "
+    "publish_target_snapshot, descriptions_override, music_id, photos_override, "
+    "subtitles_override, manifest_override, "
+    "render_template_id, "
+    "selected_image_folder, artifact_kind, "
     "local_artifact_path, local_metadata_path, render_profile, "
     "local_manifest_path, local_video_path, render_status, publish_status, "
     "workflow_state, publish_details, current_revision_id, "
@@ -126,7 +270,12 @@ class ReelStateRepository(ModuleRepository):
                 ":agency_id, :ingestion_source_id, :external_source_id, "
                 ":source_property_id, :content_fingerprint, "
                 "CAST(:content_snapshot AS jsonb), :publish_target_fingerprint, "
-                "CAST(:publish_target_snapshot AS jsonb), :render_template_id, "
+                "CAST(:publish_target_snapshot AS jsonb), "
+                "CAST(:descriptions_override AS jsonb), :music_id, "
+                "CAST(:photos_override AS jsonb), "
+                "CAST(:subtitles_override AS jsonb), "
+                "CAST(:manifest_override AS jsonb), "
+                ":render_template_id, "
                 ":selected_image_folder, :artifact_kind, :local_artifact_path, "
                 ":local_metadata_path, "
                 ":render_profile, :local_manifest_path, :local_video_path, "
@@ -140,6 +289,11 @@ class ReelStateRepository(ModuleRepository):
                 "content_snapshot = EXCLUDED.content_snapshot, "
                 "publish_target_fingerprint = EXCLUDED.publish_target_fingerprint, "
                 "publish_target_snapshot = EXCLUDED.publish_target_snapshot, "
+                "descriptions_override = EXCLUDED.descriptions_override, "
+                "music_id = EXCLUDED.music_id, "
+                "photos_override = EXCLUDED.photos_override, "
+                "subtitles_override = EXCLUDED.subtitles_override, "
+                "manifest_override = EXCLUDED.manifest_override, "
                 "render_template_id = EXCLUDED.render_template_id, "
                 "selected_image_folder = EXCLUDED.selected_image_folder, "
                 "artifact_kind = EXCLUDED.artifact_kind, "
@@ -166,6 +320,22 @@ class ReelStateRepository(ModuleRepository):
                 "content_snapshot": _mapping_to_jsonb(state.content_snapshot),
                 "publish_target_fingerprint": state.publish_target_fingerprint,
                 "publish_target_snapshot": _mapping_to_jsonb(state.publish_target_snapshot),
+                "descriptions_override": _override_to_jsonb_param(
+                    state.descriptions_override
+                ),
+                # Feature 25: empty string is treated as ``None`` so the
+                # repository always writes SQL NULL when the override is
+                # cleared (matches the FK ``ON DELETE SET NULL`` contract).
+                "music_id": (state.music_id or None),
+                "photos_override": _photos_override_to_jsonb_param(
+                    state.photos_override
+                ),
+                "subtitles_override": _subtitles_override_to_jsonb_param(
+                    state.subtitles_override
+                ),
+                "manifest_override": _manifest_override_to_jsonb_param(
+                    state.manifest_override
+                ),
                 "render_template_id": state.render_template_id or "classic",
                 "selected_image_folder": state.selected_image_folder,
                 "artifact_kind": state.artifact_kind,
@@ -233,6 +403,11 @@ class ReelStateRepository(ModuleRepository):
                 ),
                 created_at=existing.created_at,
                 updated_at=existing.updated_at,
+                descriptions_override=existing.descriptions_override,
+                music_id=existing.music_id,
+                photos_override=existing.photos_override,
+                subtitles_override=existing.subtitles_override,
+                manifest_override=existing.manifest_override,
             )
         )
 
@@ -283,6 +458,11 @@ class ReelStateRepository(ModuleRepository):
                 last_published_provider_external_id=existing.last_published_provider_external_id,
                 created_at=existing.created_at,
                 updated_at=existing.updated_at,
+                descriptions_override=existing.descriptions_override,
+                music_id=existing.music_id,
+                photos_override=existing.photos_override,
+                subtitles_override=existing.subtitles_override,
+                manifest_override=existing.manifest_override,
             )
         )
 
@@ -354,6 +534,11 @@ class ReelStateRepository(ModuleRepository):
                 last_published_provider_external_id=existing.last_published_provider_external_id,
                 created_at=existing.created_at,
                 updated_at=existing.updated_at,
+                descriptions_override=existing.descriptions_override,
+                music_id=existing.music_id,
+                photos_override=existing.photos_override,
+                subtitles_override=existing.subtitles_override,
+                manifest_override=existing.manifest_override,
             )
         )
 

@@ -1,4 +1,4 @@
-# Arquitectura — Qué significa "hacer un buen trabajo" (`4reels back/`)
+# Arquitectura — Qué significa "hacer un buen trabajo" (`/opt/projects/4Reels-Backend`)
 
 > Este documento es un **resumen operativo** para el agente. La fuente de
 > verdad es [`ARCHITECTURE.md`](../ARCHITECTURE.md) en la raíz del proyecto.
@@ -84,6 +84,7 @@ WordPress / GoHighLevel
 | `publishing`      | `provider_connections(provider)` + adapters (GoHighLevel, …).   |
 | `rendering`       | ffmpeg + layout + selección de fotos.                           |
 | `delivery`        | jobs + outbox + dispatcher contract.                            |
+| `notifications`   | email delivery (audit table, dispatcher, worker handler). Subscribes to `delivery.outbox` events of type `review_requested` (feature 27). |
 
 ## Qué NO hacer
 
@@ -104,9 +105,15 @@ WordPress / GoHighLevel
 
 ## Estado del refactor
 
-Phase 1 ✅ — schema + skeleton + API/worker split + compat shims.
+Phase 1 ✅ — schema + skeleton + API/worker split + compat shims (2026-04-30).
 Phase 2 ✅ — split de god-files; eliminación física de `services/`,
-`application/`, `repositories/`, `core/` y `domain/` (cierre 2026-05-06).
-Phase 3 🚧 — rename de URLs a `/v1/*` + lockstep con el frontend.
+`application/`, `repositories/`, `core/` y `domain/` (2026-05-06).
+Phase 3 ✅ — rename de URLs a `/v1/*` + lockstep con el frontend (2026-05-06).
+Phase 4 ✅ — hardening del contrato live front↔back: JWT agency-scoped y
+payloads Pydantic estrictos (2026-05-07).
 
-Ver [`REFACTOR_STATUS.md`](../REFACTOR_STATUS.md) para el detalle vivo.
+**Sin fase activa.** El repo está en modo mantenimiento: solo hotfixes o
+features explícitamente añadidas y aprobadas. Backlog candidato a Phase 5
+en [`phase_4_operating_rules.md`](phase_4_operating_rules.md) §3.
+
+Ver [`REFACTOR_STATUS.md`](../REFACTOR_STATUS.md) para el detalle histórico.

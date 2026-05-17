@@ -1,7 +1,7 @@
 {
   "project": "4reels-back",
-  "description": "Backend FastAPI multi-tenant. Phase 4 — hardening del contrato live front↔back: autenticación real para /v1/admin/* y payloads estrictos compatibles con Pydantic. Phase 3 cerrada el 2026-05-06; el snapshot histórico vive en progress/history.md y los artefactos de contrato en docs/http_surface.md + docs/openapi.json.",
-  "phase": "Phase 4 — frontend/backend live contract hardening",
+  "description": "Backend FastAPI multi-tenant en /opt/projects/4Reels-Backend. Fases 1-4 cerradas (Phase 1 2026-04-30, Phase 2 2026-05-06, Phase 3 2026-05-06, Phase 4 2026-05-07). Sin fase activa por defecto — el repo está en modo mantenimiento: solo hotfixes o features explícitamente añadidas y aprobadas por el usuario. Backlog candidato a una eventual Phase 5 documentado en docs/phase_4_operating_rules.md §3 (NO arrancar sin aprobación). El snapshot histórico vive en progress/history.md y los artefactos de contrato en docs/http_surface.md + docs/openapi.json.",
+  "phase": "Mantenimiento — Phases 1-4 done; sin fase activa",
   "rules": {
     "one_feature_at_a_time": true,
     "require_tests_to_close": true,
@@ -23,11 +23,10 @@
     "legacy_dirs_frozen": []
   },
   "ordering_notes": [
-    "Modo serial estricto: una feature a la vez. Las 4 features son ortogonales (cada una toca un router/módulo distinto) pero se ejecutan en orden de id para mantener el repo trivialmente verificable tras cada cierre.",
-    "Phase 3 es cross-repo: las features 2 y 3 también modifican `4reels front/`. La feature 4 lee el front desde el back (test de contrato). Coordinar con `4reels front/feature_list.json` antes de cerrar — el implementer debe abrir la entrada equivalente allí.",
-    "Sin commits intermedios (regla heredada de Phase 2). Cierre de feature = `pytest -q` verde en back + suites del front verdes + `python -m apps.api --check` + `python -m apps.worker --check` exit 0 + reviewer APPROVED.",
-    "Tras cerrar las 4 features, Phase 3 se da por terminada. El backlog candidato para Phase 4 (multi-provider real, multi-source de ingestión, dashboard de jobs, hardening de observabilidad) vive en REFACTOR_STATUS.md §Phase 4 backlog candidates y NO debe arrancarse hasta que el usuario apruebe alcance.",
-    "Reglas operativas detalladas en `docs/phase_3_operating_rules.md`. Si chocan con este JSON, gana el doc (los textos del JSON se redactaron antes de los spikes por feature)."
+    "HISTÓRICO: las 5 features registradas en este archivo corresponden a Phase 3 (ids 1-4) y Phase 4 (id 5). Todas están en estado `done` y NO se reabren. Se mantienen como contrato de aceptación verificable.",
+    "Cross-repo: el repo hermano vive en `/opt/projects/4Reels-Frontend`. Cualquier feature futura que toque ambos lados se abre con el mismo id en los dos `feature_list.json` (modelo validado en Phase 4).",
+    "Reglas históricas: Phase 3 → `docs/phase_3_operating_rules.md`; Phase 4 → `docs/phase_4_operating_rules.md`. No aplican como override para trabajo nuevo, son post-mortem.",
+    "Modo de trabajo actual = mantenimiento. Hay dos vías: (a) feature aprobada por el usuario y añadida con `status: pending` en este archivo, sigue el flujo leader→implementer→reviewer normal; (b) hotfix urgente declarado por el usuario con la palabra `hotfix`, que permite saltarse el protocolo (ver `CLAUDE.md` §Hotfix)."
   ],
   "features": [
     {
@@ -462,6 +461,900 @@
         ".venv/bin/python -m pytest tests/unit/catalog/ tests/unit/rendering/ tests/integration/configuration/test_render_templates_router.py tests/integration/rendering/ -q",
         "Alembic cycle: alembic upgrade head; alembic downgrade -1; alembic upgrade head",
         "Manual: trigger webhook WordPress con accent colors en una agencia con render_template_id='side_banner', inspeccionar el MP4 y el poster JPG generados; verificar que el banner vertical aparece, paneles tienen el color rebajado, foto a sangre"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 17,
+      "name": "side_banner_ribbon_polish",
+      "title": "Polish del banner vertical: cinta más larga, texto más pequeño, BER a la izquierda, fondo #FECF4D hardcoded",
+      "description": "Iteración visual sobre el render template side_banner (feature 16) para alinearlo con example-new-template.png. (1) La cinta vertical rotada termina más abajo (~35% del alto del frame). (2) El texto rotado usa una fuente más pequeña para que 'SALE AGREED' no se desborde. (3) El BER badge se desplaza hacia la izquierda (x = width*0.36). (4) El fondo de la cinta queda hardcoded a #FECF4D opaco (alpha 1.0); accent_background_color sigue alimentando los paneles superior/inferior (reel y poster), solo el asset rotado ignora el valor dinámico. Volveremos a hacerlo dinámico en una feature futura.",
+      "module": "modules/rendering/",
+      "schema": "No",
+      "scope": {
+        "back": [
+          "modules/rendering/infrastructure/preparation.py:_resolve_vertical_banner_layout — subir body_height a max(420, round(settings.height * 0.325)). El notch_height actual (~2.5%) suma para llegar a ~35% del alto del frame.",
+          "modules/rendering/infrastructure/preparation.py:_render_vertical_status_banner — reducir font_size de max(22, round(horizontal_height * 0.58)) a max(20, round(horizontal_height * 0.40)). Cambiar la alpha del background a 1.0 (alpha=1.0 en apply_alpha_to_hex). Mantener text_hex dinámico (no se hardcodea).",
+          "modules/rendering/infrastructure/preparation.py — definir constante de módulo _SIDE_BANNER_RIBBON_BACKGROUND = '#FECF4D' y usarla en la llamada a _render_vertical_status_banner en lugar de property_data.accent_background_color.",
+          "modules/rendering/infrastructure/layout/panels.py — cambiar side_ber_x = round(width * 0.52) por round(width * 0.36).",
+          "tests/unit/rendering/test_layout_composition_side_banner.py — actualizar la aserción del BER (round(1080 * 0.36) en lugar de 0.52).",
+          "Añadir o ampliar un test unit que verifique que la llamada a _render_vertical_status_banner recibe background_hex='#FECF4D' independientemente del accent_background_color de la propiedad. Puede mockear subprocess.run y capturar el filter graph para asegurar drawbox con #FECF4D y alpha 1.0."
+        ],
+        "front": [],
+        "external": []
+      },
+      "acceptance": [
+        "_resolve_vertical_banner_layout devuelve body_height >= round(height*0.325) para un frame 1080x1920",
+        "El filter graph que entrega _render_vertical_status_banner incluye drawbox con color #fecf4d y alpha 1.0 (0xfecf4d sin transparencia) independientemente del accent_background_color de la propiedad",
+        "El font_size del drawtext rotado se calcula con coeficiente ~0.40 sobre horizontal_height, evitando el desborde de 'SALE AGREED'",
+        "overlay.ber_badge_box.x == round(width*0.36) cuando layout_variant='side_banner' y has_ber_badge=True",
+        "El variant 'classic' no cambia (regresión cero): tests existentes verdes",
+        "Tests del bottom panel del poster y del reel siguen recibiendo property_data.accent_background_color dinámico (solo la cinta vertical se hardcodea)",
+        "pytest -q termina verde",
+        "python -m apps.api --check y python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/rendering/ tests/integration/rendering/ -q"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 19,
+      "name": "include_pinterest_in_reel_defaults_platforms",
+      "title": "Incluir 'pinterest' en el array por defecto de agency_reel_defaults.platforms",
+      "description": "La feature 7 backend incorporó pinterest como destino social conectable y publicable, y el frontend lo expone en /social como plataforma elegible para plantillas. Sin embargo, el default de agency_reel_defaults.platforms en alembic/versions/20260501_0001_initial_schema.py:148-150 sigue siendo ['tiktok','instagram','linkedin','youtube','facebook','gbp']. Resultado: una agencia recién creada configura plantilla de Pinterest en /social pero nunca recibe captions Pinterest porque su row de reel_defaults no incluye 'pinterest' en platforms. Esta feature: (1) añade 'pinterest' al default array de la columna platforms para agencies nuevas (nueva migración alembic; no se altera el default in-place de la migración inicial, se hace ALTER COLUMN SET DEFAULT en una migración nueva); (2) ofrece data migration opcional que añade 'pinterest' a agencies existentes que NO lo tengan en platforms; (3) actualiza docs/API.md §3 para mencionar pinterest entre las plataformas activadas por defecto.",
+      "module": "modules/configuration/, alembic/, docs/",
+      "scope": {
+        "back": [
+          "Nueva migración alembic en alembic/versions/ que ejecute: ALTER TABLE agency_reel_defaults ALTER COLUMN platforms SET DEFAULT '[\"tiktok\",\"instagram\",\"linkedin\",\"youtube\",\"facebook\",\"gbp\",\"pinterest\"]'::jsonb (o JSON según el dialect actual)",
+          "Data migration opcional dentro de la misma revision: UPDATE agency_reel_defaults SET platforms = platforms || '[\"pinterest\"]' WHERE NOT (platforms ? 'pinterest'); — usar JSONB containment correcto según schema",
+          "Actualizar el valor default literal en cualquier seed/factory de tests que cree ReelDefaults para incluir 'pinterest'",
+          "Actualizar docs/API.md §3 con el nuevo default array",
+          "Tests integración: verificar que una agency nueva tras la migración tiene 'pinterest' en platforms"
+        ],
+        "front": [
+          "Sin cambios. El front ya muestra Pinterest en /social y en /defaults (feature 7 frontend done)."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Nueva migración Alembic con revision_id único, downgrade reversible",
+        "Tras alembic upgrade head en BBDD limpia, una row creada vía use case de create_agency tiene 'pinterest' en agency_reel_defaults.platforms",
+        "Para BBDD ya existente con agencies antiguas sin 'pinterest', la data migration las actualiza sin tocar las que ya lo tenían",
+        "alembic downgrade -1 funciona y revierte el default",
+        "docs/API.md §3 lista pinterest como plataforma del default",
+        "pytest -q termina verde, sin regresiones",
+        "python -m apps.api --check y python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head en BBDD de test",
+        ".venv/bin/python -m pytest tests/integration/configuration/ -q"
+      ],
+      "status": "done",
+      "review": "progress/review_19_include_pinterest_in_reel_defaults_platforms.md"
+    },
+    {
+      "id": 20,
+      "name": "extend_social_templates_payload_with_title_and_hashtags",
+      "title": "Aceptar title_template y hashtags[] en el payload de social-templates",
+      "description": "La tabla agency_social_templates ya tiene columnas title_template y hashtags persistidas, y el GET ya las devuelve en items[], pero el PUT SocialTemplatesReplacePayload (modules/configuration/transport/payloads/social_templates.py) solo acepta {templates: {platform: descriptionString}}. El frontend feature 20 va a empezar a mandar el shape rico {templates: {platform: {description_template, title_template, hashtags}}}. Esta feature amplía el payload: aceptar tanto el shape plano (compatibilidad) como el shape rico, validar variables {{...}} también en title_template, y persistir las 3 columnas via SocialTemplatesRepository.replace_all_for_agency().",
+      "module": "modules/configuration/",
+      "scope": {
+        "back": [
+          "Ampliar SocialTemplatesReplacePayload para aceptar union de Dict[str,str] y Dict[str,SocialTemplateRichPayload] (con campos description_template:str, title_template:str|None, hashtags:list[str]|None)",
+          "Validar variables {{...}} también en title_template con la misma regex y lista ALLOWED_TEMPLATE_VARIABLES; añadir 422 SOCIAL_TEMPLATE_UNKNOWN_VARIABLE con field='title_template' si aplica",
+          "Validar hashtags: cada uno match /^#[\\w-]{1,50}$/, máx 30 por plataforma; 422 SOCIAL_TEMPLATE_INVALID_HASHTAG con detalle de cuál falla",
+          "Adaptar el use case ReplaceSocialTemplates y el repository.replace_all_for_agency() para persistir los 3 campos",
+          "El GET sigue devolviendo el shape actual items[{platform, description_template, title_template, hashtags, ...}] y además devuelve templates como dict de objetos (no string) cuando hay title o hashtags; mantener compatibilidad con clientes que esperaban string (decidir: nueva clave templates_rich vs cambio breaking — revisar test_social_templates_router.py para ver lo que asume el front actual)",
+          "El pipeline de publish (content_generator + property_publisher) consume title_template y hashtags si están definidos: concatenar hashtags al final de la description con separador '\\n\\n', y mandar title como campo separado en PublishMediaRequest si la red lo soporta (Pinterest, YouTube)"
+        ],
+        "front": [
+          "Cross-repo: feature 20 del frontend cubre la UI."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "PUT social-templates acepta el shape plano (descripción string) Y el shape rico (objeto con 3 campos) — backward-compatible",
+        "title_template valida variables {{...}} con la misma lista canónica; variable desconocida → 422",
+        "hashtags valida formato y cantidad; inválido → 422 SOCIAL_TEMPLATE_INVALID_HASHTAG",
+        "Repository persiste los 3 campos; GET los devuelve",
+        "PublishMediaRequest.description incluye hashtags al final si están configurados",
+        "PublishMediaRequest gana campo opcional title que se manda a las redes que lo soportan",
+        "Tests integración existentes (9 actuales en test_social_templates_router.py) siguen verdes",
+        "Tests nuevos: PUT shape rico, PUT con title con variable inválida (422), PUT con hashtag inválido (422), GET tras PUT rico devuelve los 3 campos",
+        "pytest -q termina verde (baseline +nuevos)",
+        "python -m apps.api --check y python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_social_templates_router.py tests/unit/configuration/ -q",
+        "Manual: PUT con shape rico, comprobar que el pipeline genera caption con hashtags concatenados"
+      ],
+      "status": "done",
+      "review": "progress/review_20_extend_social_templates_payload_with_title_and_hashtags.md"
+    },
+    {
+      "id": 21,
+      "name": "per_reel_description_override_endpoint",
+      "title": "PATCH /v1/admin/reels/{reel_id}/descriptions: override per-reel del caption antes de aprobar",
+      "description": "Hoy reels.publish_target_snapshot.descriptions_by_platform se calcula al ingestar (template + variables de la property) y es inmutable: si la agencia quiere matizar el caption de UN reel concreto antes de publicar, no puede sin cambiar la template global. Esta feature añade un endpoint PATCH /v1/admin/reels/{reel_id}/descriptions que persiste el override en una nueva clave reels.descriptions_override (JSONB, default null). El worker de publish lee descriptions_override si existe y lo usa en vez del snapshot. La feature respeta el contrato: solo se puede editar mientras publish_status in ('needs-approval','pending_review'); si está aprobado/publicado devuelve 409 RESOURCE_LOCKED.",
+      "module": "modules/reels/, shared/db/, alembic/",
+      "scope": {
+        "back": [
+          "Nueva columna reels.descriptions_override JSONB nullable; migración Alembic ascendente y descendente",
+          "Router PATCH /v1/admin/reels/{reel_id}/descriptions en modules/reels/transport/http/ con payload Pydantic ReelDescriptionsOverridePayload (extra='forbid', descriptions_by_platform: dict[str,str], reuse de validación de variables vacía — el caption final es texto plano renderizado, no requiere validación de variables)",
+          "Use case update_reel_descriptions_override en modules/reels/application/ con validación de estado (solo needs-approval/pending_review) y permission admin_access_policy",
+          "Ampliar el worker publish_reel (modules/reels/application/use_cases/publish_reel.py) para preferir descriptions_override sobre publish_target_snapshot.descriptions_by_platform si está presente y no-null para esa plataforma",
+          "Tests integración: PATCH happy path, 404 reel no existe, 409 si reel ya aprobado/publicado, 422 si platform desconocida (validar contra ReelDefaults.platforms de la agency), publish worker lee override correctamente",
+          "Actualizar docs/API.md y docs/http_surface.md con el endpoint nuevo"
+        ],
+        "front": [
+          "Cross-repo: feature 21 del frontend cubre la UI."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Migración Alembic añade reels.descriptions_override JSONB nullable; downgrade reversible",
+        "PATCH /v1/admin/reels/{reel_id}/descriptions con admin auth persiste el override por plataforma",
+        "PATCH a reel ya aprobado/publicado devuelve 409 RESOURCE_LOCKED",
+        "Worker publish_reel usa override por plataforma si existe; cae al snapshot si la plataforma no tiene override",
+        "Si la agencia edita la template global en /social tras un override, los reels con override NO se re-renderizan al re-encolarse",
+        "Tests integración cubren happy path, 404, 409, 422 (platform no en defaults.platforms), publish worker con override y sin override",
+        "pytest -q termina verde",
+        "python -m apps.api --check y python -m apps.worker --check exit 0"
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/reels/ tests/unit/reels/ -q",
+        "Manual contra :8001: ingestar property, esperar reel needs-approval, PATCH override de instagram, Approve & Publish, verificar en logs/GHL que el caption publicado coincide con el override"
+      ],
+      "status": "done",
+      "review": "progress/review_21_per_reel_description_override_endpoint.md"
+    },
+    {
+      "id": 22,
+      "name": "agency_music_upload",
+      "title": "Upload multipart de pistas; el object_key deja de ser input del cliente",
+      "description": "Hoy POST /v1/admin/agencies/{id}/music registra metadata libre (display_name, object_key, duration_seconds, is_default) pero NO sube el archivo: el cliente tiene que poner el blob en object storage por otra vía y pegar el key a mano. Esta feature añade un endpoint paralelo multipart POST /v1/admin/agencies/{id}/music/upload que recibe el .mp3/.m4a/.wav, lo persiste vía shared/storage/site_layout (FS hoy, S3 mañana — mismo patrón que feature 10 brand/logo), deriva object_key, calcula duration_seconds con ffprobe y crea la fila en agency_music_tracks. Sirve el blob de vuelta con GET .../music/{music_id}/file/{filename} (paridad con brand/logo/file). El POST 'metadata only' actual se retira porque deja de tener sentido cuando el upload es la única vía. El PUT sigue para reconfigure de display_name/is_default — object_key e id pasan a no editables por el cliente.",
+      "module": "modules/configuration/, shared/storage/",
+      "schema": "No (tabla agency_music_tracks ya existe; columnas object_key/duration_seconds/is_default ya están)",
+      "scope": {
+        "back": [
+          "Helper nuevo en shared/storage/site_layout.py: resolve_agency_music_destination(agency_id, filename) -> (object_key, local_path) — analogo a resolve_agency_branding_destination. Diseñado para enchufar S3 sin tocar el HTTP.",
+          "Nuevo router modules/configuration/transport/http/music_upload_router.py (separado de music_router.py para no inflar el archivo y porque el parsing multipart es lo suficientemente distinto): POST /v1/admin/agencies/{agency_id}/music/upload con form fields {file (binary), display_name (text), is_default (text 'true'|'false')}. Parsea multipart con stdlib email/policy igual que brand_logo_router.py para no añadir python-multipart a requirements.txt.",
+          "Validaciones: MIME audio/mpeg|audio/mp4|audio/wav|audio/x-wav (mismo set que ffmpeg ya consume), tamaño máximo 20 MB, display_name min 1 max 200, magic-bytes sanity check.",
+          "Cálculo de duration_seconds via ffprobe (ya disponible en el contenedor por rendering). Si ffprobe falla o duration > 600 → 400 MUSIC_TRACK_AUDIO_INVALID con detalle.",
+          "Use case nuevo upload_music_track en modules/configuration/application/use_cases/ que orquesta: write blob → ffprobe → register row. Reusa la lógica de register_music_track existente para la persistencia.",
+          "Nuevo endpoint GET /v1/admin/agencies/{agency_id}/music/{music_id}/file/{filename} en music_upload_router.py (paridad con stream_admin_agency_brand_logo) que sirve el blob como StreamingResponse con admin auth scope-checked. La UI lo necesita para preview futuro (waveform).",
+          "Retirar POST /v1/admin/agencies/{agency_id}/music (metadata-only) actual: el handler queda solo para list. El register_music_track use case se mantiene como dependencia interna del upload pero deja de tener handler HTTP directo.",
+          "Ajustar MusicTrackPatchPayload (transport/payloads/music.py): object_key pasa a no aceptarse en el PATCH (extra='forbid' ya lo hace si se elimina del modelo). El cliente solo puede tocar display_name, is_default y duration_seconds (si decidimos permitirlo; recomendado no — ffprobe es la verdad).",
+          "Tests integration: happy path upload, MIME inválido → 400, > 20 MB → 413, ffprobe fail → 400 con código, duration derivada coincide con archivo real (fixture .mp3 corto < 1MB en tests/integration/configuration/_fixtures/), GET file/{filename} sirve los mismos bytes y rechaza cross-agency.",
+          "Tests unit del use case: registra fila, hace cleanup del blob si la persistencia falla a mitad.",
+          "Actualizar docs/API.md, regenerar docs/http_surface.md y docs/openapi.json."
+        ],
+        "front": [
+          "Cross-repo: feature 22 del frontend cubre el reemplazo del form."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "POST /v1/admin/agencies/{id}/music/upload con multipart (file + display_name + is_default) responde 201 con {status:'created', agency_id, music_track:{music_id, display_name, object_key, duration_seconds, is_default, created_at}}; el blob queda persistido bajo la carpeta de la agencia y duration_seconds coincide con ffprobe.",
+        "POST con MIME no soportado → 400 MUSIC_TRACK_AUDIO_INVALID; > 20MB → 413; sin display_name → 422; ffprobe falla → 400 con código y hint.",
+        "GET /v1/admin/agencies/{id}/music/{music_id}/file/{filename} devuelve el blob con admin auth scope-checked; cross-agency → 403/404 según política existente.",
+        "POST /v1/admin/agencies/{id}/music (metadata-only) queda retirado: 405 o 404. Tests integration que dependían de él se actualizan o se eliminan.",
+        "PUT /v1/admin/agencies/{id}/music/{music_id} rechaza object_key con 422 (extra='forbid').",
+        "shared/storage/site_layout.resolve_agency_music_destination devuelve (object_key, Path) deterministas; el path local cae bajo property_media/ o el equivalente actual del repo (la migración a S3 no es scope aquí).",
+        "alembic upgrade head sin cambios (no hay schema en esta feature).",
+        "pytest -q termina verde (baseline actual + tests nuevos).",
+        "python -m apps.api --check exit 0.",
+        "docs/API.md y docs/http_surface.md reflejan el endpoint nuevo; docs/openapi.json regenerado."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_music_router.py tests/integration/configuration/test_music_upload_router.py tests/unit/configuration/ -q",
+        "Manual contra :8001: curl -F file=@sample.mp3 -F display_name='Test' -F is_default=false con bearer admin → 201; GET subsiguiente devuelve el track con duration coherente."
+      ],
+      "status": "done",
+      "review": "progress/review_22_agency_music_upload.md"
+    },
+    {
+      "id": 23,
+      "name": "wire_render_to_agency_music_tracks",
+      "title": "El renderer lee agency_music_tracks en vez de escanear assets/music/",
+      "description": "Hoy resolve_background_audio_paths (modules/rendering/infrastructure/runtime/assets.py:101) escanea el directorio local assets/music/ del repo (4 MP3s NCS hardcoded) y elige uno al azar. La página /music registra tracks en agency_music_tracks pero NUNCA llegan al pipeline de render. Esta feature reorienta el renderer a leer la pool de la agencia (default tracks de agency_music_tracks via configuración del bounded context), con seed por agencia de las 4 NCS existentes (decisión validada: cada agencia arranca con copia propia que puede borrar). El fallback a 'toda la library de la agencia' cuando default pool está vacía queda hardcoded a true aquí; feature 24 lo hace configurable.",
+      "module": "modules/rendering/infrastructure/runtime/, modules/configuration/, modules/reels/, alembic/",
+      "schema": "Sí (data migration: seed por agencia + copia de blobs al storage backend)",
+      "scope": {
+        "back": [
+          "Migración Alembic 'seed_existing_agencies_with_ncs_music_tracks': para cada agency_id existente, copia los 4 .mp3 de assets/music/ al destino devuelto por resolve_agency_music_destination(agency_id, filename) y crea las 4 filas en agency_music_tracks con is_default=true, display_name derivado del nombre del archivo (limpio, sin 'NCS Release' ni corchetes). Idempotente: si la agencia ya tiene tracks no-vacío, skip. Si una agencia luego se crea, su creación dispara el mismo seed (use case create_agency lo invoca).",
+          "Cambiar la firma de resolve_background_audio_paths(workspace_dir, settings, *, shuffle_candidates) → (workspace_dir, settings, *, music_tracks: tuple[Path,...], shuffle_candidates). El que orquesta el render resuelve las paths antes (es responsabilidad de modules/reels o del use case que prepara assets, no de runtime/).",
+          "Nuevo helper en modules/rendering/infrastructure/runtime/assets.py: resolve_agency_music_local_paths(music_tracks: list[MusicTrack]) -> tuple[Path,...] que, dado un set de tracks de BBDD, traduce object_key → Path local via shared/storage. Si falta un blob → ResourceNotFoundError con código MUSIC_BLOB_MISSING.",
+          "En modules/reels/application/use_cases/ingest_property_into_reel.py (y/o regenerate_reel.py si aplica) cargar la lista de music_tracks de la agencia ANTES de invocar el render: query default tracks; si vacío, query full library; si vacío, raise. Inyectarla en el render context.",
+          "modules/rendering/application/scripted_video/render_service.py: aceptar el nuevo argumento music_tracks por el camino largo del render; threading hasta la llamada a mux_audio_candidates en render_reel.py.",
+          "El directorio assets/music/ queda como fallback de emergencia solo si la migración no ha corrido (modo dev sin BBDD). En runtime normal el código no lo lee.",
+          "Tests integration: agencia con 1 default track → render usa esa; agencia con 4 default → shuffle entre las 4; agencia sin default + library 2 tracks → render usa esas 2 con shuffle; agencia sin tracks (default ni library) → render falla con MUSIC_NO_TRACKS y job marca reel.publish_status='failed' o equivalente; cross-agency: agencia A no puede usar tracks de B.",
+          "Tests unit del helper resolve_agency_music_local_paths: blob ausente → ResourceNotFoundError con código exacto.",
+          "Actualizar docs/API.md (sección Rendering) y REFACTOR_STATUS.md notando el cambio de fuente.",
+          "Bloquea: feature 24 (rules) y feature 25 (override) dependen de que el renderer ya consulte BBDD."
+        ],
+        "front": [
+          "Sin cambios obligatorios. La feature 23 del frontend se abre simbólicamente como noop para preservar el patrón cross-repo same-id."
+        ],
+        "external": [
+          "Heads-up para integradores: si alguien tiene un script externo que despliega .mp3s en assets/music/, ese path deja de servir música a los renders. La carpeta se mantiene en repo para fallback dev."
+        ]
+      },
+      "acceptance": [
+        "alembic upgrade head ejecuta el seed: cada agencia preexistente termina con 4 filas en agency_music_tracks (is_default=true) y 4 blobs en el storage backend.",
+        "alembic downgrade -1 limpia las filas seedeadas y los blobs si y solo si fueron creados por la migración (idempotente, no toca tracks subidas por la agencia).",
+        "El use case que prepara el render para una agencia con default tracks usa esas tracks; con default vacío + library no-vacía usa la library; sin tracks raise.",
+        "El test integration de render reel verifica que el filter graph de mux_audio_candidates referencia un Path real bajo resolve_agency_music_destination(agency_id, ...) en vez de assets/music/.",
+        "Crear una agencia nueva via use case dispara el seed automáticamente (verificar con test).",
+        "resolve_background_audio_paths firma actualizada; los 6 call sites del repo se actualizan en lockstep.",
+        "pytest -q termina verde (baseline + nuevos).",
+        "python -m apps.api --check y python -m apps.worker --check exit 0.",
+        "Bloquea-resuelto: features 24 y 25 pueden arrancar tras este merge."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head sobre BBDD limpia",
+        ".venv/bin/python -m pytest tests/integration/rendering/ tests/unit/rendering/ tests/integration/reels/ -q",
+        "Manual contra :8001: subir 1 track via feature 22, ingestar property, esperar render, inspeccionar logs del worker para confirmar que el mux usa el blob subido (no NCS)."
+      ],
+      "status": "done",
+      "review": "progress/review_23_wire_render_to_agency_music_tracks.md"
+    },
+    {
+      "id": 24,
+      "name": "agency_music_selection_rules",
+      "title": "Persistir reglas de selección de música y conectar el Toggle decorativo",
+      "description": "MusicRules.jsx en el front muestra un Toggle 'Fall back to full library if no default track exists' con onChange={() => {}} — decorativo. Esta feature persiste esa regla (y deja sitio para extensiones futuras) en agency_reel_defaults.settings (JSONB) bajo la clave music.selection_rules, la expone via el GET/PUT /defaults existente, y feature 23 hardcoded a true se reescribe para leer el flag. El front (feature 24) conecta el Toggle.",
+      "module": "modules/configuration/, modules/rendering/",
+      "schema": "No (settings ya es JSONB, solo se documenta la sub-clave)",
+      "scope": {
+        "back": [
+          "Documentar en modules/configuration/transport/payloads/defaults.py la sub-estructura settings.music.selection_rules: {fallback_to_full_library: bool}. extra='forbid' a nivel raíz; el sub-objeto se valida con un modelo Pydantic anidado opcional.",
+          "Update_aggregated_reel_profile (y read_aggregated_reel_profile) sirven el sub-objeto round-trip con default {fallback_to_full_library: true} si está ausente.",
+          "modules/reels/application/use_cases/ingest_property_into_reel.py (y regenerate_reel.py): al cargar agency_settings, leer settings.music.selection_rules.fallback_to_full_library en vez del valor hardcoded true introducido por feature 23.",
+          "Tests integration: PUT /defaults con sub-objeto valida y round-trips; PUT con valor desconocido bajo music.* → 422; render flow respeta el flag (default true → usa library; false → falla con MUSIC_NO_DEFAULT_TRACKS si default pool vacía).",
+          "docs/API.md documenta la sub-estructura."
+        ],
+        "front": [
+          "Cross-repo: feature 24 del front conecta el Toggle."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "PUT /v1/admin/agencies/{id}/defaults con body que incluye settings.music.selection_rules.fallback_to_full_library=false round-trips correctamente.",
+        "Variable desconocida bajo settings.music.* → 422 SETTINGS_UNKNOWN_KEY o equivalente.",
+        "Render con default pool vacía + fallback_to_full_library=false → reel.publish_status='failed' con código MUSIC_NO_DEFAULT_TRACKS; con flag=true → usa library.",
+        "Tests integration y unit cubren ambos paths del flag y la default value cuando settings.music está ausente.",
+        "docs/API.md documenta la clave y su default.",
+        "pytest -q verde, --check verde."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_defaults_router.py tests/integration/rendering/ tests/integration/reels/ -q"
+      ],
+      "status": "done",
+      "review": "progress/review_24_agency_music_selection_rules.md"
+    },
+    {
+      "id": 25,
+      "name": "per_reel_music_override",
+      "title": "Override de pista por reel: PATCH /reels/{id}/music re-encola render con esa pista",
+      "description": "Cuando el usuario quiere asignar/cambiar la pista de un reel concreto desde /reels (hoy hooks.js:101 del front tiene un campo music:'' muerto, vestigio del mock), el back necesita: (1) columna reels.music_id nullable referenciando agency_music_tracks; (2) PATCH /v1/admin/reels/{reel_id}/music con body {music_id: str|null}; (3) si publish_status no es needs-approval/pending_review devuelve 409 RESOURCE_LOCKED; (4) el override re-encola render del reel con esa pista única (sin tocar la pool). Nota explícita: esta feature NO implementa silent-reel persistente + remux-only — re-render completo con override de música. La optimización de silent-reel queda como feature futura (5) del plan documentada en explore_feature_25_music_override_plan.md si se decide hacerlo.",
+      "module": "modules/reels/, alembic/",
+      "schema": "Sí (alembic: añadir columna reels.music_id String(36) nullable + FK opcional a agency_music_tracks(id) ON DELETE SET NULL)",
+      "scope": {
+        "back": [
+          "Migración Alembic: añadir reels.music_id String(36) nullable + ForeignKey('agency_music_tracks.id', ondelete='SET NULL'). Sin backfill (NULL = 'usa la pool default').",
+          "Nuevo router modules/reels/transport/http/admin_reels_music_router.py (o handler en admin_reels_router.py si encaja sin inflar) con PATCH /v1/admin/reels/{reel_id}/music. Body Pydantic ReelMusicOverridePayload {music_id: str | None}. Valida cross-agency: el music_id debe pertenecer a la agencia del reel.",
+          "Use case update_reel_music_override en modules/reels/application/use_cases/ con validación de estado (solo needs-approval/pending_review, igual que feature 21). Re-encola un job de render con el override.",
+          "El job de render acepta un nuevo campo opcional override_music_track_id en su payload. Si está presente, el use case que prepara assets (feature 23) sustituye la pool por la lista de 1 elemento con esa pista.",
+          "Si el reel ya estaba aprobado o publicado → 409 RESOURCE_LOCKED.",
+          "Tests integration: PATCH happy path con music_id válido → 200, re-encola job, render usa la pista; PATCH con music_id de otra agencia → 403/404; PATCH a reel publicado → 409; PATCH con music_id=null → 200, vuelve a usar la pool default en el siguiente render.",
+          "Actualizar docs/API.md y docs/http_surface.md."
+        ],
+        "front": [
+          "Cross-repo: feature 25 del frontend añade el selector en /reels."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "alembic upgrade head añade la columna reels.music_id nullable; downgrade reversible.",
+        "PATCH /v1/admin/reels/{reel_id}/music con {music_id:<id válido de la misma agencia>} → 200 {status:'saved', reel_id, music_id}; re-encola job de render.",
+        "PATCH con {music_id: null} → 200 y borra el override (el siguiente render vuelve a usar la pool default).",
+        "PATCH con music_id de otra agencia → 403 (o 404 según política).",
+        "PATCH a reel publicado/aprobado → 409 RESOURCE_LOCKED.",
+        "Render del reel con override usa exactamente esa pista (filter graph del mux la referencia).",
+        "Tests integration cubren happy path, cross-agency, 409 y override null.",
+        "docs/API.md y docs/http_surface.md actualizados.",
+        "pytest -q verde, --check verde."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/reels/ tests/unit/reels/ -q",
+        "Manual contra :8001: subir 2 tracks, ingestar property, esperar reel needs-approval, PATCH music override a la track #2, verificar en logs que el render se re-encola con esa pista y el MP4 final la usa."
+      ],
+      "status": "done",
+      "review": "progress/review_25_per_reel_music_override.md"
+    },
+    {
+      "id": 26,
+      "name": "email_notification_infrastructure",
+      "title": "Capa shared/email + tabla email_notifications + env vars SMTP",
+      "description": "Infraestructura sin lógica de negocio que prepara el soporte de notificaciones por email. (1) Crea capa `shared/email/` con interfaz `EmailSender` (Protocol con `send(message: EmailMessage) -> SentEmail`) y 2 backends concretos: `ConsoleEmailSender` (imprime el email a stdout, default en dev/tests) y `SmtpEmailSender` (stdlib `smtplib` + `email.message.EmailMessage`). Selección via env var `EMAIL_BACKEND=console|smtp`. (2) Añade env vars `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` (default `notifications@4reels.ie`), `SMTP_FROM_NAME` (default `4Reels Notifications`) y `FRONTEND_BASE_URL` (default `http://localhost:5173`, prod `https://4reelsfront-test.4property.com`). (3) Migración Alembic nueva (revision `20260514_0007`) que crea tabla `email_notifications` con columnas `(id UUID PK, agency_id VARCHAR(36) FK→agencies ON DELETE CASCADE, event_kind TEXT, site_id TEXT, source_property_id INT, recipient_email TEXT, status TEXT, provider_message_id TEXT, error_message TEXT, sent_at TIMESTAMPTZ, created_at, updated_at)` + UNIQUE (agency_id, site_id, source_property_id, recipient_email, event_kind) + indices on status y agency_id. (4) Repository en `modules/notifications/infrastructure/` para listar, upsert, marcar sent/failed. (5) Tests unit del SmtpEmailSender (con MagicMock del SMTP) + integration de la migración y el repository.",
+      "module": "shared/email/, modules/notifications/, alembic/, settings/, tests/",
+      "schema": "Sí (nueva tabla email_notifications + migración 20260514_0007)",
+      "scope": {
+        "back": [
+          "shared/email/__init__.py + shared/email/sender.py: Protocol EmailSender + dataclass EmailMessage(to:list[str], subject:str, body_text:str, body_html:str|None, from_address:str, from_name:str|None, reply_to:str|None, headers:dict|None) y SentEmail(provider_message_id:str|None, recipients:list[str], sent_at:str).",
+          "shared/email/backends/console_sender.py: imprime el email a stdout, devuelve SentEmail con provider_message_id=None.",
+          "shared/email/backends/smtp_sender.py: usa smtplib + email.message.EmailMessage. TLS opcional. Soporta auth. Construye el Message-ID local y lo devuelve como provider_message_id.",
+          "shared/email/factory.py: build_email_sender(settings) → EmailSender según env var EMAIL_BACKEND.",
+          "settings/notifications.py (o donde encajen los settings de modules): NotificationSettings con todas las env vars del SMTP + FRONTEND_BASE_URL. Cargados desde process env.",
+          "Migración 20260514_0007_email_notifications: schema completo + indices.",
+          "modules/notifications/domain/email_record.py: dataclass EmailRecord con shape persistido.",
+          "modules/notifications/infrastructure/email_notification_repository.py: list_by_filter, insert_pending, mark_sent, mark_failed.",
+          "Tests unit: SmtpSender con mock smtplib, factory selecciona backend correcto, repository roundtrip.",
+          "Tests integration: migración up/down/up; insert + UNIQUE conflict; mark_sent transición de estado.",
+          "Docs: actualizar .env.example, docs/API.md (sección nueva 'Notifications')."
+        ],
+        "front": [
+          "Sin cambios. Feature 26 del back es infra pura."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "shared/email/ expone EmailSender Protocol + EmailMessage dataclass.",
+        "build_email_sender selecciona ConsoleEmailSender cuando EMAIL_BACKEND=console y SmtpEmailSender cuando EMAIL_BACKEND=smtp.",
+        "SmtpEmailSender envía email vía smtplib con auth opcional y TLS según env vars; tests unit lo verifican con mock.",
+        "alembic upgrade head ejecuta la migración 20260514_0007 y crea email_notifications; downgrade reversible.",
+        "EmailNotificationRepository.insert_pending con (agency_id, site_id, source_property_id, recipient_email, event_kind) idempotente vía UNIQUE (segundo insert con misma key devuelve la fila existente sin duplicar).",
+        ".env.example documenta SMTP_HOST/PORT/USER/PASSWORD/USE_TLS/FROM_ADDRESS/FROM_NAME, EMAIL_BACKEND y FRONTEND_BASE_URL.",
+        "Sin business logic todavía (publish_reel no se toca; feature 27 lo cablea).",
+        "pytest -q verde (baseline + nuevos tests unit/integration).",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/unit/notifications/ tests/integration/notifications/ -q"
+      ],
+      "status": "done",
+      "review": "progress/review_26_email_notification_infrastructure.md"
+    },
+    {
+      "id": 27,
+      "name": "email_notification_review_requested",
+      "title": "Subscriber del outbox 'review_requested' + handler worker email_send",
+      "description": "Cablea la infraestructura de email (feature 26) al evento real: cuando publish_reel.py emite el outbox event 'review_requested' (línea 224), un subscriber nuevo carga la lista de destinatarios de agency_reel_defaults.settings.automation.reviewEmails, valida cada email, inserta N filas pending en email_notifications (una por destinatario) compartiendo provider_message_id placeholder, y encola UN job de kind='email_send' con el shape rico {agency_id, site_id, source_property_id, recipient_emails:list[str], subject, body_text, body_html, context:{...}}. El worker incluye un handler nuevo para 'email_send' que llama al EmailSender configurado, actualiza las N filas con el provider_message_id devuelto y status='sent' (o 'failed' con error_message). El throttle (max 1 envío por agency+recipient/minuto) se aplica en el subscriber antes de encolar. Soporta backward-compat: si reviewEmails llega como string CSV (legacy), lo split-ea por coma + trim.",
+      "module": "modules/notifications/application/, modules/notifications/transport/, apps/worker/, modules/reels/application/use_cases/publish_reel.py (opcional touch para event payload)",
+      "schema": "No (tabla email_notifications ya existe tras feature 26)",
+      "scope": {
+        "back": [
+          "modules/notifications/application/use_cases/dispatch_review_requested_email.py: lee outbox event 'review_requested', extrae agency_id+site_id+property_id, carga uow.configuration.defaults.get(agency_id).settings.automation.reviewEmails (acepta list[str] o string CSV; normaliza a list[str] lowercased, dedup), valida con regex (helper en shared/email/validators.py o reuse del front cuando esté), inserta pending en email_notifications con UNIQUE conflict idempotente, encola job kind='email_send'.",
+          "modules/notifications/application/use_cases/send_email_job_handler.py: el handler del worker para kind='email_send'. Renderiza template (asunto + cuerpo plain + cuerpo HTML opcional), construye EmailMessage(to=recipient_emails, subject, body_text, body_html, from_address=settings.smtp_from_address, from_name=settings.smtp_from_name), llama EmailSender.send, actualiza las N filas de email_notifications con provider_message_id + status='sent'. On exception: mark_failed con error_message.",
+          "assets/email/templates/review_requested.txt y review_requested.html: templates simples con placeholders {reel_url}, {agency_name}, {property_title}, {property_address}. El cuerpo plain text es el canónico; HTML opcional con botón 'Review reel'.",
+          "shared/email/url_builder.py: build_reel_editor_url(frontend_base_url, site_id, property_id) → URL final con query params.",
+          "Worker boot: registrar el handler en apps/worker/runtime.py mapeando 'email_send' al use case.",
+          "Outbox subscriber: gancho en apps/worker/ que polea outbox_events.type='review_requested' y dispara el dispatch use case.",
+          "Throttle: query previa a encolar — si existe envío sent_at en últimos 60s al mismo (agency, recipient), skip ese recipient.",
+          "Tests integration end-to-end: publicar reel con approval_required=true + 2 destinatarios → 1 job 'email_send' encolado → worker lo procesa → 2 filas email_notifications con status='sent' → ConsoleEmailSender capturó la salida con asunto/body correctos.",
+          "Tests integration de retry: SmtpEmailSender fakeado para fallar la primera vez → handler marca failed → segundo poll lo retoma (si la cola lo permite) o feature documenta como manual.",
+          "Tests unit del normalizador de reviewEmails (CSV→list, dedup, lowercase, regex filter).",
+          "Docs: actualizar docs/API.md sección Notifications y documentar el flujo end-to-end en docs/email_notifications.md."
+        ],
+        "front": [
+          "Cross-repo: feature 26 del front entrega el UI de configuración de reviewEmails."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Publicar un reel con approval_required=true y 2 destinatarios configurados en defaults.settings.automation.reviewEmails dispara: (a) 2 filas pending en email_notifications, (b) 1 job kind='email_send' encolado con recipient_emails:list[str], (c) tras procesar el job, 2 filas sent con mismo provider_message_id y sent_at.",
+        "Si el reel se regenera y vuelve a pending_review, se manda email nuevo con event_kind='review_requested_resent' (UNIQUE permite re-insert).",
+        "Throttle: dos triggers consecutivos en <60s al mismo (agency, recipient) → solo el primero crea email.",
+        "reviewEmails en formato CSV legacy (string 'a@x.com, b@y.com') se acepta y normaliza a list[str].",
+        "reviewEmails con un email inválido (regex fail) se filtra silenciosamente (no crashea) y el resto se envía.",
+        "Template render incluye el link al frontend construido con FRONTEND_BASE_URL + site_id + property_id.",
+        "SmtpEmailSender falla → email_notifications marcadas failed con error_message; logs registran el incidente.",
+        "ConsoleEmailSender (dev) imprime el cuerpo completo a stdout con un prefijo identificable.",
+        "pytest -q verde (baseline + integration end-to-end).",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/notifications/test_review_requested_flow.py tests/unit/notifications/ -q",
+        "Manual contra :8001 (con SMTP backend o console): subir property con webhook, aprobar agency review_emails con 2 direcciones, esperar pending_review, comprobar logs del worker / inbox SMTP."
+      ],
+      "status": "done",
+      "review": "progress/review_27_email_notification_review_requested.md"
+    },
+    {
+      "id": 28,
+      "name": "font_catalog_and_brand_font_in_render",
+      "title": "Catálogo de fuentes (Inter+Manrope+Plus Jakarta Sans+Montserrat+Poppins+Roboto) + font_family inyectado al render",
+      "description": "Hoy el frontend ofrece un dropdown hardcoded de 5 fuentes (Inter, Söhne, Manrope, Plus Jakarta Sans, Helvetica) pero solo Inter está en disco; el resto son ficticias. Además font_family es dead-end: persiste en BrandSettings pero NUNCA llega al renderer (Inter hardcoded en DEFAULT_REEL_FONT_PATH). Esta feature: (1) baja 5 fuentes adicionales libres (Google OFL: Manrope, Plus Jakarta Sans, Montserrat, Poppins, Roboto) a assets/fonts/ con structure estandarizada `<Family>/Regular.ttf` y `<Family>/Bold.ttf`. (2) Crea modules/configuration/domain/font_catalog.py con AVAILABLE_FONTS = (FontDescriptor(family, display_name, regular_path, bold_path), ...) como source of truth. (3) Endpoint GET /v1/admin/fonts (admin scope, global no per-agency) que devuelve {items: [{family, display_name, available: bool}], count}. (4) Validador en BrandSettingsUpsertPayload: font_family debe estar en AVAILABLE_FONTS o ser null (422 UNKNOWN_FONT_FAMILY si no). (5) En ingest_property_into_reel.py, tras cargar brand, resolver el FontDescriptor: si brand.font_family null → fallback 'Inter'; sino → catalog.resolve(brand.font_family). Inyectar regular_path y bold_path en PropertyReelTemplate.font_path y bold_font_path. (6) Quitar Söhne y Helvetica del dropdown del front (incluido en feature 28 del front).",
+      "module": "modules/configuration/, modules/reels/application/use_cases/, modules/rendering/application/scripted_video/, assets/fonts/, alembic (no schema), tests/, docs/",
+      "schema": "No (no toca BBDD; font_family ya está en BrandSettings)",
+      "scope": {
+        "back": [
+          "assets/fonts/Manrope/{Regular.ttf,Bold.ttf}, Plus_Jakarta_Sans/, Montserrat/, Poppins/, Roboto/ — descargar de Google Fonts OFL (verificar licencia OFL.txt incluido en cada carpeta).",
+          "modules/configuration/domain/font_catalog.py: dataclass FontDescriptor + tupla AVAILABLE_FONTS = (Inter, Manrope, PlusJakartaSans, Montserrat, Poppins, Roboto). Helper resolve(family) -> FontDescriptor lanzando ValueError si no existe.",
+          "modules/configuration/application/use_cases/list_available_fonts.py + transport/http/fonts_router.py con GET /v1/admin/fonts; admin auth scope.",
+          "modules/configuration/transport/payloads/brand.py: validator en font_family (Pydantic field_validator) que comprueba membership en AVAILABLE_FONTS family names; 422 UNKNOWN_FONT_FAMILY con detail.allowed_families.",
+          "modules/reels/application/use_cases/ingest_property_into_reel.py: tras self._resolve_brand_primary_color(...), resolver font_descriptor via font_catalog.resolve(brand.font_family or 'Inter'). Inyectar en PropertyReelTemplate.font_path y bold_font_path en lugar de DEFAULT_REEL_FONT_PATH constants.",
+          "modules/rendering/application/scripted_video/models.py: confirmar que PropertyReelTemplate.font_path/bold_font_path siguen siendo el campo correcto (debería ser pasar Path en lugar de constants).",
+          "Tests integration: GET /fonts devuelve 6 entries con available=true; PUT /brand con font_family='Manrope' → 200; PUT con 'NonExistent' → 422 UNKNOWN_FONT_FAMILY; render con Manrope usa el path correcto (verificar filter graph ffmpeg).",
+          "Tests unit del FontCatalog.resolve (incluye null → Inter default).",
+          "Docs: actualizar docs/API.md con GET /fonts y el validador font_family de /brand. Actualizar .env.example si hace falta path config (probablemente no — paths son fijos relative al repo)."
+        ],
+        "front": [
+          "Cross-repo: feature 28 del front consume GET /fonts y popula el dropdown."
+        ],
+        "external": [
+          "Operacional: las 5 fuentes nuevas son ~5-20MB cada una. assets/fonts/ pasará de 4MB a ~50MB. Si esto es problema para el deploy, considerar Git LFS (ya en uso en el repo?) o un script de bootstrap que las descargue en setup."
+        ]
+      },
+      "acceptance": [
+        "assets/fonts/ contiene 6 carpetas (Inter, Manrope, Plus_Jakarta_Sans, Montserrat, Poppins, Roboto) cada una con Regular.ttf, Bold.ttf y OFL.txt (licencia).",
+        "GET /v1/admin/fonts devuelve {items: [{family, display_name, available}], count: 6} con admin auth.",
+        "PUT /v1/admin/agencies/{id}/brand con font_family='Manrope' (en catálogo) → 200; con 'Söhne' o cualquier otro fuera del catálogo → 422 UNKNOWN_FONT_FAMILY con details.allowed_families.",
+        "PUT con font_family=null → 200, persiste null en BBDD.",
+        "Render de un reel cuya agencia tiene font_family='Manrope' usa el path real assets/fonts/Manrope/Regular.ttf en el ffmpeg drawtext (verificar en tests integration con filter graph).",
+        "Render de una agencia con font_family=null usa Inter (default).",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0.",
+        "Bloquea-resuelto: feature 28 del front puede arrancar."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_brand_router.py tests/integration/configuration/test_fonts_router.py tests/integration/rendering/ tests/unit/configuration/ -q",
+        "Manual contra :8001: GET /v1/admin/fonts con admin bearer → 6 items; PUT /brand con font_family='Manrope' → 200; PUT con 'NotAFont' → 422."
+      ],
+      "status": "done",
+      "review": "progress/review_28_font_catalog_and_brand_font_in_render.md"
+    },
+    {
+      "id": 29,
+      "name": "secondary_color_side_banner",
+      "title": "secondary_color de la agencia sustituye al amarillo #FECF4D hardcoded del template side_banner",
+      "description": "Feature 17 dejó hardcoded el color #FECF4D para la cinta vertical del template side_banner. Esta feature cablea BrandSettings.secondary_color al render del side_banner: si la agencia configura un secondary_color, ese gana; si no, se cae al fallback actual #FECF4D. NO se toca el template classic (no usa secondary_color); plantillas futuras decidirán independientemente. La cascada es: brand.secondary_color → property.wppd_accent_text_color (si webhook lo trae como secundario; verificar campo exacto) → #FECF4D hardcoded.",
+      "module": "modules/reels/application/use_cases/ingest_property_into_reel.py, modules/rendering/application/scripted_video/, tests/",
+      "schema": "No",
+      "scope": {
+        "back": [
+          "modules/reels/application/use_cases/ingest_property_into_reel.py: helper _resolve_brand_secondary_color analógico a _resolve_brand_primary_color (línea 625). Cascada: brand.secondary_color → property.wppd_accent_text_color (o el campo que aplique para 'color secundario'; verificar en el webhook payload) → '#FECF4D'.",
+          "modules/rendering/application/scripted_video/models.py: si PropertyRenderData ya tiene secondary_color/accent_text_color, reusar; si no, añadir campo y propagarlo.",
+          "modules/rendering/infrastructure/layout/panels.py o filters.py: el filter graph que pinta la cinta side_banner debe leer el color del template/property en lugar del literal #FECF4D.",
+          "Tests integration: render side_banner con agency.secondary_color='#FF00FF' → el filter graph contiene #FF00FF (no #FECF4D); render con agency.secondary_color=null y property con wppd_accent_text_color válido → usa ese; render con ambos null → #FECF4D.",
+          "Tests regresión del template classic: brand.secondary_color !== null NO debe alterar el render del classic."
+        ],
+        "front": [
+          "Sin cambios."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Render de un reel side_banner con agency.secondary_color configurado usa ese color (filter graph contiene el hex correcto).",
+        "Si agency.secondary_color es null y el webhook trae color válido → usa el del webhook.",
+        "Si ambos null → fallback #FECF4D (comportamiento actual preservado).",
+        "Render del template classic NO se ve afectado por cambios en secondary_color de la agencia (tests de regresión).",
+        "pytest -q verde, sin regresiones en tests existentes de feature 16/17.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/rendering/ tests/unit/rendering/ -q",
+        "Manual contra :8001: configurar agency.secondary_color='#FF0000', renderizar reel con template side_banner, verificar visualmente / en logs el filter graph que el color rojo se usa."
+      ],
+      "status": "done",
+      "review": "progress/review_29_secondary_color_side_banner.md"
+    },
+    {
+      "id": 31,
+      "name": "subtitle_settings_wiring",
+      "title": "Cablear todas las settings de subtítulos del frontend al render ffmpeg",
+      "description": "Hoy el frontend (/defaults > Subtitles) tiene controles de typography, background y position que se persisten en `agency_reel_defaults.settings.sub*` pero el renderer solo consume `subtitle_font_size`. El resto (`subFont`, `subWeight`, `subColor`, `subBgStyle`, `subBgColor`, `subBgOpacity`, `subPosition`, `subAlign`, `subUppercase`, `subMaxChars`) son inertes. Además, `defaults.settings['automation.autoCaptions']` (boolean) ya existe pero no se cablea: el renderer siempre dibuja subtítulos. Esta feature cabla todos los campos: (1) el ingest lee las settings y las stash en `render_template_reel_settings` como keys renderer-internal; (2) `frame_composition._build_render_data` propaga al render data; (3) `compose_subtitle_segments` aplica `subMaxChars` para wrapping, `subPosition` para Y, `subAlign` para X, `subUppercase` para transformar texto, `subSize` para fontsize; (4) el ffmpeg drawtext usa `subFont` (resuelto via font_catalog), `subWeight` (regular/bold), `subColor` (fontcolor), `subBgStyle` (none → sin box ni border, outline → borderw, block → box=1+boxcolor), `subBgColor` con `subBgOpacity`. (5) `auto_captions=false` → omitir TODOS los drawtext de subtítulos en el filter graph. La opción `pill` background (rounded corners) se trata como `block` por ahora dado que ffmpeg drawtext no soporta esquinas redondeadas nativamente; lo documentamos como follow-up opcional. La opción `karaoke / word highlight` se elimina del frontend en feature 31 front (no se cablea aquí).",
+      "module": "modules/rendering/, modules/reels/application/use_cases/, tests/",
+      "schema": "No",
+      "scope": {
+        "back": [
+          "modules/rendering/infrastructure/render_template_settings.py: añadir las nuevas keys renderer-internal a _RENDERER_INTERNAL_OVERRIDE_KEYS.",
+          "modules/rendering/infrastructure/models.py: extender PropertyRenderData con SubtitleStyle dataclass (font_family, weight, color, bg_style, bg_color, bg_opacity, position, alignment, uppercase, max_chars, enabled).",
+          "modules/rendering/application/frame_composition.py: leer settings.sub* y settings['automation.autoCaptions'] del render_template_reel_settings y poblar SubtitleStyle.",
+          "modules/reels/application/use_cases/ingest_property_into_reel.py: leer agency_reel_defaults.settings y stash los campos sub* + auto_captions en render_template_reel_settings.",
+          "modules/rendering/infrastructure/layout/subtitles.py: aplicar SubtitleStyle al compose: subMaxChars al wrap, subPosition al Y, subAlign al X, subUppercase a transformar texto.",
+          "modules/rendering/infrastructure/ffmpeg/filters.py: aplicar SubtitleStyle al drawtext (fontfile via font_catalog weight aware, fontcolor, box/borderw según subBgStyle). Si auto_captions_enabled=False, omitir drawtext de subtitle_segments.",
+          "modules/configuration/domain/font_catalog.py: helper para resolver descriptor por weight (500/600 → regular, 700/800 → bold).",
+          "Tests integration + unit cubriendo las 11 settings + auto_captions on/off."
+        ],
+        "front": [
+          "Cross-repo: feature 31 del front hace cleanup + añade switch autoCaptions a SubtitlesTab."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Settings subFont/subWeight/subColor/subBgStyle/subBgColor/subBgOpacity/subPosition/subAlign/subUppercase/subMaxChars persistidos en defaults.settings llegan al filter graph del reel.",
+        "auto_captions=true (default) → subtítulos renderizados; auto_captions=false → omitidos.",
+        "subBgStyle='none' → drawtext sin box ni borderw; 'outline' → borderw + bordercolor; 'block'/'pill' → box=1+boxcolor+boxborderw.",
+        "subUppercase=true → texto en uppercase en el drawtext.",
+        "subPosition='top'/'middle'/'bottom' → segment.y correcto.",
+        "subAlign='left'/'center'/'right' → x calculation correcto.",
+        "subFont resuelve via font_catalog; fallback Inter si family fuera del catálogo.",
+        "pytest -q verde (baseline 3 fallos preexistentes preservados).",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/rendering/ tests/unit/rendering/ tests/integration/reels/ -q",
+        "Manual contra :8001: configurar subSize=64 + subBgStyle=block + subPosition=top desde /defaults; ingestar property; inspeccionar logs del worker para el filter graph del reel."
+      ],
+      "status": "done",
+      "review": "progress/review_31_subtitle_settings_wiring.md"
+    },
+    {
+      "id": 32,
+      "name": "reels_list_pagination_and_filters",
+      "title": "Paginación (page+page_size+total) y filtros básicos en GET /reels",
+      "description": "Hoy GET /v1/admin/agencies/{id}/reels solo acepta ?limit= y devuelve {items, count} donde count = len(items) (no total real). Sin offset ni filtros. Esta feature añade paginación real y filtros sin romper el shape público de items. (1) Query params nuevos: page (1-based, default 1), page_size (default 25, max 100), workflow_state (CSV opcional), publish_status (CSV opcional), q (string opcional, búsqueda case-insensitive sobre title o slug). (2) Response extendida: {items, count_total, page, page_size, has_more}. count_total se computa con los mismos filtros aplicados (query SQL separada con SELECT COUNT). count legacy (= len(items)) se preserva como alias por backcompat de tests. (3) ListReelsUseCase.execute firma extendida; clamp server-side (page>=1, 1<=page_size<=100). (4) reel_query.list_recent_for_agency acepta offset + filtros via WHERE compuesto; nueva reel_query.count_for_agency con los mismos filtros. (5) Tests integration cubren paginación, filtros individuales, combinaciones, q match parcial, clamping. (6) ?limit= legacy sigue funcionando: si no llega page, limit equivale a page_size con page=1.",
+      "module": "modules/reels/application/use_cases/list_reels.py, modules/reels/transport/http/admin_reels_router.py, modules/reels/transport/payloads/admin_reels.py, modules/reels/infrastructure/reel_query.py, tests/",
+      "schema": "No (no toca columnas; solo añade WHERE/OFFSET/LIMIT y un COUNT(*))",
+      "scope": {
+        "back": [
+          "modules/reels/application/use_cases/list_reels.py: ListReelsUseCase.execute añade kwargs page, page_size, workflow_state (tuple|None), publish_status (tuple|None), q (str|None). Retorna (items, count_total).",
+          "modules/reels/infrastructure/reel_query.py: list_recent_for_agency acepta offset + filtros; nueva count_for_agency(agency_id, filtros) que reusa el WHERE compuesto.",
+          "modules/reels/transport/http/admin_reels_router.py: parse de page (>=1, default 1), page_size (1..100, default 25), workflow_state/publish_status (CSV → tuple), q (strip, min length 1 o None). Construye response con count_total + page + page_size + has_more = (page * page_size < count_total). Backcompat: si page no presente y limit sí, limit==page_size.",
+          "modules/reels/transport/payloads/admin_reels.py: ListReelsResponse extendido con count_total:int, page:int, page_size:int, has_more:bool. Field count preserva su semántica (len(items)) para no romper consumers existentes.",
+          "Tests integration en tests/integration/reels/test_list_reels_pagination.py: seedear ~50 reels → page=1&page_size=10 devuelve 10 items + count_total=50 + has_more=True; page=5 devuelve 10 + has_more=False; workflow_state=needs_approval filtra; q='cranford' busca parcial; combinación workflow_state + q + page funciona.",
+          "Tests unit del clamping (page_size=500 → 100; page=0 → 1; q=' ' → None).",
+          "Actualizar docs/API.md sección /reels con los nuevos query params y shape de response."
+        ],
+        "front": [
+          "Cross-repo: feature 32 del front consume {count_total, page, page_size, has_more} y expone filtros + paginación en la UI."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "GET /reels?page=1&page_size=10 devuelve 10 items + count_total + page=1 + page_size=10 + has_more correcto.",
+        "GET /reels?page_size=500 clampa a 100; GET /reels?page=0 clampa a 1.",
+        "GET /reels?workflow_state=needs_approval filtra; ?workflow_state=needs_approval,approved acepta CSV.",
+        "GET /reels?q=cranford busca por title ILIKE %cranford% o slug ILIKE %cranford%.",
+        "count_total respeta los filtros aplicados (no es count total de la agencia ignorando filtros).",
+        "?limit=N legacy sigue funcionando (compat shim: limit equivalente a page_size si page no presente).",
+        "pytest -q verde, sin regresiones en test_list_reels existente.",
+        "apps.api --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/reels/test_list_reels.py tests/integration/reels/test_list_reels_pagination.py -q",
+        "Manual contra :8001: curl con bearer admin → distintas combinaciones de page/page_size/workflow_state/q."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 33,
+      "name": "agency_outro_video_upload_and_render",
+      "title": "Upload multipart de outro video por agencia + concat al final del reel renderizado",
+      "description": "Permite a la agencia subir un MP4/MOV que se concatena al final de cada reel renderizado. (1) Endpoint multipart POST /v1/admin/agencies/{id}/outro/upload (patrón de feature 22 música y feature 9 logo). (2) GET /v1/admin/agencies/{id}/outro/file para preview / consumo desde front. (3) DELETE /v1/admin/agencies/{id}/outro para reset (vuelve a outro_source='none'). (4) Persistir outro_object_key, outro_duration_seconds, outro_source ('uploaded'|'brand_card'|'none') en agency_reel_defaults (columnas nuevas) o en nueva tabla agency_intro_outro_assets (decisión del implementer, justificable en el explore). (5) Storage en shared/storage/site_layout (FS hoy, S3 mañana sin cambiar HTTP). (6) Renderer: si outro_enabled y outro_source='uploaded', ffmpeg concat demuxer del reel + outro normalizado (resample SAR/DAR/fps/audio matching). 'brand_card' y 'none' se documentan como pendientes ('brand_card' implementable en feature futura). (7) Validación server-side: duración 1–10s, mime video/mp4|quicktime, tamaño ≤50MB. (8) Migración alembic con revision encadenado tras la última disponible al arrancar.",
+      "module": "modules/configuration/, modules/rendering/, shared/storage/site_layout/, alembic/, tests/",
+      "schema": "Sí (columnas outro_object_key, outro_duration_seconds, outro_source en agency_reel_defaults o nueva tabla agency_intro_outro_assets)",
+      "scope": {
+        "back": [
+          "modules/configuration/transport/http/outro_router.py: POST /upload multipart con UploadFile (validación tamaño + mime); GET /file devuelve bytes con range; DELETE limpia metadata + borra blob.",
+          "modules/configuration/application/use_cases/upload_outro_video.py: valida duración via ffprobe, persiste object_key + duration_seconds + source='uploaded' en defaults.",
+          "modules/configuration/domain/agency_settings.py: añadir campos outro_object_key, outro_duration_seconds, outro_source.",
+          "modules/configuration/transport/payloads/defaults.py: ReelDefaultsUpsertPayload (read) expone outro_* en el GET /defaults.",
+          "shared/storage/site_layout (o equivalente): subcarpeta {agency_id}/outro/ para los blobs.",
+          "Migración alembic 'agency_outro_assets' (revision encadenada): añadir columnas o nueva tabla. Decisión del implementer pero documentada en progress/impl_33_*.md.",
+          "modules/rendering/application/scripted_video/: helper concat_outro_to_reel que normaliza outro (resample a misma resolución/SAR/DAR/fps + audio resample/silence-pad).",
+          "modules/rendering/infrastructure/preparation.py o donde encaje: pasar outro path al pipeline si outro_enabled+source=uploaded.",
+          "Tests integration: upload → GET /defaults muestra outro_*; render con outro_enabled produce video cuya duración = duración_reel + outro_duration; verificar concat correcto vía ffprobe.",
+          "Tests unit del validator (size, mime, duration).",
+          "Docs: actualizar docs/API.md sección /defaults con outro_* + nueva sección outro upload."
+        ],
+        "front": [
+          "Cross-repo: feature 33 del front cablea IntroOutroCard 'Outro' al multipart upload + GET file."
+        ],
+        "external": [
+          "Operacional: blobs de outro en site_layout pueden crecer (max 50MB cada uno). Considerar cleanup cuando se desactiva outro_source='none'."
+        ]
+      },
+      "acceptance": [
+        "POST /outro/upload con multipart MP4 5s → 200 con {outro_object_key, outro_duration_seconds, outro_source: 'uploaded'}.",
+        "GET /outro/file devuelve los bytes del último upload.",
+        "DELETE /outro limpia metadata (source vuelve a 'none', object_key NULL) y borra blob.",
+        "Validación: mime no video → 422; duración >10s → 422; tamaño >50MB → 413.",
+        "Migración up/down/up funcional.",
+        "Render con outro_enabled=true y source='uploaded' produce MP4 final cuya duración = duración_base_reel + outro_duration_seconds (verificable con ffprobe en test integration).",
+        "Render con outro_enabled=false o source='none' NO concatena nada (comportamiento actual preservado).",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_outro_router.py tests/integration/rendering/ -q",
+        "Manual contra :8001: subir MP4 5s, GET /defaults, ingestar property con outro_enabled, verificar duración del reel renderizado."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 34,
+      "name": "agency_intro_video_upload_and_render",
+      "title": "Upload multipart de intro video por agencia + concat al inicio del reel renderizado",
+      "description": "Simétrico a feature 33 pero para intro. Mismo patrón de endpoints, storage, persistencia y validación; la concatenación va al INICIO del reel en lugar del final. Conviene mergear DESPUÉS de feature 33 para reaprovechar el helper de normalización + concat. Si en feature 33 se creó tabla agency_intro_outro_assets, esta solo añade fila 'intro'; si se añadieron columnas a agency_reel_defaults, esta añade columnas intro_* paralelas a outro_*.",
+      "module": "modules/configuration/, modules/rendering/, shared/storage/site_layout/, alembic/, tests/",
+      "schema": "Sí (intro_object_key, intro_duration_seconds, intro_source — paralelo a feature 33)",
+      "scope": {
+        "back": [
+          "modules/configuration/transport/http/intro_router.py: simétrico a outro_router.py.",
+          "modules/configuration/application/use_cases/upload_intro_video.py: simétrico a feature 33.",
+          "modules/configuration/domain/agency_settings.py: añadir campos intro_object_key, intro_duration_seconds, intro_source. (intro_enabled ya existe.)",
+          "modules/configuration/transport/payloads/defaults.py: exponer intro_* en GET /defaults.",
+          "shared/storage/site_layout: subcarpeta {agency_id}/intro/ paralela a /outro/.",
+          "Migración alembic encadenada tras feature 33: añadir columnas intro_*.",
+          "modules/rendering/: reusar helper de feature 33 para concatenar al inicio (concat_intro_to_reel).",
+          "Tests integration y unit simétricos a feature 33.",
+          "Docs: actualizar docs/API.md sección /defaults con intro_*."
+        ],
+        "front": [
+          "Cross-repo: feature 34 del front cablea IntroOutroCard 'Intro' al multipart upload."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "POST /intro/upload con multipart → 200 con {intro_object_key, intro_duration_seconds, intro_source: 'uploaded'}.",
+        "GET /intro/file y DELETE /intro funcionan como sus pares de outro.",
+        "Migración up/down/up funcional (encadenada tras feature 33).",
+        "Render con intro_enabled=true y source='uploaded' produce MP4 final cuya duración = intro_duration + duración_base_reel.",
+        "Render con outro_enabled e intro_enabled simultáneamente concatena ambos (intro al principio, outro al final, base reel en medio).",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/configuration/test_intro_router.py tests/integration/rendering/ -q",
+        "Manual contra :8001: subir MP4 intro 3s, ingestar property con intro_enabled, verificar reel con intro al principio."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 35,
+      "name": "per_reel_photos_override",
+      "title": "PATCH /reels/{id}/photos: reorder + selección persiste y re-encola render",
+      "description": "Hoy el editor del front puede reordenar y toggle-selected las fotos del reel solo en state local. Esta feature añade endpoint PATCH /v1/admin/agencies/{id}/reels/{site_id}/{source_property_id}/photos con body {photos: [{position: int, selected: bool}, ...]}. Valida que cada position cubre el rango completo de fotos disponibles (extraídas del media_revision actual del property), persiste el override en una nueva columna reels.photos_override JSONB, y re-encola un render con el nuevo orden (mismo patrón que feature 25 música y 21 descripciones). 409 CONFLICT si reel en workflow_state=approved o publish_status=published. El renderer respeta photos_override si existe; si es NULL, fallback al orden default (orden del media_revision).",
+      "module": "modules/reels/application/use_cases/, modules/reels/transport/http/admin_reels_router.py, modules/reels/transport/payloads/, modules/rendering/, alembic/, tests/",
+      "schema": "Sí (columna reels.photos_override JSONB NULL + migración encadenada)",
+      "scope": {
+        "back": [
+          "Migración alembic 'reels_add_photos_override': añadir columna reels.photos_override JSONB NULL.",
+          "shared/db/orm.py: añadir field photos_override al modelo Reel.",
+          "modules/reels/application/use_cases/update_reel_photos_override.py: valida el body (positions únicas y cubren el rango, sin gaps), persiste, re-encola render reusando el helper de feature 25.",
+          "modules/reels/transport/payloads/admin_reels.py: ReelPhotosOverridePayload con cues estrictas (extra='forbid').",
+          "modules/reels/transport/http/admin_reels_router.py: PATCH /photos handler con auth + 409 si workflow_state in {approved, published}.",
+          "modules/rendering/: leer photos_override si !=NULL al construir el manifest; sino fallback al orden default.",
+          "Tests integration: PATCH cambia el orden → re-encola job → render produce reel con fotos reordenadas (verificar manifest ffmpeg).",
+          "Tests integration 409: PATCH a reel approved devuelve 409 con error code apropiado.",
+          "Docs: actualizar docs/API.md."
+        ],
+        "front": [
+          "Cross-repo: feature 35 del front cablea PhotosPanel al PATCH."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "PATCH /reels/{id}/photos con [{position:0,selected:true},{position:1,selected:false},{position:2,selected:true}] → 200; reels.photos_override persistido.",
+        "Body inválido (positions con gap, duplicadas, fuera de rango) → 422 con detail informativo.",
+        "PATCH a reel approved → 409 PHOTOS_OVERRIDE_LOCKED (o nombre alineado con feature 25).",
+        "PATCH dispara job de render; tras procesar, el video refleja el nuevo orden.",
+        "PATCH con photos vacío o null → clear override; render vuelve a usar orden default.",
+        "Migración up/down/up funcional.",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/reels/test_reel_photos_override.py tests/integration/rendering/ -q",
+        "Manual contra :8001: PATCH photos, esperar render, verificar reel renderizado."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 36,
+      "name": "per_reel_subtitles_override",
+      "title": "PATCH /reels/{id}/subtitles: edición de texto y tiempos persiste y re-encola render",
+      "description": "Hoy SubtitlesPanel edita en state local. Esta feature añade PATCH /v1/admin/agencies/{id}/reels/{site_id}/{source_property_id}/subtitles con body {cues: [{index:int, text:str, in_seconds:float, out_seconds:float}, ...]}. Valida: cada cue tiene in<out, in/out>=0, sin solapes, index único y monotonous, text 1-200 chars. Persiste en nueva columna reels.subtitles_override JSONB. Re-encola render que ahora genera la pista de subs desde el override (reemplaza la pista auto-generada por autoCaptions). 409 si reel approved/published. Si subtitles_override es NULL, el renderer mantiene el comportamiento actual (autoCaptions si está enabled, nada si está disabled).",
+      "module": "modules/reels/application/use_cases/, modules/reels/transport/, modules/rendering/, alembic/, tests/",
+      "schema": "Sí (columna reels.subtitles_override JSONB NULL)",
+      "scope": {
+        "back": [
+          "Migración alembic 'reels_add_subtitles_override': columna reels.subtitles_override JSONB NULL.",
+          "shared/db/orm.py: añadir field subtitles_override al modelo Reel.",
+          "modules/reels/application/use_cases/update_reel_subtitles_override.py: valida cues (in<out, no overlap, index único), persiste, re-encola render.",
+          "modules/reels/transport/payloads/admin_reels.py: ReelSubtitlesOverridePayload con shape estricto.",
+          "modules/reels/transport/http/admin_reels_router.py: PATCH /subtitles handler con 409.",
+          "modules/rendering/: si subtitles_override != NULL, usar esos cues en lugar del flujo autoCaptions actual. Generar drawtext / SubRip file desde los cues.",
+          "Tests integration: PATCH cambia texto/tiempos → re-encola → video resultante tiene los nuevos subs (verificar filter graph o ffprobe srt extract).",
+          "Tests 422: overlap, in>=out, text vacío, text >200 chars.",
+          "Tests 409: PATCH a reel approved.",
+          "Docs."
+        ],
+        "front": [
+          "Cross-repo: feature 36 del front cablea SubtitlesPanel al PATCH."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "PATCH /reels/{id}/subtitles con cues válidos → 200; reels.subtitles_override persistido.",
+        "Body inválido (overlap, in>=out, text vacío/>200) → 422.",
+        "PATCH a reel approved → 409.",
+        "Render usa los cues persistidos en el filter graph (drawtext o burn-in).",
+        "PATCH con cues=[] o null → clear override; render vuelve a autoCaptions o sin subs según defaults.",
+        "Migración up/down/up funcional.",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/reels/test_reel_subtitles_override.py tests/integration/rendering/ -q",
+        "Manual contra :8001: PATCH subtitles con texto custom, esperar render, verificar visualmente que el video muestra los nuevos textos."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 37,
+      "name": "per_reel_slides_override",
+      "title": "PATCH /reels/{id}/slides: edición del manifest de escenas persiste y re-encola render",
+      "description": "SlidesPanel del front permite editar la lista/orden de escenas del reel (escenas con fotos, voiceover, intro, etc.) — más amplio que solo fotos o subs. Esta feature añade PATCH /v1/admin/agencies/{id}/reels/{site_id}/{source_property_id}/slides con body {slides: [{slide_id, position, duration_seconds, kind, ...}, ...]} que reemplaza la sección scenes del manifest. Validación: shape de cada slide (kind permitido en {photo, voiceover, text, intro_card, outro_card}), suma de durations ≤ target_duration_seconds * 1.5 (margin), positions cubren rango 0..N-1 sin gaps. Persiste en reels.manifest_override JSONB. Re-encola render que ahora construye el manifest desde el override. 409 si reel approved/published.",
+      "module": "modules/reels/application/use_cases/, modules/reels/transport/, modules/rendering/application/scripted_video/, alembic/, tests/",
+      "schema": "Sí (columna reels.manifest_override JSONB NULL)",
+      "scope": {
+        "back": [
+          "Migración alembic 'reels_add_manifest_override': columna reels.manifest_override JSONB NULL.",
+          "shared/db/orm.py: añadir field manifest_override.",
+          "modules/reels/application/use_cases/update_reel_slides_override.py: valida slides, persiste, re-encola render.",
+          "modules/reels/transport/payloads/admin_reels.py: ReelSlidesOverridePayload con discriminator por 'kind' (Pydantic Discriminated Union).",
+          "modules/reels/transport/http/admin_reels_router.py: PATCH /slides handler con 409.",
+          "modules/rendering/application/scripted_video/: si manifest_override != NULL, construir el render plan desde el override en lugar del manifest auto-generado.",
+          "Tests integration cubren reorder, edit duration, distintos kinds.",
+          "Tests 422 (kind inválido, positions con gap, duración total fuera de rango).",
+          "Tests 409.",
+          "Docs."
+        ],
+        "front": [
+          "Cross-repo: feature 37 del front cablea SlidesPanel al PATCH."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "PATCH /reels/{id}/slides con slides válidos → 200; manifest_override persistido.",
+        "Body inválido → 422 con detalles por slide.",
+        "PATCH a reel approved → 409.",
+        "Render construye plan desde manifest_override y video resultante refleja el nuevo orden + duraciones.",
+        "PATCH con slides=[] o null → clear override; render vuelve al manifest auto-generado.",
+        "Migración up/down/up funcional.",
+        "pytest -q verde.",
+        "apps.api --check y apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head",
+        ".venv/bin/python -m pytest tests/integration/reels/test_reel_slides_override.py tests/integration/rendering/ -q",
+        "Manual contra :8001: PATCH slides reordenando, esperar render, verificar reel."
+      ],
+      "status": "done"
+    },
+    {
+      "id": 38,
+      "name": "db_backed_webhook_secrets",
+      "title": "Webhook WordPress lee el signing secret desde ingestion_sources en lugar de exigir restart con WEBHOOK_SITE_SECRETS",
+      "description": "Hoy POST /v1/ingest/wordpress/property solo acepta sites cuyo secret esté en la env var WEBHOOK_SITE_SECRETS (modules/ingestion/transport/http/wordpress_webhook_router.py:179). Eso convierte el modelo en operativamente 1 WordPress por agencia: aunque el schema ya soporta N sites (UNIQUE(agency_id, kind, external_id) en ingestion_sources no bloquea) y el admin CRUD ya persiste el secret en la columna ingestion_sources.secrets_encrypted (PUT /v1/admin/wordpress-sources/{site_id} vía ProvisionWordPressSourceUseCase), el webhook handler nunca lo lee. Esta feature refactoriza la resolución del secret: primero busca ingestion_sources.secrets_encrypted (desencriptado con shared.db.security.decrypt_text), y solo cae al settings.site_secrets de env como fallback legacy con warning log. Si ni BBDD ni env tienen secret → 401 INVALID_WEBHOOK_CREDENTIALS (comportamiento actual). Resultado: una misma cuenta GHL puede recibir webhooks de N WordPress por agencia sin reiniciar el servicio.",
+      "module": "modules/ingestion/transport/http/, modules/ingestion/infrastructure/, tests/integration/ingestion/, tests/unit/ingestion/",
+      "schema": "No (la columna ingestion_sources.secrets_encrypted ya existe; ningún DDL nuevo)",
+      "scope": {
+        "back": [
+          "modules/ingestion/transport/http/wordpress_webhook_router.py: extraer _resolve_expected_secret(uow, site_id, env_fallback) que (1) hace uow.ingestion.sources.get_by_kind_external_id(kind='wordpress', external_id=site_id), (2) si source.secrets_encrypted es no-NULL, llama decrypt_text(source.secrets_encrypted) y lo retorna, (3) si NULL → fallback a settings.site_secrets.get(site_id) con log.warning('using legacy env secret for site_id=…'), (4) si tampoco hay env → return None.",
+          "Sustituir el lookup actual de settings.site_secrets.get(site_id) (línea 179) por _resolve_expected_secret(uow, site_id, settings.site_secrets). Mantener exactamente la rama de 401 INVALID_WEBHOOK_CREDENTIALS cuando el secret resuelto es None.",
+          "Verificar que el módulo de IngestionSourceRepository expone get_by_kind_external_id en el uow (ya lo hace según el explorer). Si hace falta un alias `find_by_site_id` no añadirlo — usar el lookup existente.",
+          "Sin cambios en ProvisionWordPressSourceUseCase ni en wordpress_sources_router.py — ya persisten correctamente.",
+          "Sin cambios en schema, alembic, shared/db/orm.py, settings/.",
+          "Tests integration en tests/integration/ingestion/test_wordpress_webhook_flow.py (extender, no archivo nuevo): (a) webhook con secret en BBDD y sin env → 202; (b) webhook con secret en BBDD que NO matchea la firma → 401; (c) site sin secrets_encrypted en BBDD pero con env → 202 + warning log capturable; (d) 2 sites WP distintos provisionados para la MISMA agency, cada uno con su secret en BBDD, ambos envían webhook → ambos 202 con job encolado y agency_id correcto.",
+          "Tests unit en tests/unit/ingestion/test_wordpress_webhook_secret_resolution.py (archivo nuevo): mock del repo + env, asserts del orden BBDD→env→None y del log de warning."
+        ],
+        "front": [],
+        "external": []
+      },
+      "acceptance": [
+        "POST /v1/ingest/wordpress/property con site_id cuyo secret está en ingestion_sources.secrets_encrypted (env vacía) → 202.",
+        "Mismo POST con signature inválida → 401 INVALID_WEBHOOK_CREDENTIALS.",
+        "POST con site_id que no tiene secrets_encrypted en BBDD pero sí en WEBHOOK_SITE_SECRETS → 202 + log warning 'using legacy env secret'.",
+        "POST con site_id sin secret ni en BBDD ni en env → 401.",
+        "2 sites WP distintos provisionados para la misma agency, sin reiniciar el servicio entre provision y webhook, ambos webhooks aceptados (202) y resueltos a la misma agency_id.",
+        "Tests existentes de test_wordpress_webhook_flow.py siguen verdes (regression).",
+        "apps.api --check verde; apps.worker --check verde.",
+        "bash ./init.sh exit 0 (modulo los 3 fallos baseline conocidos)."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/ingestion/test_wordpress_webhook_flow.py tests/unit/ingestion/test_wordpress_webhook_secret_resolution.py -q",
+        ".venv/bin/python -m apps.api --check",
+        "Manual contra :8001: PUT /v1/admin/wordpress-sources/site-a {webhook_secret:'…'} → PUT /v1/admin/wordpress-sources/site-b {webhook_secret:'…'} (misma agency_id) → enviar webhook firmado a cada uno → ambos 202."
+      ],
+      "status": "done",
+      "leader_notes": "Feature 37 está in_progress en paralelo (impl_37.md existe, review_37.md pendiente). NO tocar shared/db/orm.py, modules/reels/, modules/rendering/, alembic/versions/, docs/API.md, docs/http_surface.md, docs/openapi.json. Si la regeneración de docs/openapi.json se considera necesaria por esta feature, diferirla — el contrato HTTP del webhook no cambia, sólo cambia la fuente del secret."
+    },
+    {
+      "id": 39,
+      "name": "test_reels_list_ordering_guard",
+      "title": "Test integration: GET /reels devuelve los reels ordenados por updated_at DESC y un reel modificado sube al top",
+      "description": "Hoy el endpoint GET /v1/admin/agencies/{agency_id}/reels ordena por r.updated_at DESC NULLS LAST (modules/reels/infrastructure/reel_query.py:259) y todos los use cases que mutan un reel actualizan updated_at vía ReelStateRepository.save(). No existe test que verifique esa garantía explícitamente. Esta feature añade test integration que (a) seedea 3 reels con updated_at en T1<T2<T3 y verifica orden T3,T2,T1 en la respuesta; (b) muta el reel T1 (cualquier override que toque updated_at, ej PATCH /music via UpdateReelMusicOverrideUseCase o equivalente) y verifica que T1 pasa a la primera posición. Sin cambios en código de producción — sólo guard test.",
+      "module": "tests/integration/reels/",
+      "schema": "No",
+      "scope": {
+        "back": [
+          "tests/integration/reels/test_list_reels_ordering.py (archivo nuevo): seedear 3 reels distintos con updated_at controlado vía tests/support/postgres.py fixtures (seed_reel o equivalente). Test 1: GET /v1/admin/agencies/{id}/reels devuelve ids en orden esperado por updated_at DESC. Test 2: tras tocar updated_at del reel más antiguo (vía SQL directo en la fixture o vía PATCH a un endpoint público que mute el reel — preferible PATCH para cubrir el path real), siguiente GET lo muestra primero.",
+          "Sin cambios en modules/, apps/, shared/, alembic/, settings/."
+        ],
+        "front": [],
+        "external": []
+      },
+      "acceptance": [
+        "Test 1: tres reels seeded en T1<T2<T3 → GET devuelve orden T3, T2, T1.",
+        "Test 2: tras mutar el reel T1 (touch updated_at) → siguiente GET devuelve T1 primero.",
+        "Los tests existentes en tests/integration/reels/ siguen pasando sin regresión.",
+        "bash ./init.sh exit 0 (modulo 3 baseline failures conocidos)."
+      ],
+      "verification": [
+        ".venv/bin/python -m pytest tests/integration/reels/test_list_reels_ordering.py -q",
+        "bash ./init.sh"
+      ],
+      "status": "done",
+      "leader_notes": "Feature paralela a frontend #39 (live_state_sync_reels_dashboard). Esta feature NO toca código de producción — sólo añade tests. No modificar shared/db/orm.py, modules/reels/, ni alembic."
+    },
+    {
+      "id": 40,
+      "name": "manual_reel_regenerate_endpoint",
+      "title": "POST /reels/{id}/regenerate: re-encolar render manualmente sin tocar workflow/publish",
+      "description": "Botón 'Render again' del editor (front feature 40) necesita un endpoint que SOLO re-encole un render del reel con su config actual + overrides (photos/subtitles/manifest) sin tocar workflow_state ni publish_status (a diferencia del approve+regenerate existente, que sí los muta). Reusa RegenerateReelUseCase con un modo nuevo. 409 si publish_status='published' o si ya hay un job 'queued'/'processing' para esta property. Response 200: {render_status:'pending', job_id, queued_at}.",
+      "module": "modules/reels/transport/http/admin_reels_router.py, modules/reels/application/use_cases/regenerate_reel.py, modules/reels/transport/payloads/admin_reels.py, tests/",
+      "schema": "No",
+      "scope": {
+        "back": [
+          "modules/reels/transport/http/admin_reels_router.py: nuevo POST /v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/regenerate. Reusa RegenerateReelUseCase con modo 'manual_only' que NO mute workflow_state ni publish_status.",
+          "modules/reels/application/use_cases/regenerate_reel.py: parámetro nuevo `mode: Literal['approve_and_regenerate','manual_only']` con default 'approve_and_regenerate' (preserva callers existentes — el approve handler sigue pasando default). El handler manual pasa 'manual_only' y el use case skipea el setattr de workflow_state/publish_status.",
+          "modules/reels/transport/payloads/admin_reels.py: ReelManualRegeneratePayload con `reason: str | None` opcional (auditoría). extra='forbid'.",
+          "Pre-check de conflict: (a) si publish_status=='published' → 409 con code 'REGENERATE_PUBLISHED_FORBIDDEN'. (b) si SELECT 1 FROM jobs WHERE kind='reel_publish' AND property_id=... AND status IN ('queued','processing') exists → 409 'REGENERATE_ALREADY_IN_FLIGHT'.",
+          "Tests integration en tests/integration/reels/test_regenerate_reel_manual.py: happy path (200, job encolado, workflow/publish status invariantes), 409 published, 409 in_flight, 404 not found, override survives (photos_override sigue presente en el job encolado).",
+          "docs/API.md: nueva sección 'POST /reels/.../regenerate (feature 40)'."
+        ],
+        "front": [
+          "Cross-repo: front feature 40 cablea el botón al endpoint."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "POST /regenerate sobre reel render_status=completed, publish_status NOT published → 200 con {render_status:'pending', job_id}; nuevo job en tabla con status='queued'.",
+        "POST /regenerate sobre reel publish_status='published' → 409 REGENERATE_PUBLISHED_FORBIDDEN.",
+        "POST /regenerate cuando ya existe job 'queued' o 'processing' para esa property → 409 REGENERATE_ALREADY_IN_FLIGHT.",
+        "POST sobre reel inexistente → 404.",
+        "workflow_state y publish_status NO cambian tras el POST (assert antes/después).",
+        "Si el reel tiene photos_override/subtitles_override/manifest_override no-NULL, el nuevo render los usa (verificar via existing_state peek).",
+        "pytest -q verde (no regresa features 25/35/36/37).",
+        "apps.api --check + apps.worker --check exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/reels/test_regenerate_reel_manual.py tests/integration/reels/test_reel_photos_override.py tests/integration/reels/test_reel_subtitles_override.py -q",
+        "Manual contra :8001: POST regenerate, verificar nuevo job + render completed."
       ],
       "status": "done"
     }

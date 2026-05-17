@@ -181,6 +181,7 @@ def build_property_reel_manifest_from_data(
             workspace_dir,
             settings,
             shuffle_candidates=False,
+            music_tracks=None,
         )
     )
 

@@ -29,6 +29,7 @@ ACTIVE_TABLES = frozenset(
         "agency_automation_rules",
         "agency_social_templates",
         "agency_music_tracks",
+        "agency_intro_outro_assets",
         "properties",
         "property_images",
         "reels",
@@ -37,6 +38,7 @@ ACTIVE_TABLES = frozenset(
         "jobs",
         "outbox_events",
         "scripted_video_artifacts",
+        "email_notifications",
         "alembic_version",
     }
 )
@@ -158,11 +160,20 @@ def seed_tenant(
     *,
     site_id: str = "site-a",
     source_status: str = "active",
+    seed_default_music: bool = True,
+    workspace_dir: Path | None = None,
 ) -> SeededTenant:
     """Seed an agency + a WordPress `ingestion_sources` row.
 
     `site_id` is kept as the parameter name for backwards compatibility; it
     becomes `ingestion_sources.external_id` (with `kind='wordpress'`).
+
+    Feature 23: by default also seed a synthetic ``agency_music_tracks``
+    row so flows that ingest a property through the renderer can resolve
+    a non-empty music pool. Tests that want to exercise the empty-pool
+    error path can pass ``seed_default_music=False`` and assert on
+    :class:`~shared.errors.PropertyReelError` with
+    ``code="MUSIC_NO_TRACKS"``.
     """
     timestamp = datetime.now(timezone.utc)
     agency_id = str(uuid4())
@@ -215,8 +226,38 @@ def seed_tenant(
                     "updated_at": timestamp,
                 },
             )
+            if seed_default_music:
+                object_key = f"agencies/{agency_id}/music/_seed_ncs_test.mp3"
+                connection.execute(
+                    text(
+                        "INSERT INTO agency_music_tracks ("
+                        "id, agency_id, display_name, object_key, "
+                        "duration_seconds, is_default, created_at"
+                        ") VALUES (:id, :agency_id, :display_name, "
+                        ":object_key, :duration_seconds, :is_default, "
+                        ":created_at)"
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "agency_id": agency_id,
+                        "display_name": "Test Track",
+                        "object_key": object_key,
+                        "duration_seconds": 60,
+                        "is_default": True,
+                        "created_at": timestamp,
+                    },
+                )
     finally:
         engine.dispose()
+    if seed_default_music and workspace_dir is not None:
+        music_dir = (
+            Path(workspace_dir)
+            / "generated_media"
+            / "_agency_music"
+            / agency_id
+        )
+        music_dir.mkdir(parents=True, exist_ok=True)
+        (music_dir / "_seed_ncs_test.mp3").write_bytes(b"stub-music-track")
     return SeededTenant(
         agency_id=agency_id,
         ingestion_source_id=ingestion_source_id,

@@ -42,7 +42,9 @@ def _build_client(database_url: str, workspace_dir) -> TestClient:
 def test_get_returns_null_for_a_fresh_agency() -> None:
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seeded = seed_tenant(
+                database.url, site_id="ckp.ie", seed_default_music=False
+            )
             client = _build_client(database.url, workspace_dir)
 
             response = client.get(

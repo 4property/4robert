@@ -90,7 +90,9 @@ class WorkerDispatcherFlowTests(unittest.TestCase):
     def test_reel_publish_handler_completes_job_and_writes_outbox(self) -> None:
         with temporary_workspace() as workspace_dir:
             with temporary_postgres_schema(DATABASE_URL) as database:
-                tenant = seed_tenant(database.url, site_id="ckp.ie")
+                tenant = seed_tenant(
+                    database.url, site_id="ckp.ie", workspace_dir=workspace_dir
+                )
                 seed_provider_connection(
                     database.url,
                     agency_id=tenant.agency_id,

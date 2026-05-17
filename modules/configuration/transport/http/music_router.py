@@ -28,13 +28,11 @@ from modules.configuration.application.use_cases.reconfigure_music_track import 
     ReconfigureMusicTrackUseCase,
 )
 from modules.configuration.application.use_cases.register_music_track import (
-    RegisterMusicTrackInput,
     RegisterMusicTrackUseCase,
 )
 from modules.configuration.domain import MusicTrack
 from modules.configuration.transport.payloads.music import (
     MusicTrackPatchPayload,
-    MusicTrackPayload,
 )
 from shared.db import DatabaseUnitOfWork
 from shared.errors import ApplicationError, ResourceNotFoundError, ValidationError
@@ -56,7 +54,11 @@ def create_music_router(
         prefix=admin_access_policy.base_path,
         tags=["Admin · Music"],
     )
-    register_music_track = register_music_track or RegisterMusicTrackUseCase()
+    # ``register_music_track`` is retained as a kwarg for backwards
+    # compatibility with callers that wire it from a parent factory, but
+    # this router no longer accepts a direct metadata POST (feature 22).
+    # The upload router owns the registration call now.
+    del register_music_track
     list_music_tracks = list_music_tracks or ListMusicTracksUseCase()
     inspect_music_track = inspect_music_track or InspectMusicTrackUseCase()
     reconfigure_music_track = reconfigure_music_track or ReconfigureMusicTrackUseCase()
@@ -66,62 +68,36 @@ def create_music_router(
 
     @router.post(
         "/agencies/{agency_id}/music",
-        summary="Register a new music track for the agency",
+        summary="(retired) Direct metadata POST for a music track",
         description=(
-            "Adds a track to the agency music library. The `id` is "
-            "generated server side; the response echoes the saved record."
+            "Retired by feature 22. Use "
+            "`POST /v1/admin/agencies/{id}/music/upload` (multipart) "
+            "instead. Always returns 405."
         ),
     )
     async def register_admin_agency_music_track(
         agency_id: str,
-        payload: MusicTrackPayload,
         request: Request,
     ) -> JSONResponse:
+        # Auth-first so probing the surface still requires a valid token
+        # (matches every other admin endpoint and avoids leaking endpoint
+        # existence to unauthenticated callers).
         authorization_error = authorize_admin_request(request, admin_access_policy)
         if authorization_error is not None:
             return authorization_error
-        try:
-            with unit_of_work_factory() as uow:
-                track = register_music_track.execute(
-                    uow=uow,
-                    data=RegisterMusicTrackInput(
-                        agency_id=agency_id,
-                        display_name=payload.display_name,
-                        object_key=payload.object_key,
-                        duration_seconds=payload.duration_seconds,
-                        is_default=payload.is_default,
-                    ),
-                )
-        except ValidationError as error:
-            return json_error(
-                400,
-                str(error),
-                code=error.code,
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-        except ResourceNotFoundError as error:
-            return json_error(
-                404,
-                str(error),
-                code=error.code,
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-        except ApplicationError as error:
-            return json_error(
-                500,
-                str(error),
-                code=getattr(error, "code", "MUSIC_TRACK_SAVE_FAILED"),
-                hint=error.hint,
-                details={"context": error.context} if error.context else None,
-            )
-        return JSONResponse(
-            status_code=201,
-            content={
-                "status": "created",
+        return json_error(
+            405,
+            (
+                "Direct metadata POST is retired. Use "
+                "POST /v1/admin/agencies/{id}/music/upload instead."
+            ),
+            code="METHOD_NOT_ALLOWED",
+            details={
                 "agency_id": agency_id,
-                "music_track": _serialize_track(track),
+                "use_endpoint": (
+                    f"POST {admin_access_policy.base_path}"
+                    f"/agencies/{agency_id}/music/upload"
+                ),
             },
         )
 
@@ -221,8 +197,8 @@ def create_music_router(
                         agency_id=agency_id,
                         music_id=music_id,
                         display_name=payload.display_name,
-                        object_key=payload.object_key,
-                        duration_seconds=payload.duration_seconds,
+                        object_key=None,
+                        duration_seconds=None,
                         is_default=payload.is_default,
                     ),
                 )

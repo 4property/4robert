@@ -92,6 +92,11 @@ class TimedTextSegmentLayout:
     clamped: bool
     start_time: float
     end_time: float
+    # Feature 31: per-segment horizontal alignment ("center"/"left"/"right")
+    # honored by the ffmpeg ``drawtext`` builder. ``"center"`` preserves
+    # the historical centering inside ``max_width``; "left" anchors at
+    # ``x``; "right" right-aligns inside ``max_width``.
+    alignment: str = "center"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -108,6 +113,7 @@ class TimedTextSegmentLayout:
             "clamped": self.clamped,
             "start_time": round(self.start_time, 3),
             "end_time": round(self.end_time, 3),
+            "alignment": self.alignment,
         }
 
 

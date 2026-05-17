@@ -9,6 +9,7 @@ during sub-feature 18c. Wraps the social-media-posting endpoints
 from __future__ import annotations
 
 import html
+import re
 from urllib.parse import quote
 
 from shared.errors import SocialPublishingError
@@ -20,6 +21,56 @@ from modules.publishing.infrastructure.adapters.gohighlevel.models import (
     UploadedMedia,
 )
 from modules.publishing.infrastructure.adapters.platforms import get_platform_config
+
+
+# Match `<br>` variants (preserve as newline) before stripping any other tag.
+_BR_TAG_PATTERN = re.compile(r"<br\s*/?>", re.IGNORECASE)
+# Match `</p>` (preserve as paragraph break).
+_CLOSE_P_PATTERN = re.compile(r"</p\s*>", re.IGNORECASE)
+# Match any HTML-ish `<...>` token (greedy until the next `>`).
+_TAG_PATTERN = re.compile(r"<[^>]+>")
+# Collapse 3+ consecutive newlines into a single paragraph break.
+_BLANK_LINE_PATTERN = re.compile(r"\n{3,}")
+# Trim trailing whitespace before each newline.
+_TRAILING_WS_PATTERN = re.compile(r"[ \t]+\n")
+
+
+def _sanitize_for_social(text: str | None) -> str | None:
+    """Strip HTML so platforms that reject `<` and `>` (notably YouTube) accept
+    the description.
+
+    Mirrors the cleanup `modules.rendering.infrastructure.ai_photo_selection.
+    prompting.html_to_text` performs but kept inline so the social publisher
+    has no upstream dependency on a rendering helper. Idempotent on plain
+    text: a caption without any tags or entities round-trips unchanged.
+
+    Order matters:
+
+    1. Decode HTML entities first (`&amp;` → `&`, `&lt;` → `<`). This is
+       what the previous `html.unescape` call did. Decoding before tag
+       stripping turns `&lt;a&gt;` into `<a>` so the regex picks it up
+       and removes it consistently.
+    2. Preserve line breaks: `<br>` → `\n`, `</p>` → `\n\n`.
+    3. Strip all remaining `<…>` tokens.
+    4. Replace any stray `<` or `>` (from malformed HTML) with a space so
+       the YouTube validator never sees one.
+    5. Normalise trailing whitespace before newlines and collapse runs of
+       3+ newlines into a paragraph break.
+    """
+    if text is None:
+        return text
+    if not text:
+        return text
+    decoded = html.unescape(text)
+    decoded = _BR_TAG_PATTERN.sub("\n", decoded)
+    decoded = _CLOSE_P_PATTERN.sub("\n\n", decoded)
+    decoded = _TAG_PATTERN.sub("", decoded)
+    # Replace any stray angle brackets that survived (malformed HTML, raw
+    # `<` from non-template text). YouTube rejects them outright.
+    decoded = decoded.replace("<", " ").replace(">", " ")
+    decoded = _TRAILING_WS_PATTERN.sub("\n", decoded)
+    decoded = _BLANK_LINE_PATTERN.sub("\n\n", decoded)
+    return decoded.strip()
 
 
 class GoHighLevelSocialService:
@@ -99,15 +150,18 @@ class GoHighLevelSocialService:
         target_url: str | None = None,
         scheduled_at: str | None = None,
     ) -> CreatedSocialPost:
-        # Final hop before the POST body leaves the process — decode any HTML
-        # entities (`&#8217;`, `&amp;`, `&quot;`, `&#x2019;`) that may still
-        # be sitting in description/title. The deterministic content generator
-        # and `normalize_caption` already decode at their respective layers,
-        # but a defensive decode here keeps the contract with GHL clean even
-        # when callers bypass those layers (feature 12
-        # `unescape_html_entities_everywhere`). `html.unescape` is idempotent.
-        decoded_description = html.unescape(description) if description else description
-        decoded_title = html.unescape(title) if title else title
+        # Final hop before the POST body leaves the process — strip HTML tags
+        # and decode entities. Originally just `html.unescape` (feature 12
+        # `unescape_html_entities_everywhere`), but YouTube outright rejects
+        # any `<` or `>` in the description (HTTP 400 "Invalid video
+        # description specified in the request metadata.") and WordPress
+        # `short_description` routinely contains `<p>`, `<br>`, `<a>` and
+        # similar markup that flows through the template into the caption.
+        # `_sanitize_for_social` strips tags, preserves paragraph breaks,
+        # decodes entities and removes any stray angle bracket so all
+        # platforms see plain text.
+        decoded_description = _sanitize_for_social(description)
+        decoded_title = _sanitize_for_social(title)
         # Feature 11: honour the agency's automation publish window. If
         # the regenerate use case computed a future ``scheduled_at`` (ISO
         # 8601 UTC), GoHighLevel expects ``status='scheduled'`` plus the

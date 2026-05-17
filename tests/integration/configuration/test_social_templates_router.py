@@ -261,3 +261,228 @@ def test_social_templates_put_reports_every_offending_platform() -> None:
             details = body.get("details") or {}
             offending = details.get("unknown_variables_by_platform") or {}
             assert offending == {"instagram": ["foo"], "tiktok": ["bar", "baz"]}
+
+
+# ── Feature 20 — rich payload, title_template & hashtags ────────────────────
+
+
+def test_put_accepts_rich_shape_with_title_and_hashtags() -> None:
+    """Feature 20: the PUT accepts ``{description_template, title_template,
+    hashtags}`` per platform and the GET surfaces them in ``items[]``.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "pinterest": {
+                            "description_template": "See {{property_title}} in {{city}}",
+                            "title_template": "{{property_title}} · {{price}}",
+                            "hashtags": ["#realestate", "#dublin"],
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            # Legacy flat `templates` keeps the description for backward-compat.
+            assert payload["templates"] == {
+                "pinterest": "See {{property_title}} in {{city}}",
+            }
+            items_by_platform = {item["platform"]: item for item in payload["items"]}
+            assert items_by_platform["pinterest"]["title_template"] == (
+                "{{property_title}} · {{price}}"
+            )
+            assert items_by_platform["pinterest"]["hashtags"] == [
+                "#realestate",
+                "#dublin",
+            ]
+
+            # GET round-trip exposes the rich fields too.
+            get_response = client.get(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                headers=ADMIN_BEARER,
+            )
+            assert get_response.status_code == 200, get_response.text
+            get_body = get_response.json()
+            stored = {item["platform"]: item for item in get_body["items"]}
+            assert stored["pinterest"]["description_template"] == (
+                "See {{property_title}} in {{city}}"
+            )
+            assert stored["pinterest"]["title_template"] == (
+                "{{property_title}} · {{price}}"
+            )
+            assert stored["pinterest"]["hashtags"] == ["#realestate", "#dublin"]
+
+
+def test_put_rejects_unknown_variable_in_title_template_with_422() -> None:
+    """Title template variables are validated against the same catalog as
+    descriptions. The 422 payload nests ``title_template`` under the
+    platform so the frontend renders the error next to the right field.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "pinterest": {
+                            "description_template": "{{property_title}}",
+                            "title_template": "{{cosa_inventada}} of {{city}}",
+                            "hashtags": [],
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 422, response.text
+            body = response.json()
+            assert body["code"] == "SOCIAL_TEMPLATE_UNKNOWN_VARIABLE"
+            details = body.get("details") or {}
+            assert details["unknown_variables_by_platform"] == {
+                "pinterest": {"title_template": ["cosa_inventada"]},
+            }
+
+
+def test_put_reports_both_fields_when_each_has_unknown_variables() -> None:
+    """If both description and title carry unknown variables, the nested
+    shape lists both keys so the admin fixes them in one round-trip.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "pinterest": {
+                            "description_template": "{{foo}} home in {{city}}",
+                            "title_template": "{{bar}}",
+                            "hashtags": [],
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 422, response.text
+            details = response.json().get("details") or {}
+            assert details["unknown_variables_by_platform"] == {
+                "pinterest": {
+                    "description_template": ["foo"],
+                    "title_template": ["bar"],
+                }
+            }
+
+
+def test_put_rejects_invalid_hashtag_with_422() -> None:
+    """Each hashtag must match ``^#[\\w-]{1,50}$``; otherwise 422."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "pinterest": {
+                            "description_template": "",
+                            "title_template": "",
+                            "hashtags": ["#valid", "no-hash", "#bad space"],
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 422, response.text
+            body = response.json()
+            assert body["code"] == "SOCIAL_TEMPLATE_INVALID_HASHTAG"
+            details = body.get("details") or {}
+            errors = details.get("hashtag_errors_by_platform") or {}
+            assert errors == {
+                "pinterest": {"invalid": ["no-hash", "#bad space"]}
+            }
+
+
+def test_put_rejects_more_than_30_hashtags_with_422() -> None:
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            hashtags = [f"#tag{i:03d}" for i in range(35)]
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "instagram": {
+                            "description_template": "",
+                            "title_template": "",
+                            "hashtags": hashtags,
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 422, response.text
+            body = response.json()
+            assert body["code"] == "SOCIAL_TEMPLATE_INVALID_HASHTAG"
+            details = body.get("details") or {}
+            errors = details.get("hashtag_errors_by_platform") or {}
+            assert errors["instagram"]["count"] == 35
+            assert errors["instagram"]["max"] == 30
+
+
+def test_put_legacy_string_shape_still_works() -> None:
+    """Backward-compat: ``templates[platform] = "<string>"`` keeps working."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/social-templates",
+                json={
+                    "templates": {
+                        "instagram": "Visit {{property_title}} in {{city}}",
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["templates"] == {
+                "instagram": "Visit {{property_title}} in {{city}}",
+            }
+            items = {item["platform"]: item for item in payload["items"]}
+            # title_template and hashtags default to empty for the legacy shape.
+            assert items["instagram"]["title_template"] == ""
+            assert items["instagram"]["hashtags"] == []

@@ -38,6 +38,37 @@ DEFAULT_REEL_FONT_PATH = Path("assets/fonts/Inter/static/Inter_28pt-Regular.ttf"
 DEFAULT_REEL_FONT_BOLD_PATH = Path("assets/fonts/Inter/static/Inter_28pt-Bold.ttf")
 
 
+@dataclass(frozen=True, slots=True)
+class SubtitleStyle:
+    """Per-agency subtitle styling resolved from ``agency_reel_defaults.settings``.
+
+    Feature 31: the frontend ``/defaults > Subtitles`` panel persists ten
+    ``sub*`` fields plus ``automation.autoCaptions`` under
+    ``agency_reel_defaults.settings`` (JSONB). The ingest use case maps
+    those into renderer-internal keys on
+    ``render_template_reel_settings``; ``frame_composition._build_render_data``
+    then materialises them into this dataclass which travels with
+    ``PropertyRenderData`` to the ffmpeg filter graph.
+
+    Defaults mirror the frontend defaults so a freshly-onboarded agency
+    that never opened the panel renders the same look the codebase had
+    before feature 31 cabled the wires (outline-only subtitle, bottom
+    position, centered, no uppercase, 36-char wrap).
+    """
+
+    enabled: bool = True
+    font_family: str | None = None
+    weight: str = "700"
+    color: str = "#ffffff"
+    bg_style: str = "outline"
+    bg_color: str = "#0f1729"
+    bg_opacity: int = 82
+    position: str = "bottom"
+    alignment: str = "center"
+    uppercase: bool = False
+    max_chars: int = 36
+
+
 @dataclass(slots=True)
 class PropertyReelTemplate:
     width: int = REEL_WIDTH
@@ -141,6 +172,42 @@ class PropertyRenderData:
     viewing_times: tuple[str, ...] = ()
     accent_text_color: str | None = None
     accent_background_color: str | None = None
+    # Feature 29: BrandSettings.secondary_color cascades down to the
+    # side_banner vertical ribbon. ``None`` signals "use the hardcoded
+    # global fallback" (``preparation._SIDE_BANNER_RIBBON_BACKGROUND``
+    # = ``#FECF4D``). The accent_* fields above keep driving the top /
+    # bottom panels (reel + poster); the secondary color is only
+    # consumed by the rotated ribbon asset.
+    side_banner_ribbon_background_color: str | None = None
+    # Hotfix 2026-05-15: ``BrandSettings.primary_color`` cascades down to
+    # the side_banner top / bottom panels (the "header" and "footer" the
+    # user sees over the reel and the poster). ``None`` means "no agency
+    # override" — the renderer then falls back to
+    # ``accent_background_color`` (the per-property colour from the
+    # WordPress webhook), and finally to the hardcoded
+    # ``black@0.38`` / ``black@0.46`` defaults inside
+    # ``build_overlay_filter`` if neither value is present. Classic
+    # layout does NOT use this field; only ``side_banner`` consumes it.
+    side_banner_panel_color: str | None = None
+    # Feature 31: per-agency subtitle styling resolved from
+    # ``agency_reel_defaults.settings`` (JSONB). ``frame_composition._build_render_data``
+    # materialises the renderer-internal ``subtitle_*`` keys (set in the
+    # ingest use case from the front-end persisted ``sub*`` camelCase
+    # values) into this dataclass. ``enabled=False`` skips every subtitle
+    # ``drawtext`` in the ffmpeg filter graph.
+    subtitle_style: SubtitleStyle = field(default_factory=SubtitleStyle)
+    # Feature 36: per-reel subtitle override forwarded from
+    # ``reels.subtitles_override``. ``None`` means "no override — let
+    # ``compose_subtitle_segments`` build the captions from the slide
+    # text as usual". Otherwise an ordered tuple of
+    # ``(index, text, in_seconds, out_seconds)`` cues that bypass the
+    # autoCaptions composer entirely; the layout still goes through
+    # ``compose_subtitle_segments`` (so geometry / styling stays
+    # consistent with feature 31) but the input changes from the
+    # auto-generated captions to the override cues.
+    subtitles_override: (
+        tuple[tuple[int, str, float, float], ...] | None
+    ) = None
 
 
 PropertyReelData = PropertyRenderData
@@ -156,5 +223,6 @@ __all__ = [
     "PropertyRenderData",
     "PropertyReelSlide",
     "PropertyReelTemplate",
+    "SubtitleStyle",
     "property_reel_template_to_dict",
 ]

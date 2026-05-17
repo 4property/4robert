@@ -293,7 +293,7 @@
                 "type": "null"
               }
             ],
-            "description": "Heading font used in the reel and the outro card.",
+            "description": "Heading font used in the reel and the outro card. Must match one of the canonical family names served by `GET /v1/admin/fonts`. `null` clears the override (the renderer falls back to Inter).",
             "examples": [
               "Inter"
             ],
@@ -766,9 +766,71 @@
         "title": "IngestionSourceUpdatePayload",
         "type": "object"
       },
+      "IntroCardSlide": {
+        "additionalProperties": false,
+        "description": "Auto-generated intro card slide.\n\n``title`` and ``subtitle`` are optional so the front-end can produce\na card with branding only (logo, address, etc.) or with copy.",
+        "properties": {
+          "duration_seconds": {
+            "description": "Positive duration in seconds. The sum across every slide must not exceed ``target_duration_seconds * 1.5`` where ``target_duration_seconds`` is the agency's reel default (or the system default ``REEL_TOTAL_DURATION_SECONDS`` when the agency has no row).",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "kind": {
+            "const": "intro_card",
+            "description": "Discriminator literal — ``intro_card``. Auto-generated intro card with optional title / subtitle copy.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "description": "0-indexed slot in the final reel. Together with every other slide's ``position`` must cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "description": "Stable identifier for the slide (assigned by the front-end editor). Must be a non-empty string, unique across the entire ``slides`` array.",
+            "minLength": 1,
+            "title": "Slide Id",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional sub-headline for the intro card.",
+            "title": "Subtitle"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional headline for the intro card.",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "slide_id",
+          "position",
+          "duration_seconds",
+          "kind"
+        ],
+        "title": "IntroCardSlide",
+        "type": "object"
+      },
       "MusicTrackPatchPayload": {
         "additionalProperties": false,
-        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/music/{music_id}`.\n\nEvery field is optional: omitted fields preserve the previously stored\nvalue.",
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/music/{music_id}`.\n\nOnly ``display_name`` and ``is_default`` are editable post-upload.\n``object_key`` is owned by the upload endpoint (the binary lives on\ndisk and the key is opaque to clients) and ``duration_seconds`` is\nderived from ``ffprobe`` — both would corrupt the on-disk/DB\ninvariant if clients could rewrite them. ``extra='forbid'`` makes the\nHTTP layer return 422 when either field is supplied (feature 22).",
         "properties": {
           "display_name": {
             "anyOf": [
@@ -782,19 +844,6 @@
             ],
             "title": "Display Name"
           },
-          "duration_seconds": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 600.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration Seconds"
-          },
           "is_default": {
             "anyOf": [
               {
@@ -805,65 +854,128 @@
               }
             ],
             "title": "Is Default"
-          },
-          "object_key": {
+          }
+        },
+        "title": "MusicTrackPatchPayload",
+        "type": "object"
+      },
+      "OutroCardSlide": {
+        "additionalProperties": false,
+        "description": "Auto-generated outro card slide, mirror of ``IntroCardSlide``.",
+        "properties": {
+          "call_to_action": {
             "anyOf": [
               {
-                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Object Key"
-          }
-        },
-        "title": "MusicTrackPatchPayload",
-        "type": "object"
-      },
-      "MusicTrackPayload": {
-        "additionalProperties": false,
-        "description": "Body for `POST /v1/admin/agencies/{agency_id}/music`.\n\nUsed to register a brand new music track. The `id` is generated server\nside; the client only supplies the descriptive fields.",
-        "example": {
-          "display_name": "Sunset Drive",
-          "duration_seconds": 28,
-          "is_default": false,
-          "object_key": "agencies/ckp/music/sunset-drive.mp3"
-        },
-        "properties": {
-          "display_name": {
-            "description": "Human-readable label shown in the music picker.",
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
+            "description": "Optional CTA text rendered as a clickable affordance (e.g. ``Book a viewing``).",
+            "title": "Call To Action"
           },
           "duration_seconds": {
-            "description": "Duration of the track in seconds. Must be positive.",
+            "description": "Positive duration in seconds. The sum across every slide must not exceed ``target_duration_seconds * 1.5`` where ``target_duration_seconds`` is the agency's reel default (or the system default ``REEL_TOTAL_DURATION_SECONDS`` when the agency has no row).",
             "exclusiveMinimum": 0.0,
-            "maximum": 600.0,
             "title": "Duration Seconds",
+            "type": "number"
+          },
+          "kind": {
+            "const": "outro_card",
+            "description": "Discriminator literal — ``outro_card``. Auto-generated outro card with optional title / subtitle / CTA copy.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "description": "0-indexed slot in the final reel. Together with every other slide's ``position`` must cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
             "type": "integer"
           },
-          "is_default": {
-            "default": false,
-            "description": "When true, this track is highlighted as the default for new reels.",
-            "title": "Is Default",
-            "type": "boolean"
-          },
-          "object_key": {
-            "description": "Object storage key for the audio asset.",
+          "slide_id": {
+            "description": "Stable identifier for the slide (assigned by the front-end editor). Must be a non-empty string, unique across the entire ``slides`` array.",
             "minLength": 1,
-            "title": "Object Key",
+            "title": "Slide Id",
+            "type": "string"
+          },
+          "subtitle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional sub-headline for the outro card.",
+            "title": "Subtitle"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional headline for the outro card.",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "slide_id",
+          "position",
+          "duration_seconds",
+          "kind"
+        ],
+        "title": "OutroCardSlide",
+        "type": "object"
+      },
+      "PhotoSlide": {
+        "additionalProperties": false,
+        "description": "Image slide (the current default slide kind for the renderer).\n\n``photo_position`` is the index into the property's source photo\nset (matches the feature-35 ``photos_override.position`` semantics)\n— the renderer uses it to pick the underlying image.",
+        "properties": {
+          "duration_seconds": {
+            "description": "Positive duration in seconds. The sum across every slide must not exceed ``target_duration_seconds * 1.5`` where ``target_duration_seconds`` is the agency's reel default (or the system default ``REEL_TOTAL_DURATION_SECONDS`` when the agency has no row).",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "kind": {
+            "const": "photo",
+            "description": "Discriminator literal — ``photo``. Identifies the slide as a property image slide.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "photo_position": {
+            "description": "0-indexed slot in the property's photo set. The renderer uses this to pick the underlying image when assembling the scene list. Multiple slides may reference the same ``photo_position`` (the cross-slide rule is on ``position`` and ``slide_id``, not on ``photo_position``).",
+            "minimum": 0.0,
+            "title": "Photo Position",
+            "type": "integer"
+          },
+          "position": {
+            "description": "0-indexed slot in the final reel. Together with every other slide's ``position`` must cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "description": "Stable identifier for the slide (assigned by the front-end editor). Must be a non-empty string, unique across the entire ``slides`` array.",
+            "minLength": 1,
+            "title": "Slide Id",
             "type": "string"
           }
         },
         "required": [
-          "display_name",
-          "object_key",
-          "duration_seconds"
+          "slide_id",
+          "position",
+          "duration_seconds",
+          "kind",
+          "photo_position"
         ],
-        "title": "MusicTrackPayload",
+        "title": "PhotoSlide",
         "type": "object"
       },
       "ProviderConnectionUpsertPayload": {
@@ -953,7 +1065,7 @@
       },
       "ReelDefaultsUpsertPayload": {
         "additionalProperties": false,
-        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/defaults`.\n\nDefaults is the canonical owner of `platforms` (which channels reels\npublish to). The free-form `settings` dict mirrors the frontend\nINITIAL_DEFAULTS shape (currency, language, aspect, resolution, fps,\nsubFont, subSize, subBgStyle, musicVolume, kenBurns, introCard,\noutroCard, etc.) and is merged shallow with the previously stored\nobject.",
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/defaults`.\n\nDefaults is the canonical owner of `platforms` (which channels reels\npublish to). The free-form `settings` dict mirrors the frontend\nINITIAL_DEFAULTS shape (currency, language, aspect, resolution, fps,\nsubFont, subSize, subBgStyle, musicVolume, kenBurns, introCard,\noutroCard, etc.) and is merged shallow with the previously stored\nobject.\n\nThe `settings.music` sub-document is validated by\n:class:`SettingsMusicPayload` so unknown keys under `music.*` (and\nunder `music.selection_rules.*`) are rejected with 422 instead of\nbeing silently persisted. Other keys under `settings` keep their\nfree-form behaviour for forward compatibility with the frontend\nINITIAL_DEFAULTS shape.",
         "example": {
           "caption_template": "{{property_title}} · {{price}}",
           "duration_seconds": 30,
@@ -974,6 +1086,11 @@
             "introCard": true,
             "kenBurns": true,
             "language": "en-IE",
+            "music": {
+              "selection_rules": {
+                "fallback_to_full_library": true
+              }
+            },
             "musicVolume": 65,
             "outroCard": true,
             "resolution": "1080p",
@@ -1036,6 +1153,18 @@
             "description": "Identifier of the music track used by default.",
             "title": "Music Id"
           },
+          "outro_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether to append the uploaded outro video at the end of every rendered reel. Effective only when an outro asset has been uploaded (`outro_source='uploaded'`).",
+            "title": "Outro Enabled"
+          },
           "platforms": {
             "anyOf": [
               {
@@ -1085,11 +1214,93 @@
                 "type": "null"
               }
             ],
-            "description": "Free-form rendering defaults (frontend INITIAL_DEFAULTS shape). Stored verbatim under `agency_reel_defaults.settings` (jsonb).",
+            "description": "Free-form rendering defaults (frontend INITIAL_DEFAULTS shape). Stored verbatim under `agency_reel_defaults.settings` (jsonb). The `music` sub-key is validated by `SettingsMusicPayload` so unknown keys under `music.*` are rejected with 422.",
             "title": "Settings"
           }
         },
         "title": "ReelDefaultsUpsertPayload",
+        "type": "object"
+      },
+      "ReelDescriptionsOverridePayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PATCH .../reels/{site_id}/{property_id}/descriptions``.",
+        "properties": {
+          "descriptions_by_platform": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Platform → rendered caption text. The keys must match the agency's enabled platforms (``agency_reel_defaults.platforms``); unknown platforms produce a 422 response. The values are the final text shown by the frontend after template variables were substituted — this endpoint does not re-render templates.",
+            "title": "Descriptions By Platform",
+            "type": "object"
+          }
+        },
+        "title": "ReelDescriptionsOverridePayload",
+        "type": "object"
+      },
+      "ReelMusicOverridePayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PATCH .../reels/{site_id}/{property_id}/music``.",
+        "properties": {
+          "music_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identifier of the ``agency_music_tracks`` row to use for this reel. ``null`` clears any previous override and the next render falls back to the agency pool. The id must reference a track owned by the same agency as the reel.",
+            "title": "Music Id"
+          }
+        },
+        "title": "ReelMusicOverridePayload",
+        "type": "object"
+      },
+      "ReelPhotosOverrideEntry": {
+        "additionalProperties": false,
+        "description": "One entry in the override array: a (position, selected) pair.",
+        "properties": {
+          "position": {
+            "description": "The original 0-indexed photo position the slot points at. Must be unique across the array and together with every other entry's ``position`` cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "selected": {
+            "description": "When ``true`` the photo is rendered into the reel; when ``false`` the slot is dropped from the final video.",
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "position",
+          "selected"
+        ],
+        "title": "ReelPhotosOverrideEntry",
+        "type": "object"
+      },
+      "ReelPhotosOverridePayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PATCH .../reels/{site_id}/{property_id}/photos``.",
+        "properties": {
+          "photos": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReelPhotosOverrideEntry"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ordered list of slot entries. ``null`` (or an empty list) clears any previous override and the renderer falls back to the default order from ``property_images``. Otherwise, positions must cover ``[0, N)`` exactly once where ``N`` is the number of source photos for the property.",
+            "title": "Photos"
+          }
+        },
+        "title": "ReelPhotosOverridePayload",
         "type": "object"
       },
       "ReelProfileUpsertPayload": {
@@ -1281,6 +1492,117 @@
         "title": "ReelProfileUpsertPayload",
         "type": "object"
       },
+      "ReelSlidesOverridePayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PATCH .../reels/{site_id}/{property_id}/slides``.\n\nThe payload is intentionally narrow: the front-end submits the full\narray (no partial edits — the override is replaced wholesale). A\n``null`` or empty array clears the override and the next render\nfalls back to the auto-generated manifest pipeline.\n\nValidation contract (Pydantic layer):\n\n* ``extra='forbid'`` at the body level AND on every slide.\n* The ``kind`` discriminator must be one of the five allowed\n  values (``photo``, ``voiceover``, ``text``, ``intro_card``,\n  ``outro_card``).\n* Each slide enforces ``slide_id``, ``position``, ``duration_seconds``\n  shape rules at the base level, and the per-kind extra fields.\n* Cross-slide invariants (unique ``slide_id``, positions covering\n  ``[0, N)`` exactly once, sum-of-durations cap) are re-checked at\n  the use-case layer so the contract is self-contained.",
+        "properties": {
+          "slides": {
+            "anyOf": [
+              {
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "intro_card": "#/components/schemas/IntroCardSlide",
+                      "outro_card": "#/components/schemas/OutroCardSlide",
+                      "photo": "#/components/schemas/PhotoSlide",
+                      "text": "#/components/schemas/TextSlide",
+                      "voiceover": "#/components/schemas/VoiceoverSlide"
+                    },
+                    "propertyName": "kind"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PhotoSlide"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VoiceoverSlide"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TextSlide"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IntroCardSlide"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OutroCardSlide"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ordered list of slide entries. ``null`` (or an empty list) clears any previous override and the renderer falls back to the auto-generated manifest pipeline. Otherwise the slides must satisfy the cross-array invariants enforced by the use case (unique ``slide_id``, positions covering ``[0, N)`` exactly once, sum of ``duration_seconds`` ≤ ``target_duration_seconds * 1.5``).",
+            "title": "Slides"
+          }
+        },
+        "title": "ReelSlidesOverridePayload",
+        "type": "object"
+      },
+      "ReelSubtitleCue": {
+        "additionalProperties": false,
+        "description": "One cue in the override array.",
+        "properties": {
+          "in_seconds": {
+            "description": "Cue start time, in seconds from the beginning of the reel. Must be >= 0 and strictly less than ``out_seconds``.",
+            "minimum": 0.0,
+            "title": "In Seconds",
+            "type": "number"
+          },
+          "index": {
+            "description": "0-indexed cue slot. Must be unique across the array and monotonically increasing (``cues[i].index < cues[i+1].index``).",
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "out_seconds": {
+            "description": "Cue end time, in seconds from the beginning of the reel. Must be strictly greater than ``in_seconds``.",
+            "exclusiveMinimum": 0.0,
+            "title": "Out Seconds",
+            "type": "number"
+          },
+          "text": {
+            "description": "Literal subtitle text rendered onscreen. 1-200 characters; no ``{{ variables }}`` are interpolated.",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "text",
+          "in_seconds",
+          "out_seconds"
+        ],
+        "title": "ReelSubtitleCue",
+        "type": "object"
+      },
+      "ReelSubtitlesOverridePayload": {
+        "additionalProperties": false,
+        "description": "Body for ``PATCH .../reels/{site_id}/{property_id}/subtitles``.",
+        "properties": {
+          "cues": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ReelSubtitleCue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ordered list of subtitle cues. ``null`` (or an empty list) clears any previous override and the renderer falls back to the autoCaptions flow (when ``automation.autoCaptions`` is enabled) or to no subtitles otherwise. Otherwise the cues must have unique monotonically increasing ``index`` keys and non-overlapping timing windows.",
+            "title": "Cues"
+          }
+        },
+        "title": "ReelSubtitlesOverridePayload",
+        "type": "object"
+      },
       "RenderTemplateSelectPayload": {
         "additionalProperties": false,
         "example": {
@@ -1343,26 +1665,129 @@
         "title": "ScriptedRenderResponse",
         "type": "object"
       },
+      "SocialTemplateRichPayload": {
+        "additionalProperties": false,
+        "description": "Rich shape for a single platform inside the templates map.\n\nBackward-compat: the admin form historically posted\n``templates[platform] = \"<description>\"`` (a plain string). The frontend\nnow sends a richer object so the admin can also configure a per-platform\n``title_template`` (used by networks that accept a separate title, e.g.\nPinterest/YouTube) and a list of canned ``hashtags`` appended to the\ndescription at publish time.\n\nBoth ``description_template`` and ``title_template`` honour the same\n`{{variable}}` catalog defined in\n``modules.configuration.domain.social_templates_variables``. Hashtags\nare stored verbatim and must match ``^#[\\w-]{1,50}$`` (validated by\nthe router).",
+        "example": {
+          "description_template": "{{property_title}} · {{price}}",
+          "hashtags": [
+            "#realestate",
+            "#dublin"
+          ],
+          "title_template": "{{property_title}} in {{city}}"
+        },
+        "properties": {
+          "description_template": {
+            "default": "",
+            "description": "The caption body used for the platform. Empty string keeps the platform's row but drops the description (the deterministic fallback caption built from the property record is used at publish time).",
+            "title": "Description Template",
+            "type": "string"
+          },
+          "hashtags": {
+            "description": "Up to 30 hashtags appended at publish time to the rendered description with `\\n\\n` separator. Each entry must match `^#[\\w-]{1,50}$`.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Hashtags",
+            "type": "array"
+          },
+          "title_template": {
+            "default": "",
+            "description": "Optional title template substituted at publish time and forwarded to networks that accept a dedicated title (Pinterest, YouTube). Empty string means no title is sent. References the same `{{variable}}` catalog as `description_template`.",
+            "title": "Title Template",
+            "type": "string"
+          }
+        },
+        "title": "SocialTemplateRichPayload",
+        "type": "object"
+      },
       "SocialTemplatesReplacePayload": {
         "additionalProperties": false,
-        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/social-templates`.\n\nReplaces the whole template block: every existing per-platform row is\ndropped and re-inserted from the supplied `templates` map. Each key is\na platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,\n`youtube`, `gbp`, `pinterest`) and the value is the description template.",
+        "description": "Body for `PUT /v1/admin/agencies/{agency_id}/social-templates`.\n\nReplaces the whole template block: every existing per-platform row is\ndropped and re-inserted from the supplied `templates` map. Each key is\na platform identifier (`instagram`, `tiktok`, `facebook`, `linkedin`,\n`youtube`, `gbp`, `pinterest`) and the value is either:\n\n- a plain string — treated as ``description_template`` (legacy shape,\n  kept for backward-compat with admin clients pinned to the v1 contract).\n- a :class:`SocialTemplateRichPayload` — the full per-platform record\n  (description + title + hashtags).",
         "example": {
           "templates": {
-            "instagram": "{{property_title}} · {{price}}\n{{short_description}}\n👉 {{booking_link}}",
-            "tiktok": "Just listed in {{neighborhood}} — {{property_title}}\n{{price}} · {{bedrooms}} bed"
+            "instagram": {
+              "description_template": "{{property_title}} · {{price}}\n{{short_description}}\n👉 {{booking_link}}",
+              "hashtags": [
+                "#realestate",
+                "#dublin"
+              ],
+              "title_template": ""
+            },
+            "tiktok": "Just listed in {{neighborhood}} — {{property_title}}"
           }
         },
         "properties": {
           "templates": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Mapping of platform identifier to description template. Unknown keys are accepted so future platforms do not need a schema bump. Empty map drops all stored templates. Each value may reference any of the variables in `ALLOWED_TEMPLATE_VARIABLES` (see `modules.configuration.domain.social_templates_variables`) using `{{variable_name}}` syntax. Unknown variables are rejected with 422 `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE`.",
-            "title": "Templates",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SocialTemplateRichPayload"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mapping of platform identifier to template payload. Values may be a plain string (legacy: the description template) or a rich object exposing `description_template`, `title_template`, and `hashtags`. Unknown keys are accepted so future platforms do not need a schema bump. Empty map drops all stored templates. Templates may reference any of the variables in `ALLOWED_TEMPLATE_VARIABLES` (see `modules.configuration.domain.social_templates_variables`) using `{{variable_name}}` syntax. Unknown variables are rejected with 422 `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE`; invalid hashtags or more than 30 hashtags per platform are rejected with 422 `SOCIAL_TEMPLATE_INVALID_HASHTAG`.",
+            "title": "Templates"
           }
         },
         "title": "SocialTemplatesReplacePayload",
+        "type": "object"
+      },
+      "TextSlide": {
+        "additionalProperties": false,
+        "description": "Pure text card (no image).",
+        "properties": {
+          "duration_seconds": {
+            "description": "Positive duration in seconds. The sum across every slide must not exceed ``target_duration_seconds * 1.5`` where ``target_duration_seconds`` is the agency's reel default (or the system default ``REEL_TOTAL_DURATION_SECONDS`` when the agency has no row).",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "kind": {
+            "const": "text",
+            "description": "Discriminator literal — ``text``. The slide displays a text card with no underlying image.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "description": "0-indexed slot in the final reel. Together with every other slide's ``position`` must cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "description": "Stable identifier for the slide (assigned by the front-end editor). Must be a non-empty string, unique across the entire ``slides`` array.",
+            "minLength": 1,
+            "title": "Slide Id",
+            "type": "string"
+          },
+          "text": {
+            "description": "Literal text the renderer burns on the slide. 1-500 characters, no ``{{ variables }}`` interpolation.",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide_id",
+          "position",
+          "duration_seconds",
+          "kind",
+          "text"
+        ],
+        "title": "TextSlide",
         "type": "object"
       },
       "ValidationError": {
@@ -1403,6 +1828,51 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceoverSlide": {
+        "additionalProperties": false,
+        "description": "Voiceover-only slide (no visual change, audio overlay).\n\nToday's renderer does not consume voiceover assets — the entry is\npersisted so the FE can render the editor preview, and so a future\npass can wire it up without a schema migration.",
+        "properties": {
+          "audio_url": {
+            "description": "URL or workspace-relative path of the audio asset. The renderer accepts any string today; future tightening (MIME / length / signed URL) lives at the use-case layer.",
+            "minLength": 1,
+            "title": "Audio Url",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "description": "Positive duration in seconds. The sum across every slide must not exceed ``target_duration_seconds * 1.5`` where ``target_duration_seconds`` is the agency's reel default (or the system default ``REEL_TOTAL_DURATION_SECONDS`` when the agency has no row).",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "kind": {
+            "const": "voiceover",
+            "description": "Discriminator literal — ``voiceover``. The slide overlays audio on top of the surrounding visual frames.",
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "description": "0-indexed slot in the final reel. Together with every other slide's ``position`` must cover the range ``[0, N)`` exactly once.",
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          },
+          "slide_id": {
+            "description": "Stable identifier for the slide (assigned by the front-end editor). Must be a non-empty string, unique across the entire ``slides`` array.",
+            "minLength": 1,
+            "title": "Slide Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide_id",
+          "position",
+          "duration_seconds",
+          "kind",
+          "audio_url"
+        ],
+        "title": "VoiceoverSlide",
         "type": "object"
       }
     }
@@ -2246,6 +2716,129 @@
         ]
       }
     },
+    "/v1/admin/agencies/{agency_id}/intro": {
+      "delete": {
+        "description": "Resets the intro metadata to ``source='none'`` (object_key cleared) and removes the on-disk blob. Idempotent — a DELETE without a prior upload returns the same shape.",
+        "operationId": "delete_admin_agency_intro_v1_admin_agencies__agency_id__intro_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete the agency's intro video",
+        "tags": [
+          "Admin · Intro"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/intro/file": {
+      "get": {
+        "description": "Serves the bytes of the intro registered for the agency. Returns 404 if no intro is configured or the on-disk blob has been removed.",
+        "operationId": "stream_admin_agency_intro_v1_admin_agencies__agency_id__intro_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream the agency's previously uploaded intro video",
+        "tags": [
+          "Admin · Intro"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/intro/upload": {
+      "post": {
+        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's intro folder. Validates size (<=50MB) and duration (1..10s via ffprobe). Returns the asset metadata (`intro_object_key`, `intro_duration_seconds`, `intro_source = \"uploaded\"`). Errors: 422 INTRO_INVALID_MIME, 413 INTRO_FILE_TOO_LARGE, 422 INTRO_INVALID_DURATION, 404 ADMIN_AGENCY_NOT_FOUND.",
+        "operationId": "upload_admin_agency_intro_v1_admin_agencies__agency_id__intro_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload the agency's intro video (multipart, MP4/MOV, <=50MB, 1-10s)",
+        "tags": [
+          "Admin · Intro"
+        ]
+      }
+    },
     "/v1/admin/agencies/{agency_id}/music": {
       "get": {
         "description": "Returns every music track attached to the agency, ordered by display name. Replaces the legacy `/music-tracks` stub.",
@@ -2287,7 +2880,7 @@
         ]
       },
       "post": {
-        "description": "Adds a track to the agency music library. The `id` is generated server side; the response echoes the saved record.",
+        "description": "Retired by feature 22. Use `POST /v1/admin/agencies/{id}/music/upload` (multipart) instead. Always returns 405.",
         "operationId": "register_admin_agency_music_track_v1_admin_agencies__agency_id__music_post",
         "parameters": [
           {
@@ -2300,16 +2893,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MusicTrackPayload"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -2330,7 +2913,48 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Register a new music track for the agency",
+        "summary": "(retired) Direct metadata POST for a music track",
+        "tags": [
+          "Admin · Music"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/music/upload": {
+      "post": {
+        "description": "Accepts a multipart body with `file` (audio binary), `display_name` (label, 1..200 chars) and `is_default` (`true`/`false`). Supported MIME types: audio/mpeg, audio/mp4, audio/wav. The backend persists the binary under the agency's music folder, probes the duration via ffprobe and registers a row in `agency_music_tracks`. Returns 201 with the saved `music_track`. Errors: 400 MUSIC_TRACK_AUDIO_INVALID (bad MIME / ffprobe failure / duration > 10min), 413 if the payload is over 20 MB, 422 if `display_name` is missing or blank, 404 if the agency is unknown.",
+        "operationId": "upload_admin_agency_music_track_v1_admin_agencies__agency_id__music_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload a new music track (multipart, <=20MB)",
         "tags": [
           "Admin · Music"
         ]
@@ -2490,6 +3114,188 @@
         ]
       }
     },
+    "/v1/admin/agencies/{agency_id}/music/{music_id}/file/{filename}": {
+      "get": {
+        "description": "Serves the audio binary registered for `music_id`. The filename in the URL must match the trailing segment of the track's `object_key` (the upload endpoint returns that key). The path is scope-checked against the agency JWT: a request that targets another agency's track responds 404. Returns 404 if the track does not exist or the on-disk binary has been removed.",
+        "operationId": "stream_admin_agency_music_track_v1_admin_agencies__agency_id__music__music_id__file__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "music_id",
+            "required": true,
+            "schema": {
+              "title": "Music Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream a previously uploaded music track binary",
+        "tags": [
+          "Admin · Music"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/outro": {
+      "delete": {
+        "description": "Resets the outro metadata to ``source='none'`` (object_key cleared) and removes the on-disk blob. Idempotent — a DELETE without a prior upload returns the same shape.",
+        "operationId": "delete_admin_agency_outro_v1_admin_agencies__agency_id__outro_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete the agency's outro video",
+        "tags": [
+          "Admin · Outro"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/outro/file": {
+      "get": {
+        "description": "Serves the bytes of the outro registered for the agency. Returns 404 if no outro is configured or the on-disk blob has been removed.",
+        "operationId": "stream_admin_agency_outro_v1_admin_agencies__agency_id__outro_file_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream the agency's previously uploaded outro video",
+        "tags": [
+          "Admin · Outro"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/outro/upload": {
+      "post": {
+        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's outro folder. Validates size (<=50MB) and duration (1..10s via ffprobe). Returns the asset metadata (`outro_object_key`, `outro_duration_seconds`, `outro_source = \"uploaded\"`). Errors: 422 OUTRO_INVALID_MIME, 413 OUTRO_FILE_TOO_LARGE, 422 OUTRO_INVALID_DURATION, 404 ADMIN_AGENCY_NOT_FOUND.",
+        "operationId": "upload_admin_agency_outro_v1_admin_agencies__agency_id__outro_upload_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload the agency's outro video (multipart, MP4/MOV, <=50MB, 1-10s)",
+        "tags": [
+          "Admin · Outro"
+        ]
+      }
+    },
     "/v1/admin/agencies/{agency_id}/reel-profile": {
       "get": {
         "description": "Returns the agency configuration assembled into the legacy `reel_profiles` shape (brand + defaults + automation + social templates + music tracks). Prefer the per-section endpoints — `/brand`, `/defaults`, `/automation`, `/social-templates`, `/music` — when you only need a single concern.",
@@ -2582,7 +3388,7 @@
     },
     "/v1/admin/agencies/{agency_id}/reels": {
       "get": {
-        "description": "Returns the most recent reels for the agency, joining the `properties` row, the latest `reels` row, and the most recent `media_revisions` row. Used by the agency Reels dashboard.",
+        "description": "Returns a paginated slice of the agency's reels (feature 32).\n\nQuery params:\n- ``page`` (int, default 1, clamped to >=1).\n- ``page_size`` (int, default 25, clamped to ``[1, 100]``).\n- ``workflow_state`` (CSV, optional). Filters by ``reels.workflow_state``.\n- ``publish_status`` (CSV, optional). Filters by ``reels.publish_status``.\n- ``q`` (string, optional). Case-insensitive ILIKE over ``reels.title``, ``reels.slug`` and the related ``properties.list_reference`` (property reference).\n- ``limit`` (int, legacy). If ``page`` is absent, ``limit`` is interpreted as ``page_size`` with ``page=1``. If both are present, ``page_size`` wins and ``limit`` is ignored.\n\nResponse shape: ``{items, count, count_total, page, page_size, has_more}`` where ``count == len(items)`` is preserved for backwards compatibility and ``count_total`` respects the active filters.",
         "operationId": "list_admin_agency_reels_v1_admin_agencies__agency_id__reels_get",
         "parameters": [
           {
@@ -2615,7 +3421,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List the agency's recent reels",
+        "summary": "List the agency's recent reels (paginated, filterable)",
         "tags": [
           "Admin · Content"
         ]
@@ -2734,6 +3540,75 @@
           }
         },
         "summary": "Approve a reel and regenerate (re-publish) it",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/descriptions": {
+      "patch": {
+        "description": "Persists a per-reel ``descriptions_override`` JSONB (feature 21) that wins over the auto-generated captions at publish time. Only reels still pending review accept overrides (publish_status in {pending, pending_review, needs-approval, ''}) — otherwise the endpoint returns **409 REEL_NOT_EDITABLE**. Platforms not listed in the agency's ``agency_reel_defaults.platforms`` produce a **422 PLATFORM_NOT_ENABLED**. The client always submits the full shape; the override is replaced wholesale and ``descriptions_by_platform={}`` clears it back to the templated captions.",
+        "operationId": "patch_admin_agency_reel_descriptions_v1_admin_agencies__agency_id__reels__site_id___source_property_id__descriptions_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelDescriptionsOverridePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override the rendered captions for one reel",
         "tags": [
           "Admin · Content"
         ]
@@ -2928,6 +3803,203 @@
         ]
       }
     },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/music": {
+      "patch": {
+        "description": "Persists ``reels.music_id`` (feature 25). ``music_id=null`` clears the override and the next render falls back to the agency pool (features 23/24). A non-null ``music_id`` must reference an ``agency_music_tracks`` row owned by the same agency — cross-agency / unknown ids surface **404 ADMIN_MUSIC_TRACK_NOT_FOUND**. Only reels still pending review accept overrides (``publish_status`` in ``{pending, pending_review, needs-approval, ''}``); otherwise the endpoint returns **409 REEL_NOT_EDITABLE**. On success the use case re-enqueues a fresh ``reel_publish`` job (same machinery as ``POST /approve``) so the worker picks up the override and re-renders.",
+        "operationId": "patch_admin_agency_reel_music_v1_admin_agencies__agency_id__reels__site_id___source_property_id__music_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelMusicOverridePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override the background music for one reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/photos": {
+      "patch": {
+        "description": "Persists a per-reel ``photos_override`` JSONB array (feature 35). Each entry is a ``{position, selected}`` pair where ``position`` is the 0-indexed original photo slot and ``selected`` toggles whether the photo lands in the final reel. The submitted positions MUST cover the range ``[0, N)`` exactly once, where ``N`` is the number of photos in the property's catalog — anything else (gap, duplicate, out-of-range, wrong shape) is rejected with **422**. ``photos=null`` and ``photos=[]`` both clear the override and the next render falls back to the default order. The endpoint returns **409 PHOTOS_OVERRIDE_LOCKED** for reels that have already cleared the editorial gate (``workflow_state='approved'`` or ``publish_status='published'``). A successful PATCH re-enqueues a fresh ``reel_publish`` job (same machinery as ``POST /approve`` and the music override endpoint) so the worker picks up the override and re-renders.",
+        "operationId": "patch_admin_agency_reel_photos_v1_admin_agencies__agency_id__reels__site_id___source_property_id__photos_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelPhotosOverridePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override the photo order / selection for one reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/regenerate": {
+      "post": {
+        "description": "Feature 40 — editor's 'Render again' button.\n\nRe-enqueues a fresh ``reel_publish`` job for the reel with its current configuration and overrides (``photos_override`` / ``subtitles_override`` / ``manifest_override``) without mutating ``workflow_state`` or ``publish_status``. This is the sibling of ``POST .../approve`` — they share the same use case (``RegenerateReelUseCase``) but use a different ``mode``.\n\nBody is optional: ``{}`` or no body is accepted. An optional ``reason`` (max 500 chars) is persisted on the new job's ``publish_context_json.manual_reason`` for traceability.\n\nReturns **409 REGENERATE_PUBLISHED_FORBIDDEN** when the reel is already ``publish_status='published'``, and **409 REGENERATE_ALREADY_IN_FLIGHT** when a ``reel_publish`` job is still ``queued`` / ``processing`` for the same property (the editor must wait for the running render to drain instead of stacking another one).",
+        "operationId": "regenerate_admin_agency_reel_v1_admin_agencies__agency_id__reels__site_id___source_property_id__regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Manually re-render a reel without touching workflow/publish state",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
     "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/reject": {
       "post": {
         "description": "Sets the reel's pipeline state to `rejected` and the publish status to `rejected` so it stays out of the publish queue.",
@@ -2982,6 +4054,144 @@
           }
         },
         "summary": "Reject a reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/slides": {
+      "patch": {
+        "description": "Persists a per-reel ``manifest_override`` JSONB array (feature 37). Each slide carries ``slide_id`` (non-empty unique string), ``position`` (covering ``[0, N)`` exactly once), ``duration_seconds`` (positive float; the sum across slides must not exceed ``target_duration_seconds * 1.5``) and a ``kind`` discriminator selecting one of ``photo`` / ``voiceover`` / ``text`` / ``intro_card`` / ``outro_card`` plus the kind-specific required fields. Anything else (unknown ``kind``, missing per-kind field, position gap, duplicate ``slide_id``, duration cap exceeded, extra field) is rejected with **422**. ``slides=null`` and ``slides=[]`` both clear the override and the next render falls back to the auto-generated manifest pipeline. The endpoint returns **409 SLIDES_OVERRIDE_LOCKED** for reels that have already cleared the editorial gate (``workflow_state='approved'`` or ``publish_status='published'``). A successful PATCH re-enqueues a fresh ``reel_publish`` job (same machinery as ``POST /approve`` and the photos / music / subtitles override endpoints) so the worker picks up the override and re-renders.",
+        "operationId": "patch_admin_agency_reel_slides_v1_admin_agencies__agency_id__reels__site_id___source_property_id__slides_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelSlidesOverridePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override the slide manifest for one reel",
+        "tags": [
+          "Admin · Content"
+        ]
+      }
+    },
+    "/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/subtitles": {
+      "patch": {
+        "description": "Persists a per-reel ``subtitles_override`` JSONB array (feature 36). Each cue is ``{index:int, text:str, in_seconds:float, out_seconds:float}`` with ``index`` keys unique and monotonically increasing, ``text`` 1-200 characters, ``in_seconds >= 0``, ``out_seconds > in_seconds`` and non-overlapping windows across consecutive cues. Anything else (wrong type, empty / over-long text, overlap, duplicate / non-monotonic index, extra field) is rejected with **422**. ``cues=null`` and ``cues=[]`` both clear the override and the next render falls back to the historical autoCaptions flow (rendered when ``automation.autoCaptions`` is enabled, nothing otherwise). The endpoint returns **409 SUBTITLES_OVERRIDE_LOCKED** for reels that have already cleared the editorial gate (``workflow_state='approved'`` or ``publish_status='published'``). A successful PATCH re-enqueues a fresh ``reel_publish`` job (same machinery as ``POST /approve`` and the photos / music override endpoints) so the worker picks up the override and re-renders.",
+        "operationId": "patch_admin_agency_reel_subtitles_v1_admin_agencies__agency_id__reels__site_id___source_property_id__subtitles_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agency_id",
+            "required": true,
+            "schema": {
+              "title": "Agency Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_property_id",
+            "required": true,
+            "schema": {
+              "title": "Source Property Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReelSubtitlesOverridePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Override the rendered subtitles / captions for one reel",
         "tags": [
           "Admin · Content"
         ]
@@ -3512,6 +4722,26 @@
         "summary": "Reconfigure an ingestion source",
         "tags": [
           "Admin - Sources"
+        ]
+      }
+    },
+    "/v1/admin/fonts": {
+      "get": {
+        "description": "Returns the immutable catalogue of fonts shipped with the backend. The frontend `/brand` dropdown should populate from this endpoint so the selector and the `PUT /brand` validator stay in lockstep. The `available` flag is `false` when the TTF is missing on disk — useful for diagnosing a broken deploy without reading worker logs.",
+        "operationId": "list_admin_fonts_v1_admin_fonts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List the font catalogue available to the brand selector",
+        "tags": [
+          "Admin · Fonts"
         ]
       }
     },

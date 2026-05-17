@@ -85,7 +85,16 @@ class UpdateAggregatedReelProfileUseCase:
                 )
 
         # Brand slice. Only fields explicitly supplied propagate; the
-        # repository preserves the previous value otherwise.
+        # repository preserves the previous value otherwise. The legacy
+        # ``/reel-profile`` endpoint does not have a "reset to default"
+        # affordance — every ``None`` here means "the client did not
+        # include the field in the body", not "clear the override". We
+        # translate those Nones to ``UNSET`` so the repository keeps the
+        # existing column intact, matching the historical contract. Only
+        # the dedicated ``PUT /brand`` endpoint (handled by
+        # ``UpdateBrandSettingsUseCase``) sends ``None`` to mean "clear".
+        from modules.configuration.infrastructure.brand_repository import UNSET
+
         if any(
             value is not None
             for value in (
@@ -96,9 +105,19 @@ class UpdateAggregatedReelProfileUseCase:
         ):
             uow.configuration.brand.upsert(
                 agency_id=agency_id,
-                primary_color=data.brand_primary_color,
-                secondary_color=data.brand_secondary_color,
-                logo_position=data.logo_position,
+                primary_color=(
+                    UNSET
+                    if data.brand_primary_color is None
+                    else data.brand_primary_color
+                ),
+                secondary_color=(
+                    UNSET
+                    if data.brand_secondary_color is None
+                    else data.brand_secondary_color
+                ),
+                logo_position=(
+                    UNSET if data.logo_position is None else data.logo_position
+                ),
             )
 
         # Defaults slice. ``extra_settings`` from the legacy payload

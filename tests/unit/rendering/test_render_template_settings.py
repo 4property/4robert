@@ -38,6 +38,29 @@ def test_normalize_property_reel_template_overrides_rejects_unknown_keys() -> No
     assert exc_info.value.code == "RENDER_TEMPLATE_SETTING_UNSUPPORTED"
 
 
+def test_normalize_property_reel_template_overrides_skips_renderer_internal_keys() -> None:
+    """Renderer-internal keys must not raise nor leak into the dataclass.
+
+    Feature 16 introduced ``fallback_accent_*`` and feature 29 added
+    ``side_banner_ribbon_background_color``: both ride along inside
+    ``render_template_reel_settings`` for the renderer to consume but do
+    not belong to ``PropertyReelTemplate``. The normaliser must silently
+    drop them instead of raising ``RENDER_TEMPLATE_SETTING_UNSUPPORTED``,
+    otherwise ``build_property_reel_template_from_overrides`` would
+    crash on every reel render.
+    """
+    overrides = normalize_property_reel_template_overrides(
+        {
+            "fallback_accent_text_color": "#0F172A",
+            "fallback_accent_background_color": "#0F172A",
+            "side_banner_ribbon_background_color": "#FF00FF",
+            "width": 720,
+        }
+    )
+
+    assert overrides == {"width": 720}
+
+
 def test_resolve_render_template_settings_hash_is_stable_for_same_settings() -> None:
     first = resolve_render_template_settings(
         _template(

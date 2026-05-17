@@ -43,6 +43,26 @@ def _resolve_subtitle_caption(
     return normalize_caption(fallback_caption, "")
 
 
+def _apply_max_chars(text: str, max_chars: int) -> str:
+    """Truncate a caption to ``max_chars`` graphemes, preserving word boundaries.
+
+    Feature 31: ``subtitle_max_chars`` lets the agency cap the caption
+    length before the text-measurement engine breaks the string into
+    lines. We truncate on a word boundary when possible (so a caption
+    does not end mid-word) and append an ellipsis only when the cap
+    actually fired — otherwise the caption is returned verbatim.
+    """
+    if max_chars <= 0:
+        return text
+    if len(text) <= max_chars:
+        return text
+    cutoff = text.rfind(" ", 0, max_chars)
+    if cutoff <= 0:
+        cutoff = max_chars
+    truncated = text[:cutoff].rstrip()
+    return f"{truncated}…" if truncated else text[:max_chars]
+
+
 def compose_subtitle_segments(
     property_data: PropertyReelData,
     settings: PropertyReelTemplate,
@@ -59,6 +79,49 @@ def compose_subtitle_segments(
     height = settings.height
     warnings: list[LayoutWarning] = []
     subtitle_segments: list[TimedTextSegmentLayout] = []
+    # Feature 31: read the per-agency subtitle styling that travels with
+    # ``property_data``. The dataclass defaults preserve the historical
+    # look (bottom / center / no uppercase / 36-char wrap) when an agency
+    # never opened the ``/defaults > Subtitles`` panel.
+    subtitle_style = getattr(property_data, "subtitle_style", None)
+    style_position = (subtitle_style.position if subtitle_style is not None else "bottom")
+    style_alignment = (subtitle_style.alignment if subtitle_style is not None else "center")
+    style_uppercase = bool(subtitle_style.uppercase) if subtitle_style is not None else False
+    style_max_chars = int(subtitle_style.max_chars) if subtitle_style is not None else 36
+    # Feature 36: when the reel carries a per-reel subtitles override,
+    # bypass the autoCaptions builder and source the (start, end, text)
+    # triples directly from the override cues. Geometry, font and style
+    # cascade unchanged so the override video matches the agency's
+    # subtitle look. The override always wins over ``slide_duration``;
+    # if the caller still has no ``slide_duration`` we have no geometry
+    # to anchor the segments to and fall back to the empty list (same
+    # contract as the legacy code path).
+    subtitles_override = getattr(property_data, "subtitles_override", None)
+    if subtitles_override and slide_duration is not None:
+        subtitle_gap_y = max(20, round(height * 0.018))
+        subtitle_x = outer_margin_x + panel_padding_x
+        subtitle_max_width = panel_width - (panel_padding_x * 2)
+        subtitle_bottom_y = (
+            (bottom_panel.y if bottom_panel is not None else height - outer_margin_y)
+            - subtitle_gap_y
+        )
+        raw_segments = [
+            (float(in_seconds), float(out_seconds), str(text_value))
+            for (_index, text_value, in_seconds, out_seconds) in subtitles_override
+        ]
+        return _build_subtitle_segments_from_raw(
+            raw_segments=raw_segments,
+            settings=settings,
+            subtitle_style=subtitle_style,
+            style_position=style_position,
+            style_alignment=style_alignment,
+            style_uppercase=style_uppercase,
+            style_max_chars=style_max_chars,
+            subtitle_x=subtitle_x,
+            subtitle_max_width=subtitle_max_width,
+            subtitle_bottom_y=subtitle_bottom_y,
+            height=height,
+        )
     if slide_duration is not None:
         subtitle_gap_y = max(20, round(height * 0.018))
         subtitle_x = outer_margin_x + panel_padding_x
@@ -86,49 +149,105 @@ def compose_subtitle_segments(
                 )
             )
 
-        for start_time, end_time, caption_text in raw_segments:
-            if not caption_text:
-                continue
-            measured_caption = measure_text_block(
-                block="subtitle_caption",
-                text=caption_text,
-                usable_width=subtitle_max_width,
-                max_lines=3,
-                max_font_size=resolve_font_size_bounds(
-                    "subtitle_caption",
-                    frame_height=height,
-                    subtitle_font_size=settings.subtitle_font_size,
-                )[0],
-                min_font_size=resolve_font_size_bounds(
-                    "subtitle_caption",
-                    frame_height=height,
-                    subtitle_font_size=settings.subtitle_font_size,
-                )[1],
-                min_chars=14,
-            )
-            if measured_caption is None:
-                continue
-            if measured_caption.warning is not None:
-                warnings.append(measured_caption.warning)
-            subtitle_segments.append(
-                TimedTextSegmentLayout(
-                    block="subtitle_caption",
-                    text=measured_caption.text,
-                    lines=measured_caption.lines,
-                    font_size=measured_caption.font_size,
-                    x=subtitle_x,
-                    y=subtitle_bottom_y - measured_caption.box_height,
-                    max_width=measured_caption.max_width,
-                    line_gap=measured_caption.line_gap,
-                    box_height=measured_caption.box_height,
-                    max_lines=measured_caption.max_lines,
-                    clamped=measured_caption.clamped,
-                    start_time=start_time,
-                    end_time=end_time,
-                )
-            )
+        segments, more_warnings = _build_subtitle_segments_from_raw(
+            raw_segments=raw_segments,
+            settings=settings,
+            subtitle_style=subtitle_style,
+            style_position=style_position,
+            style_alignment=style_alignment,
+            style_uppercase=style_uppercase,
+            style_max_chars=style_max_chars,
+            subtitle_x=subtitle_x,
+            subtitle_max_width=subtitle_max_width,
+            subtitle_bottom_y=subtitle_bottom_y,
+            height=height,
+        )
+        subtitle_segments.extend(segments)
+        warnings.extend(more_warnings)
 
     return tuple(subtitle_segments), tuple(warnings)
+
+
+def _build_subtitle_segments_from_raw(
+    *,
+    raw_segments: list[tuple[float, float, str]],
+    settings: PropertyReelTemplate,
+    subtitle_style,
+    style_position: str,
+    style_alignment: str,
+    style_uppercase: bool,
+    style_max_chars: int,
+    subtitle_x: int,
+    subtitle_max_width: int,
+    subtitle_bottom_y: int,
+    height: int,
+) -> tuple[tuple[TimedTextSegmentLayout, ...], tuple[LayoutWarning, ...]]:
+    """Materialise a sequence of ``(start, end, text)`` triples into
+    ``TimedTextSegmentLayout`` objects.
+
+    Extracted from the body of :func:`compose_subtitle_segments` so the
+    autoCaptions flow and the feature-36 override flow can share the
+    same measurement / geometry pipeline. The behaviour is preserved
+    byte-for-byte versus the legacy inline loop; only the source of the
+    ``raw_segments`` differs (slide.caption vs override cues).
+    """
+    measured_segments: list[TimedTextSegmentLayout] = []
+    accumulated_warnings: list[LayoutWarning] = []
+    for start_time, end_time, caption_text in raw_segments:
+        if not caption_text:
+            continue
+        caption_text = _apply_max_chars(caption_text, style_max_chars)
+        if style_uppercase:
+            caption_text = caption_text.upper()
+        measured_caption = measure_text_block(
+            block="subtitle_caption",
+            text=caption_text,
+            usable_width=subtitle_max_width,
+            max_lines=3,
+            max_font_size=resolve_font_size_bounds(
+                "subtitle_caption",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[0],
+            min_font_size=resolve_font_size_bounds(
+                "subtitle_caption",
+                frame_height=height,
+                subtitle_font_size=settings.subtitle_font_size,
+            )[1],
+            min_chars=14,
+        )
+        if measured_caption is None:
+            continue
+        if measured_caption.warning is not None:
+            accumulated_warnings.append(measured_caption.warning)
+        if style_position == "top":
+            segment_y = round(height * 0.10)
+        elif style_position == "middle":
+            segment_y = max(
+                0,
+                round((height - measured_caption.box_height) / 2),
+            )
+        else:
+            segment_y = subtitle_bottom_y - measured_caption.box_height
+        measured_segments.append(
+            TimedTextSegmentLayout(
+                block="subtitle_caption",
+                text=measured_caption.text,
+                lines=measured_caption.lines,
+                font_size=measured_caption.font_size,
+                x=subtitle_x,
+                y=segment_y,
+                max_width=measured_caption.max_width,
+                line_gap=measured_caption.line_gap,
+                box_height=measured_caption.box_height,
+                max_lines=measured_caption.max_lines,
+                clamped=measured_caption.clamped,
+                start_time=start_time,
+                end_time=end_time,
+                alignment=style_alignment,
+            )
+        )
+    return tuple(measured_segments), tuple(accumulated_warnings)
 
 
 __all__ = ["compose_subtitle_segments"]

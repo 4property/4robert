@@ -222,6 +222,19 @@ def _build_ingested_reel_state(
         last_published_provider_external_id=last_published_provider_external_id,
         created_at=state.created_at,
         updated_at=state.updated_at,
+        descriptions_override=state.descriptions_override,
+        music_id=state.music_id,
+        photos_override=state.photos_override,
+        # Feature 36: forward the persisted ``subtitles_override`` so a
+        # re-ingest (e.g. after PATCH /subtitles + approve) does not
+        # wipe the user's edits. Mirrors the propagation feature 35
+        # set up for ``photos_override`` (and the drive-by feature 35
+        # added for ``music_id``).
+        subtitles_override=state.subtitles_override,
+        # Feature 37: forward the persisted ``manifest_override`` so a
+        # re-ingest preserves the editor's slide list edits. Same
+        # rationale as ``photos_override`` / ``subtitles_override``.
+        manifest_override=state.manifest_override,
     )
 
 

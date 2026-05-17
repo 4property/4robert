@@ -61,13 +61,21 @@ def seed_property_with_reel(
     publish_status: str = "ready_to_publish",
     revision_media_path: str = "",
     revision_metadata_path: str = "",
+    slug: str = "sample",
+    title: str = "Sample",
+    list_reference: str | None = None,
 ) -> str:
-    """Insert a property + reel row + media revision. Returns the revision id."""
+    """Insert a property + reel row + media revision. Returns the revision id.
+
+    Optional ``slug`` / ``title`` / ``list_reference`` overrides exist so
+    feature 32 pagination/filter tests can seed a fleet of distinct
+    properties without breaking older tests that rely on the defaults.
+    """
     timestamp = datetime.now(timezone.utc)
     revision_id = str(uuid4())
     raw_payload = raw_json if raw_json is not None else {
         "id": source_property_id,
-        "title": "Sample",
+        "title": title,
         "rest_domain": external_source_id,
     }
     engine = create_engine(database_url, future=True)
@@ -77,10 +85,11 @@ def seed_property_with_reel(
                 text(
                     "INSERT INTO properties ("
                     "agency_id, ingestion_source_id, external_source_id, "
-                    "source_property_id, slug, title, raw_json, fetched_at"
+                    "source_property_id, slug, title, list_reference, "
+                    "raw_json, fetched_at"
                     ") VALUES ("
                     ":agency_id, :ingestion_source_id, :external_source_id, "
-                    ":source_property_id, :slug, :title, "
+                    ":source_property_id, :slug, :title, :list_reference, "
                     "CAST(:raw_json AS jsonb), :fetched_at"
                     ")"
                 ),
@@ -89,8 +98,9 @@ def seed_property_with_reel(
                     "ingestion_source_id": ingestion_source_id,
                     "external_source_id": external_source_id,
                     "source_property_id": source_property_id,
-                    "slug": "sample",
-                    "title": "Sample",
+                    "slug": slug,
+                    "title": title,
+                    "list_reference": list_reference,
                     "raw_json": json.dumps(raw_payload),
                     "fetched_at": timestamp,
                 },

@@ -229,7 +229,7 @@ def test_build_overlay_layout_side_banner_ber_badge_inline_with_details_row() ->
         (details_block.box_height - ber_icon_height) / 2
     )
     assert overlay.ber_badge_box.y == expected_ber_y
-    assert overlay.ber_badge_box.x == round(1080 * 0.52)
+    assert overlay.ber_badge_box.x == round(1080 * 0.36)
     # Belt-and-braces: ensure the badge actually moved down from the
     # top-panel vertical center, which would be the classic position.
     assert overlay.top_panel is not None

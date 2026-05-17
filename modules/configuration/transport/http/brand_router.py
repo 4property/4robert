@@ -96,6 +96,12 @@ def create_brand_router(
         authorization_error = authorize_admin_request(request, admin_access_policy)
         if authorization_error is not None:
             return authorization_error
+        # Hotfix 2026-05-15: distinguish "key omitted from the JSON body"
+        # (preserve the existing column) from "key sent as null" (clear
+        # the override). Pydantic collapses both onto ``None``, so we
+        # consult ``model_dump(exclude_unset=True)`` for the set of
+        # explicitly supplied keys and forward it to the use case.
+        fields_present = frozenset(payload.model_dump(exclude_unset=True).keys())
         try:
             with unit_of_work_factory() as uow:
                 record = update_brand_settings.execute(
@@ -108,6 +114,7 @@ def create_brand_router(
                         logo_object_key=payload.logo_object_key,
                         intro_logo_object_key=payload.intro_logo_object_key,
                         font_family=payload.font_family,
+                        fields_present=fields_present,
                     ),
                 )
         except ValidationError as error:
@@ -146,8 +153,17 @@ def create_brand_router(
     return router
 
 
-_DEFAULT_PRIMARY_COLOR = "#0F172A"
-_DEFAULT_SECONDARY_COLOR = "#FFFFFF"
+# Hotfix 2026-05-15: neutral grey defaults emitted when the agency
+# has not yet saved a brand row. The frontend pickers show these as a
+# starting point and the user can then change them; the renderer
+# applies the same greys (``_SIDE_BANNER_PANEL_DEFAULT`` in
+# ``poster.py``/``render_reel.py`` and ``_SIDE_BANNER_RIBBON_BACKGROUND``
+# in ``preparation.py``) when ``side_banner_panel_color`` /
+# ``side_banner_ribbon_background_color`` are absent. The earlier
+# ``#0F172A`` / ``#FFFFFF`` defaults were a hangover from the
+# pre-Reset contract and hid the "unconfigured" state from the user.
+_DEFAULT_PRIMARY_COLOR = "#374151"
+_DEFAULT_SECONDARY_COLOR = "#9CA3AF"
 _DEFAULT_LOGO_POSITION = "top-right"
 
 
@@ -168,10 +184,22 @@ def _serialize_brand(
             "created_at": "",
             "updated_at": "",
         }
+    # Hotfix 2026-05-15: when a colour / font column is an empty string
+    # the record exists but the agency has explicitly cleared the
+    # override (via the "Reset to default" affordance on the frontend).
+    # The previous serializer coerced that empty string into the
+    # ``_DEFAULT_PRIMARY_COLOR`` hex, which made the cleared state
+    # indistinguishable from a real configured value on the client.
+    # Emit the empty string verbatim so the frontend's ``brand?.field
+    # || null`` hydration switches the UI to "Using default" and the
+    # renderer's cascade (brand → webhook → hardcoded) is honoured.
+    # ``logo_position`` keeps the legacy fallback because there is no
+    # UI to reset it independently — the column always carries a real
+    # value once any field is upserted.
     return {
         "agency_id": record.agency_id,
-        "primary_color": record.primary_color or _DEFAULT_PRIMARY_COLOR,
-        "secondary_color": record.secondary_color or _DEFAULT_SECONDARY_COLOR,
+        "primary_color": record.primary_color,
+        "secondary_color": record.secondary_color,
         "logo_position": record.logo_position or _DEFAULT_LOGO_POSITION,
         "logo_object_key": record.logo_object_key,
         "intro_logo_object_key": record.intro_logo_object_key,

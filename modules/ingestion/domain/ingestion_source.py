@@ -25,6 +25,7 @@ class IngestionSource:
     last_event_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    secrets_encrypted: bytes | None = None
 
 
 @dataclass(frozen=True, slots=True)

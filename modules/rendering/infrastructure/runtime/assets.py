@@ -8,12 +8,17 @@ import random
 import re
 import shutil
 from pathlib import Path
+from typing import Iterable
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
+from modules.configuration.domain import MusicTrack
 from modules.rendering.infrastructure.models import PropertyReelTemplate
-from shared.storage.site_layout import safe_site_dirname
+from shared.storage.site_layout import (
+    resolve_agency_music_local_path,
+    safe_site_dirname,
+)
 from settings.http import OUTBOUND_HTTP_TIMEOUT_SECONDS
 from settings.images import IMAGE_EXTENSIONS, IMAGE_HEADERS
 from shared.errors import ResourceNotFoundError
@@ -103,7 +108,39 @@ def resolve_background_audio_paths(
     settings: PropertyReelTemplate,
     *,
     shuffle_candidates: bool,
+    music_tracks: tuple[Path, ...] | None = None,
 ) -> tuple[Path, ...]:
+    """Resolve the pool of background audio tracks for a reel render.
+
+    Feature 23: when ``music_tracks`` is provided (the canonical path
+    after the agency music pool has been wired through), the runtime
+    consumes that explicit list — typically resolved upstream from the
+    ``agency_music_tracks`` table via
+    :func:`resolve_agency_music_local_paths`. The legacy filesystem scan
+    under ``workspace/<assets>/music/`` is preserved as an emergency
+    fallback so the readiness check and dev workflows without a database
+    keep working when ``music_tracks`` is ``None`` or empty.
+    """
+    if music_tracks:
+        candidates = [path for path in music_tracks if path.is_file()]
+        if not candidates:
+            raise ResourceNotFoundError(
+                "No agency music tracks were available for reel rendering.",
+                code="MUSIC_BLOB_MISSING",
+                context={
+                    "music_tracks": [str(path) for path in music_tracks],
+                },
+                hint=(
+                    "Re-upload the agency music tracks or run the seed migration to "
+                    "repopulate the agency_music_tracks pool."
+                ),
+            )
+        if shuffle_candidates and len(candidates) > 1:
+            randomized_candidates = list(candidates)
+            random.SystemRandom().shuffle(randomized_candidates)
+            return tuple(randomized_candidates)
+        return tuple(candidates)
+
     configured_audio_path = (
         workspace_dir / settings.assets_dirname / settings.background_audio_filename
     )
@@ -136,6 +173,64 @@ def resolve_background_audio_paths(
         random.SystemRandom().shuffle(randomized_candidates)
         return tuple(randomized_candidates)
     return tuple(candidates)
+
+
+def resolve_agency_music_local_paths(
+    *,
+    workspace_dir: Path,
+    music_tracks: Iterable[MusicTrack],
+) -> tuple[Path, ...]:
+    """Translate :class:`MusicTrack` rows to absolute :class:`Path` objects.
+
+    Feature 23: the agency music pool persists each track as an opaque
+    ``object_key`` (so the backend can swap S3 for the filesystem later).
+    The render pipeline needs concrete :class:`Path` objects to feed
+    into ffmpeg, so this helper resolves each ``object_key`` to its
+    on-disk location via
+    :func:`shared.storage.site_layout.resolve_agency_music_local_path`.
+
+    Tracks whose ``object_key`` does not resolve to a readable file
+    raise :class:`ResourceNotFoundError` with code
+    ``MUSIC_BLOB_MISSING`` so the caller can surface a clear failure
+    instead of silently skipping the track and producing a quieter reel
+    pool than the agency expects.
+    """
+    resolved: list[Path] = []
+    for track in music_tracks:
+        object_key = str(getattr(track, "object_key", "") or "").strip()
+        if not object_key:
+            raise ResourceNotFoundError(
+                "Agency music track is missing an object_key.",
+                code="MUSIC_BLOB_MISSING",
+                context={
+                    "music_id": getattr(track, "music_id", ""),
+                    "agency_id": getattr(track, "agency_id", ""),
+                },
+                hint=(
+                    "Re-upload the track via POST /v1/admin/agencies/{id}/music/upload "
+                    "or delete the orphan row in agency_music_tracks."
+                ),
+            )
+        local_path = resolve_agency_music_local_path(
+            workspace_dir=workspace_dir,
+            object_key=object_key,
+        )
+        if local_path is None:
+            raise ResourceNotFoundError(
+                "Agency music blob is not available on disk.",
+                code="MUSIC_BLOB_MISSING",
+                context={
+                    "music_id": getattr(track, "music_id", ""),
+                    "agency_id": getattr(track, "agency_id", ""),
+                    "object_key": object_key,
+                },
+                hint=(
+                    "Re-upload the track via POST /v1/admin/agencies/{id}/music/upload "
+                    "or run the seed migration to repopulate the agency music pool."
+                ),
+            )
+        resolved.append(local_path)
+    return tuple(resolved)
 
 
 def normalize_ber_icon_code(ber_rating: str | None) -> str | None:
@@ -281,6 +376,7 @@ __all__ = [
     "download_remote_image",
     "has_explicit_unsupported_image_suffix",
     "normalize_ber_icon_code",
+    "resolve_agency_music_local_paths",
     "resolve_asset_path",
     "resolve_background_audio_paths",
     "resolve_ber_icon_path",

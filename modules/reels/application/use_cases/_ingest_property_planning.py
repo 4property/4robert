@@ -166,6 +166,12 @@ def _resolve_publish_inputs(
             templates_by_platform=getattr(
                 publish_context, "social_templates_map", {}
             ),
+            title_templates_by_platform=getattr(
+                publish_context, "social_title_templates_map", {}
+            ),
+            hashtags_by_platform=getattr(
+                publish_context, "social_hashtags_map", {}
+            ),
         )
         publish_descriptions_by_platform = dict(generated_content.captions_by_platform)
         publish_titles_by_platform = dict(generated_content.titles_by_platform)

@@ -1,4 +1,4 @@
-# Verificación — Cómo demostrar que el trabajo funciona (`4reels back/`)
+# Verificación — Cómo demostrar que el trabajo funciona (`/opt/projects/4Reels-Backend`)
 
 > Regla de oro: **el agente no dice "funciona", lo demuestra**.
 > Toda feature termina con evidencia ejecutable, no con afirmaciones.

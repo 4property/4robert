@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from modules.configuration.domain import SocialTemplate
+from modules.configuration.domain import SocialTemplate, SocialTemplateUpsert
 from modules.configuration.application.use_cases._agency_support import (
     ensure_agency_exists,
 )
@@ -19,7 +19,7 @@ from shared.db import DatabaseUnitOfWork
 @dataclass(frozen=True, slots=True)
 class ReplaceSocialTemplatesInput:
     agency_id: str
-    templates: dict[str, str]
+    templates: dict[str, SocialTemplateUpsert]
 
 
 class ReplaceSocialTemplatesUseCase:
@@ -34,12 +34,16 @@ class ReplaceSocialTemplatesUseCase:
         agency_id = str(data.agency_id or "").strip()
         ensure_agency_exists(uow, agency_id)
 
-        normalized: dict[str, str] = {}
+        normalized: dict[str, SocialTemplateUpsert] = {}
         for key, value in (data.templates or {}).items():
             platform = str(key or "").strip().lower()
             if not platform:
                 continue
-            normalized[platform] = str(value or "")
+            normalized[platform] = SocialTemplateUpsert(
+                description_template=str(value.description_template or ""),
+                title_template=str(value.title_template or ""),
+                hashtags=tuple(str(tag).strip() for tag in value.hashtags or ()),
+            )
 
         return uow.configuration.social_templates.replace_all_for_agency(
             agency_id=agency_id,
@@ -47,4 +51,8 @@ class ReplaceSocialTemplatesUseCase:
         )
 
 
-__all__ = ["ReplaceSocialTemplatesInput", "ReplaceSocialTemplatesUseCase"]
+__all__ = [
+    "ReplaceSocialTemplatesInput",
+    "ReplaceSocialTemplatesUseCase",
+    "SocialTemplateUpsert",
+]

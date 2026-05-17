@@ -54,12 +54,17 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         template,
         working_dir,
         layout_variant="classic",
+        music_tracks=None,
     ):
         captured["prepare"].append(
             {
                 "layout_variant": layout_variant,
                 "render_data_accent_text": render_data.accent_text_color,
                 "render_data_accent_background": render_data.accent_background_color,
+                "render_data_secondary_color": (
+                    render_data.side_banner_ribbon_background_color
+                ),
+                "music_tracks": music_tracks,
             }
         )
         Path(working_dir).mkdir(parents=True, exist_ok=True)
@@ -98,6 +103,7 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
                 "layout_variant": layout_variant,
                 "accent_text": render_data.accent_text_color,
                 "accent_background": render_data.accent_background_color,
+                "side_banner_panel_color": render_data.side_banner_panel_color,
             }
         )
         Path(output_path).write_bytes(b"mp4")
@@ -115,6 +121,7 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
                 "layout_variant": layout_variant,
                 "accent_text": render_data.accent_text_color,
                 "accent_background": render_data.accent_background_color,
+                "side_banner_panel_color": render_data.side_banner_panel_color,
             }
         )
         Path(output_path).write_bytes(b"jpg")
@@ -136,6 +143,8 @@ def _build_context(
     accent_background: str | None = None,
     fallback_text: str | None = None,
     fallback_background: str | None = None,
+    side_banner_ribbon_background: str | None = None,
+    side_banner_panel_color: str | None = None,
 ) -> PropertyContext:
     site_id = "site-a"
     storage_paths = resolve_site_storage_layout(workspace, site_id)
@@ -173,6 +182,13 @@ def _build_context(
     if fallback_background:
         reel_settings["fallback_accent_background_color"] = fallback_background
         poster_settings["fallback_accent_background_color"] = fallback_background
+    if side_banner_ribbon_background is not None:
+        reel_settings["side_banner_ribbon_background_color"] = (
+            side_banner_ribbon_background
+        )
+    if side_banner_panel_color is not None:
+        reel_settings["side_banner_panel_color"] = side_banner_panel_color
+        poster_settings["side_banner_panel_color"] = side_banner_panel_color
     return PropertyContext(
         workspace_dir=workspace,
         storage_paths=storage_paths,
@@ -196,16 +212,23 @@ def _build_prepared(selected_dir: Path) -> PreparedMediaAssets:
     )
 
 
-def test_side_banner_render_threads_layout_variant_and_accent_colors(
+def test_side_banner_render_threads_layout_variant_and_brand_panel_color(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Hotfix 2026-05-15: ``side_banner_panel_color`` (brand primary)
+    drives the side_banner panels in both the reel segments and the
+    cover poster. ``accent_text_color`` / ``accent_background_color``
+    are no longer populated from the WordPress webhook accents."""
     captured = _patch_primitives(monkeypatch)
     context = _build_context(
         tmp_path,
         layout_variant="side_banner",
+        # Webhook accents present but no longer threaded.
         accent_text="#ffffff",
         accent_background="#e22f8c",
+        # Brand primary on the dedicated side_banner panel field.
+        side_banner_panel_color="#123456",
     )
     selected_dir = tmp_path / "selected"
     selected_dir.mkdir(parents=True, exist_ok=True)
@@ -218,23 +241,35 @@ def test_side_banner_render_threads_layout_variant_and_accent_colors(
     assert captured["prepare"][0]["layout_variant"] == "side_banner"
     assert captured["reel"][0]["layout_variant"] == "side_banner"
     assert captured["poster"][0]["layout_variant"] == "side_banner"
-    # Per-property accent colors win.
-    assert captured["reel"][0]["accent_text"] == "#ffffff"
-    assert captured["reel"][0]["accent_background"] == "#e22f8c"
-    assert captured["poster"][0]["accent_text"] == "#ffffff"
-    assert captured["poster"][0]["accent_background"] == "#e22f8c"
+    # Brand primary reaches both reel and poster via the dedicated key.
+    assert captured["reel"][0]["side_banner_panel_color"] == "#123456"
+    assert captured["poster"][0]["side_banner_panel_color"] == "#123456"
+    # Webhook accents are not consulted by the new contract.
+    assert captured["reel"][0]["accent_text"] is None
+    assert captured["reel"][0]["accent_background"] is None
+    assert captured["poster"][0]["accent_text"] is None
+    assert captured["poster"][0]["accent_background"] is None
 
 
-def test_side_banner_render_falls_back_to_brand_color_when_property_misses(
+def test_side_banner_render_panel_color_is_none_without_brand(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Without a brand primary colour, ``side_banner_panel_color`` stays
+    ``None`` and the consumers (``poster.py`` / ``render_reel.py``)
+    fall back to the hardcoded grey ``_SIDE_BANNER_PANEL_DEFAULT``.
+
+    The legacy ``fallback_accent_*_color`` keys are inert under the new
+    contract; including them in the settings dict must not leak any
+    colour to the render data.
+    """
     captured = _patch_primitives(monkeypatch)
     context = _build_context(
         tmp_path,
         layout_variant="side_banner",
         accent_text=None,
         accent_background=None,
+        # Legacy inert keys included to assert they no longer surface.
         fallback_text="#0F172A",
         fallback_background="#0F172A",
     )
@@ -245,8 +280,10 @@ def test_side_banner_render_falls_back_to_brand_color_when_property_misses(
     renderer = DefaultMediaRenderer(workspace_dir=tmp_path)
     renderer.render_media(context, prepared)
 
-    assert captured["reel"][0]["accent_text"] == "#0F172A"
-    assert captured["reel"][0]["accent_background"] == "#0F172A"
+    assert captured["reel"][0]["side_banner_panel_color"] is None
+    assert captured["poster"][0]["side_banner_panel_color"] is None
+    assert captured["reel"][0]["accent_text"] is None
+    assert captured["reel"][0]["accent_background"] is None
 
 
 def test_classic_render_default_layout_variant_unaffected(
@@ -268,3 +305,91 @@ def test_classic_render_default_layout_variant_unaffected(
     # Without per-property colors or fallbacks, accent fields are None.
     assert captured["reel"][0]["accent_text"] is None
     assert captured["reel"][0]["accent_background"] is None
+
+
+def test_side_banner_render_threads_brand_secondary_color_to_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feature 29: ``side_banner_ribbon_background_color`` reaches preparation.
+
+    When ingestion stashes the brand secondary colour inside
+    ``render_template_reel_settings``, ``DefaultMediaRenderer._build_render_data``
+    must lift it onto ``PropertyRenderData`` so the preparation step
+    can render the rotated ribbon with the brand colour. The classic
+    layout does not consult this field — the renderer only builds the
+    ribbon asset for ``layout_variant == "side_banner"`` — but the
+    plumbing always carries the value end-to-end.
+    """
+    captured = _patch_primitives(monkeypatch)
+    context = _build_context(
+        tmp_path,
+        layout_variant="side_banner",
+        side_banner_ribbon_background="#FF00FF",
+    )
+    selected_dir = tmp_path / "selected"
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    prepared = _build_prepared(selected_dir)
+
+    renderer = DefaultMediaRenderer(workspace_dir=tmp_path)
+    renderer.render_media(context, prepared)
+
+    assert captured["prepare"][0]["render_data_secondary_color"] == "#FF00FF"
+    # Accent fields stay independent — the brand secondary colour does
+    # NOT leak into the top / bottom panel colours.
+    assert captured["reel"][0]["accent_text"] is None
+    assert captured["reel"][0]["accent_background"] is None
+
+
+def test_side_banner_render_secondary_color_absent_uses_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a brand override, ``side_banner_ribbon_background_color`` is None.
+
+    Feature 29: ``None`` signals "use the hardcoded ``#FECF4D`` fallback"
+    to ``preparation.prepare_reel_render_assets``. The accent panels
+    keep working independently.
+    """
+    captured = _patch_primitives(monkeypatch)
+    context = _build_context(tmp_path, layout_variant="side_banner")
+    selected_dir = tmp_path / "selected"
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    prepared = _build_prepared(selected_dir)
+
+    renderer = DefaultMediaRenderer(workspace_dir=tmp_path)
+    renderer.render_media(context, prepared)
+
+    assert captured["prepare"][0]["render_data_secondary_color"] is None
+
+
+def test_classic_render_ignores_brand_secondary_color_for_panels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Feature 29 regression guard: classic accent panels untouched.
+
+    Even when the brand override travels through the reel settings, the
+    classic template does not consume it — accent_text / accent_background
+    stay ``None`` and the layout_variant remains classic. Preparation
+    will see the value on the render data but it never reaches the
+    rotated ribbon (which is only built under side_banner).
+    """
+    captured = _patch_primitives(monkeypatch)
+    context = _build_context(
+        tmp_path,
+        layout_variant="classic",
+        side_banner_ribbon_background="#FF00FF",
+    )
+    selected_dir = tmp_path / "selected"
+    selected_dir.mkdir(parents=True, exist_ok=True)
+    prepared = _build_prepared(selected_dir)
+
+    renderer = DefaultMediaRenderer(workspace_dir=tmp_path)
+    renderer.render_media(context, prepared)
+
+    assert captured["prepare"][0]["layout_variant"] == "classic"
+    assert captured["reel"][0]["accent_text"] is None
+    assert captured["reel"][0]["accent_background"] is None
+    # The value is carried but classic does not build the ribbon asset.
+    assert captured["prepare"][0]["render_data_secondary_color"] == "#FF00FF"

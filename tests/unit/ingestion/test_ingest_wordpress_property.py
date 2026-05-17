@@ -111,6 +111,65 @@ def test_ingest_wordpress_property_raises_when_site_unknown() -> None:
     assert exc_info.value.code == "UNKNOWN_WORDPRESS_SITE"
 
 
+def test_ingest_wordpress_property_forwards_rich_social_templates_into_publish_context() -> None:
+    """Feature 20: the enqueued publish_context carries title_template and
+    hashtags so the worker pipeline can render and append them at publish.
+    """
+    use_case = IngestWordPressPropertyUseCase(job_max_attempts=1)
+    sources = _SourcesRepo({"ckp.ie": _source("agency-1", "ckp.ie")})
+    connections = _ConnectionsRepo(
+        {("agency-1", "gohighlevel"): _ghl_connection("loc-1", "tok-abc")}
+    )
+    delivery = _DeliveryNamespace()
+    configuration = _ConfigurationNamespace()
+    configuration.social_templates = SimpleNamespace(
+        list_for_agency=lambda agency_id: (
+            SimpleNamespace(
+                platform="pinterest",
+                description_template="See {{property_title}}",
+                title_template="{{property_title}} for sale",
+                hashtags=("#dublin", "#realestate"),
+            ),
+            SimpleNamespace(
+                platform="instagram",
+                description_template="IG copy",
+                title_template="",
+                hashtags=(),
+            ),
+        )
+    )
+
+    use_case.execute(
+        uow=_uow(
+            sources=sources,
+            connections=connections,
+            delivery=delivery,
+            configuration=configuration,
+        ),
+        data=IngestWordPressPropertyInput(
+            site_id="ckp.ie",
+            property_id=42,
+            raw_payload_hash="hash",
+            payload={"id": 42, "rest_domain": "ckp.ie"},
+            default_platforms=("pinterest", "instagram"),
+        ),
+    )
+
+    enqueued = delivery.jobs.enqueued
+    assert enqueued is not None
+    publish_context = enqueued.publish_context
+    # social_templates keeps the legacy (platform, description) tuples.
+    assert ("pinterest", "See {{property_title}}") in publish_context["social_templates"]
+    assert ("instagram", "IG copy") in publish_context["social_templates"]
+    # social_title_templates only carries non-empty titles.
+    title_templates = dict(publish_context["social_title_templates"])
+    assert title_templates == {"pinterest": "{{property_title}} for sale"}
+    # social_hashtags only carries platforms with at least one hashtag.
+    assert publish_context["social_hashtags"] == {
+        "pinterest": ["#dublin", "#realestate"]
+    }
+
+
 def test_ingest_wordpress_property_raises_when_ghl_connection_missing() -> None:
     use_case = IngestWordPressPropertyUseCase(job_max_attempts=1)
     sources = _SourcesRepo({"ckp.ie": _source("agency-1", "ckp.ie")})

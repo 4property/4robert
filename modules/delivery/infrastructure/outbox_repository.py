@@ -122,6 +122,60 @@ class OutboxRepository(ModuleRepository):
             {"published_at": published_at, "event_id": event_id},
         )
 
+    def mark_status(
+        self,
+        *,
+        event_id: str,
+        status: str,
+        last_error: str | None = None,
+        published_at: str | None = None,
+    ) -> None:
+        """Generic status transition used by the notifications subscriber
+        (feature 27) — moves an outbox row to e.g. ``'dispatched'`` or
+        ``'failed'`` while preserving the existing ``last_error`` /
+        ``published_at`` semantics of :meth:`mark_published`.
+        """
+
+        self.session.execute(
+            text(
+                "UPDATE outbox_events SET status = :status, "
+                "published_at = :published_at, "
+                "last_error = COALESCE(:last_error, '') "
+                "WHERE event_id = :event_id"
+            ),
+            {
+                "status": status,
+                "published_at": published_at,
+                "last_error": last_error,
+                "event_id": event_id,
+            },
+        )
+
+    def claim_pending_event(self, *, event_type: str) -> OutboxEvent | None:
+        """Lock and return the oldest ``status='pending'`` row of the
+        given ``event_type`` using ``FOR UPDATE SKIP LOCKED`` semantics.
+
+        Multi-process safe: any other worker calling this concurrently
+        will receive the next row (or ``None`` if the queue is empty).
+        The caller is responsible for transitioning the row to its
+        terminal status (``dispatched``, ``failed``) via
+        :meth:`mark_status` inside the same UoW transaction.
+        """
+
+        row = self.session.execute(
+            text(
+                "SELECT event_id, aggregate_type, aggregate_id, agency_id, "
+                "ingestion_source_id, external_source_id, source_property_id, "
+                "event_type, payload, status, created_at, available_at, "
+                "published_at, last_error FROM outbox_events "
+                "WHERE status = 'pending' AND event_type = :event_type "
+                "ORDER BY created_at ASC, event_id ASC "
+                "FOR UPDATE SKIP LOCKED LIMIT 1"
+            ),
+            {"event_type": event_type},
+        ).first()
+        return None if row is None else _row_to_event(row)
+
     def list_events(
         self,
         *,

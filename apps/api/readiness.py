@@ -413,6 +413,7 @@ def _resolve_background_audio_paths(workspace_dir: Path) -> tuple[Path, ...]:
         workspace_dir,
         PropertyReelTemplate(),
         shuffle_candidates=False,
+        music_tracks=None,
     )
 
 

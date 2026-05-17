@@ -144,6 +144,178 @@ def test_defaults_put_persists_namespaced_automation_settings() -> None:
             }
 
 
+def test_defaults_put_persists_music_selection_rules_false() -> None:
+    """Feature 24: PUT with `fallback_to_full_library=false` round-trips."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                json={
+                    "settings": {
+                        "music": {
+                            "selection_rules": {
+                                "fallback_to_full_library": False,
+                            }
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 200, response.text
+            put_payload = response.json()
+            assert (
+                put_payload["defaults"]["settings"]["music"][
+                    "selection_rules"
+                ]["fallback_to_full_library"]
+                is False
+            )
+
+            get_response = client.get(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                headers=ADMIN_BEARER,
+            )
+            assert get_response.status_code == 200, get_response.text
+            get_payload = get_response.json()
+            assert (
+                get_payload["defaults"]["settings"]["music"][
+                    "selection_rules"
+                ]["fallback_to_full_library"]
+                is False
+            )
+
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.configuration is not None
+                saved = uow.configuration.defaults.get(seeded.agency_id)
+            assert saved is not None
+            assert saved.settings == {
+                "music": {
+                    "selection_rules": {
+                        "fallback_to_full_library": False,
+                    }
+                }
+            }
+
+
+def test_defaults_put_persists_music_selection_rules_true() -> None:
+    """Feature 24: PUT with `fallback_to_full_library=true` round-trips."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                json={
+                    "settings": {
+                        "music": {
+                            "selection_rules": {
+                                "fallback_to_full_library": True,
+                            }
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 200, response.text
+            assert (
+                response.json()["defaults"]["settings"]["music"][
+                    "selection_rules"
+                ]["fallback_to_full_library"]
+                is True
+            )
+
+
+def test_defaults_put_rejects_unknown_music_key() -> None:
+    """Feature 24: unknown keys under `music.*` are rejected with 422."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                json={"settings": {"music": {"unknown_key": True}}},
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 422, response.text
+
+
+def test_defaults_put_rejects_unknown_selection_rules_key() -> None:
+    """Feature 24: unknown keys under `music.selection_rules.*` → 422."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                json={
+                    "settings": {
+                        "music": {
+                            "selection_rules": {"unknown_key": True}
+                        }
+                    }
+                },
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 422, response.text
+
+
+def test_defaults_get_surfaces_music_selection_rules_default() -> None:
+    """Feature 24: GET surfaces the default `fallback_to_full_library=true`.
+
+    PUTting a payload without `settings.music` must not persist the
+    default into the JSONB column (the absence is preserved). The GET
+    response, however, fills it in so the frontend Toggle starts with
+    a defined value.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.put(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                json={"settings": {"currency": "EUR"}},
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 200, response.text
+
+            get_response = client.get(
+                f"/v1/admin/agencies/{seeded.agency_id}/defaults",
+                headers=ADMIN_BEARER,
+            )
+            assert get_response.status_code == 200, get_response.text
+            settings_block = get_response.json()["defaults"]["settings"]
+            assert (
+                settings_block["music"]["selection_rules"][
+                    "fallback_to_full_library"
+                ]
+                is True
+            )
+
+            # The absence is preserved in the persisted JSONB column so
+            # the DB never accumulates implicit state.
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.configuration is not None
+                saved = uow.configuration.defaults.get(seeded.agency_id)
+            assert saved is not None
+            assert "music" not in saved.settings
+
+
 def test_defaults_returns_404_for_unknown_agency() -> None:
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:

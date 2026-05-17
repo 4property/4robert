@@ -44,6 +44,7 @@ def _jsonb_to_config(raw: Any) -> dict[str, Any]:
 def _row_to_source(row) -> IngestionSource:
     secrets_value = row.secrets_encrypted
     has_secret = bool(secrets_value) and len(bytes(secrets_value)) > 0
+    secrets_encrypted = bytes(secrets_value) if has_secret else None
     return IngestionSource(
         ingestion_source_id=str(row.id),
         agency_id=str(row.agency_id),
@@ -56,6 +57,7 @@ def _row_to_source(row) -> IngestionSource:
         last_event_at=_isoformat(row.last_event_at),
         created_at=_isoformat(row.created_at),
         updated_at=_isoformat(row.updated_at),
+        secrets_encrypted=secrets_encrypted,
     )
 
 

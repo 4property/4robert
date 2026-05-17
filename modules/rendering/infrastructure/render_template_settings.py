@@ -27,11 +27,37 @@ SUPPORTED_LAYOUT_VARIANTS = frozenset({"classic", "side_banner"})
 # do not map to ``PropertyReelTemplate`` fields. The accent fallbacks are
 # resolved from ``BrandSettings.primary_color`` during ingestion and read
 # back by ``frame_composition._build_render_data`` directly off the
-# ``PropertyContext`` settings dict (feature 16).
+# ``PropertyContext`` settings dict (feature 16). Feature 29 introduces
+# ``side_banner_ribbon_background_color`` for the brand secondary color
+# cascade consumed by ``preparation.prepare_reel_render_assets``. The
+# 2026-05-15 hotfix adds ``side_banner_panel_color`` so the brand
+# ``primary_color`` overrides the per-property accent_background_color
+# at render time for the side_banner top / bottom panels.
 _RENDERER_INTERNAL_OVERRIDE_KEYS = frozenset(
     {
         "fallback_accent_text_color",
         "fallback_accent_background_color",
+        "side_banner_ribbon_background_color",
+        "side_banner_panel_color",
+        # Feature 31: per-agency subtitle styling persisted under
+        # ``agency_reel_defaults.settings`` (camelCase ``sub*`` on the
+        # frontend, snake_case in the renderer). Stashed by
+        # ``ingest_property_into_reel`` and materialised into
+        # ``PropertyRenderData.subtitle_style`` by
+        # ``frame_composition._build_render_data``. These keys never map
+        # to ``PropertyReelTemplate`` fields and must therefore be
+        # excluded from the override validator.
+        "subtitle_font_family",
+        "subtitle_weight",
+        "subtitle_color",
+        "subtitle_bg_style",
+        "subtitle_bg_color",
+        "subtitle_bg_opacity",
+        "subtitle_position",
+        "subtitle_alignment",
+        "subtitle_uppercase",
+        "subtitle_max_chars",
+        "auto_captions_enabled",
     }
 )
 

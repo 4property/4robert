@@ -32,6 +32,15 @@ from modules.rendering.infrastructure.runtime import (
 )
 from shared.storage.site_layout import resolve_site_storage_layout
 from shared.errors import PropertyReelError
+
+
+# Hotfix 2026-05-15: neutral grey fallback for the side_banner top /
+# bottom panels when the agency has not configured a brand primary
+# colour. Mirrors the ``_SIDE_BANNER_PANEL_DEFAULT`` in ``poster.py``
+# so the cover image and the reel segments paint the same grey. Same
+# Tailwind ``gray-700`` shade — the goal is a neutral panel that
+# reads as "unconfigured" rather than as a deliberate brand colour.
+_SIDE_BANNER_PANEL_DEFAULT = "#374151"
 from shared.observability import format_console_block, format_detail_line
 
 logger = logging.getLogger(__name__)
@@ -238,12 +247,20 @@ def render_silent_reel(
     temp_dir: Path,
     layout_variant: str = "classic",
 ) -> tuple[Path, float]:
-    # Feature 16: side_banner ships per-property accent colors with a
-    # transparent panel overlay and a vertical status banner asset.
-    # Default values keep classic byte-for-byte.
+    # Hotfix 2026-05-15: side_banner panels are painted with the brand
+    # primary colour exclusively, falling back to a neutral grey when
+    # the agency has not configured one. The WordPress webhook accent
+    # feed used to participate here (feature 16) but is no longer
+    # consulted — the colour comes from the agency brand row only.
+    # Classic layout keeps the historical ``black@0.38`` /
+    # ``black@0.46`` defaults from ``build_overlay_filter``.
     from modules.rendering.infrastructure.formatting import apply_alpha_to_hex
     panel_color = (
-        apply_alpha_to_hex(property_data.accent_background_color, alpha=0.55)
+        apply_alpha_to_hex(
+            property_data.side_banner_panel_color
+            or _SIDE_BANNER_PANEL_DEFAULT,
+            alpha=0.55,
+        )
         if layout_variant == "side_banner"
         else None
     )

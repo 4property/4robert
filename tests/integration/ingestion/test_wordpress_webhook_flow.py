@@ -8,14 +8,18 @@ plumbing.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
 
 from apps.api.error_handlers import register_error_handlers
 from modules.ingestion.transport.http.wordpress_webhook_router import (
@@ -29,6 +33,8 @@ from modules.reels.application.use_cases.ingest_property_into_reel import (
 )
 from settings import DATABASE_URL
 from shared.db import DatabaseUnitOfWork
+from shared.db.security import encrypt_text
+from shared.http.webhook_signature import build_signature
 from tests.integration.reels._client import seed_automation_rules
 from tests.support.postgres import (
     seed_provider_connection,
@@ -219,7 +225,9 @@ def test_wordpress_webhook_then_worker_ingest_includes_scheduled_at_for_quiet_ho
             # we exercise the timezone-conversion path without an extra
             # helper. The quiet-hours window is the working day in local
             # time.
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seeded = seed_tenant(
+                database.url, site_id="ckp.ie", workspace_dir=workspace_dir
+            )
             seed_provider_connection(
                 database.url,
                 agency_id=seeded.agency_id,
@@ -297,6 +305,262 @@ def test_wordpress_webhook_then_worker_ingest_includes_scheduled_at_for_quiet_ho
             assert parsed.astimezone(timezone.utc) > frozen_now_utc
 
 
+def test_webhook_accepts_with_db_persisted_secret() -> None:
+    """Feature 38: site provisioned in DB, env empty → 202.
+
+    `seed_tenant` already stores `encrypt_text("test-secret")` in
+    `ingestion_sources.secrets_encrypted`; the new resolver decrypts it
+    and verifies the HMAC without ever touching `WEBHOOK_SITE_SECRETS`.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seed_provider_connection(
+                database.url,
+                agency_id=seeded.agency_id,
+                external_id="loc-1",
+                secrets={"access_token": "tok-1"},
+            )
+
+            client = _build_secure_client(
+                database_url=database.url,
+                workspace_dir=workspace_dir,
+                site_secrets={},
+            )
+
+            body = json.dumps(
+                {"id": 4321, "slug": "db-secret", "rest_domain": seeded.site_id}
+            ).encode("utf-8")
+            response = _post_signed_webhook(
+                client,
+                body=body,
+                site_id=seeded.site_id,
+                secret="test-secret",
+            )
+
+            assert response.status_code == 202, response.text
+            payload = response.json()
+            assert payload["site_id"] == seeded.site_id
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.delivery is not None
+                job = uow.delivery.jobs.get_job(payload["job_id"])
+            assert job is not None
+            assert job.external_source_id == seeded.external_source_id
+
+
+def test_webhook_rejects_wrong_signature_for_db_secret() -> None:
+    """Feature 38: site has DB secret but the caller signs with the wrong one → 401."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seed_provider_connection(database.url, agency_id=seeded.agency_id)
+
+            client = _build_secure_client(
+                database_url=database.url,
+                workspace_dir=workspace_dir,
+                site_secrets={},
+            )
+
+            body = json.dumps(
+                {"id": 9, "slug": "bad-sig", "rest_domain": seeded.site_id}
+            ).encode("utf-8")
+            response = _post_signed_webhook(
+                client,
+                body=body,
+                site_id=seeded.site_id,
+                secret="WRONG-SECRET",
+            )
+
+            assert response.status_code == 401
+            assert response.json()["code"] == "INVALID_WEBHOOK_CREDENTIALS"
+
+
+def test_webhook_fallbacks_to_env_secret_with_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Feature 38: site row exists but `secrets_encrypted` is NULL → env fallback + warning."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seed_provider_connection(database.url, agency_id=seeded.agency_id)
+            _clear_ingestion_source_secret(database.url, seeded.ingestion_source_id)
+
+            client = _build_secure_client(
+                database_url=database.url,
+                workspace_dir=workspace_dir,
+                site_secrets={seeded.site_id: "env-secret-x"},
+            )
+
+            body = json.dumps(
+                {"id": 11, "slug": "fallback", "rest_domain": seeded.site_id}
+            ).encode("utf-8")
+            with caplog.at_level(
+                logging.WARNING,
+                logger=(
+                    "modules.ingestion.transport.http.wordpress_webhook_router"
+                ),
+            ):
+                response = _post_signed_webhook(
+                    client,
+                    body=body,
+                    site_id=seeded.site_id,
+                    secret="env-secret-x",
+                )
+
+            assert response.status_code == 202, response.text
+            warnings = [
+                record
+                for record in caplog.records
+                if record.levelno == logging.WARNING
+                and "legacy env secret" in record.getMessage()
+            ]
+            assert warnings, "expected legacy env secret warning"
+
+
+def test_webhook_accepts_two_distinct_sites_for_same_agency() -> None:
+    """Feature 38: N WordPress sites per agency without restarting the service."""
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded_a = seed_tenant(database.url, site_id="site-a.example")
+            seed_provider_connection(database.url, agency_id=seeded_a.agency_id)
+            # Provision a second WP source on the same agency directly. The
+            # secret is encrypted via the same path the admin CRUD uses.
+            second_source_id = str(uuid4())
+            _add_secondary_wordpress_source(
+                database.url,
+                ingestion_source_id=second_source_id,
+                agency_id=seeded_a.agency_id,
+                external_id="site-b.example",
+                secret="secret-b",
+            )
+
+            client = _build_secure_client(
+                database_url=database.url,
+                workspace_dir=workspace_dir,
+                site_secrets={},
+            )
+
+            body_a = json.dumps(
+                {"id": 1, "slug": "from-a", "rest_domain": "site-a.example"}
+            ).encode("utf-8")
+            response_a = _post_signed_webhook(
+                client,
+                body=body_a,
+                site_id="site-a.example",
+                secret="test-secret",
+            )
+            assert response_a.status_code == 202, response_a.text
+
+            body_b = json.dumps(
+                {"id": 2, "slug": "from-b", "rest_domain": "site-b.example"}
+            ).encode("utf-8")
+            response_b = _post_signed_webhook(
+                client,
+                body=body_b,
+                site_id="site-b.example",
+                secret="secret-b",
+            )
+            assert response_b.status_code == 202, response_b.text
+
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.delivery is not None
+                job_a = uow.delivery.jobs.get_job(response_a.json()["job_id"])
+                job_b = uow.delivery.jobs.get_job(response_b.json()["job_id"])
+            assert job_a is not None and job_b is not None
+            assert job_a.agency_id == seeded_a.agency_id
+            assert job_b.agency_id == seeded_a.agency_id
+            assert job_a.external_source_id == "site-a.example"
+            assert job_b.external_source_id == "site-b.example"
+
+
+def _post_signed_webhook(
+    client: TestClient,
+    *,
+    body: bytes,
+    site_id: str,
+    secret: str,
+) -> Any:
+    timestamp = str(int(time.time()))
+    signature = build_signature(
+        secret=secret,
+        timestamp=timestamp,
+        site_id=site_id,
+        location_id="",
+        access_token="",
+        raw_body=body,
+    )
+    return client.post(
+        "/v1/ingest/wordpress/property",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-WP-Site-Id": site_id,
+            "X-WP-Timestamp": timestamp,
+            "X-WP-Signature": signature,
+        },
+    )
+
+
+def _clear_ingestion_source_secret(database_url: str, ingestion_source_id: str) -> None:
+    engine = create_engine(database_url, future=True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE ingestion_sources SET secrets_encrypted = NULL "
+                    "WHERE id = :id"
+                ),
+                {"id": ingestion_source_id},
+            )
+    finally:
+        engine.dispose()
+
+
+def _add_secondary_wordpress_source(
+    database_url: str,
+    *,
+    ingestion_source_id: str,
+    agency_id: str,
+    external_id: str,
+    secret: str,
+) -> None:
+    timestamp = datetime.now(timezone.utc)
+    normalized_external = external_id.strip().lower()
+    engine = create_engine(database_url, future=True)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO ingestion_sources ("
+                    "id, agency_id, kind, external_id, name, config_json, "
+                    "secrets_encrypted, status, last_event_at, created_at, "
+                    "updated_at"
+                    ") VALUES ("
+                    ":id, :agency_id, 'wordpress', :external_id, :name, "
+                    "CAST(:config_json AS jsonb), :secrets_encrypted, "
+                    "'active', NULL, :created_at, :updated_at"
+                    ")"
+                ),
+                {
+                    "id": ingestion_source_id,
+                    "agency_id": agency_id,
+                    "external_id": normalized_external,
+                    "name": f"Secondary {normalized_external}",
+                    "config_json": json.dumps(
+                        {
+                            "site_url": f"https://{normalized_external}",
+                            "normalized_host": normalized_external,
+                        }
+                    ),
+                    "secrets_encrypted": encrypt_text(secret),
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                },
+            )
+    finally:
+        engine.dispose()
+
+
 def _build_client(
     *,
     database_url: str,
@@ -311,6 +575,31 @@ def _build_client(
             settings=WordPressWebhookSettings(
                 path="/v1/ingest/wordpress/property",
                 security_disabled=True,
+                default_platforms=("tiktok",),
+            ),
+            job_max_attempts=3,
+            dispatcher_state=lambda: accepting_jobs,
+        )
+    )
+    return TestClient(app)
+
+
+def _build_secure_client(
+    *,
+    database_url: str,
+    workspace_dir: Path,
+    site_secrets: dict[str, str],
+    accepting_jobs: bool = True,
+) -> TestClient:
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(
+        create_wordpress_webhook_router(
+            unit_of_work_factory=lambda: DatabaseUnitOfWork(database_url, workspace_dir),
+            settings=WordPressWebhookSettings(
+                path="/v1/ingest/wordpress/property",
+                security_disabled=False,
+                site_secrets=dict(site_secrets),
                 default_platforms=("tiktok",),
             ),
             job_max_attempts=3,

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from sqlalchemy import text
 
-from modules.configuration.domain import SocialTemplate
+from modules.configuration.domain import SocialTemplate, SocialTemplateUpsert
 from modules.configuration.infrastructure.repository_helpers import isoformat, list_param
 from shared.db.repository_base import ModuleRepository, utcnow
 
@@ -118,22 +118,27 @@ class SocialTemplatesRepository(ModuleRepository):
         self,
         *,
         agency_id: str,
-        templates: dict[str, str],
+        templates: Mapping[str, SocialTemplateUpsert],
     ) -> tuple[SocialTemplate, ...]:
         """Bulk replace: drops every row for the agency and re-inserts the
-        provided platforms with `description_template` = the given string.
+        provided platforms with the rich per-platform payload.
 
-        Frontend currently sends a flat `{platform: description_template}`
-        map; richer fields (`title_template`, `hashtags`) keep their default
-        empty values. Migrating the frontend to the rich shape is a separate
-        feature.
+        Each :class:`SocialTemplateUpsert` carries ``description_template``,
+        ``title_template`` and ``hashtags``. The router converts the legacy
+        string-only shape (``templates[platform] = "<description>"``) into
+        ``SocialTemplateUpsert(description_template=...)`` before invoking
+        the use case, so this method never sees a raw string. Empty values
+        are persisted as empty strings / empty tuples (the columns default
+        to those values in the schema).
         """
         self.delete_all_for_agency(agency_id=agency_id)
-        for platform, description_template in templates.items():
+        for platform, upsert in templates.items():
             self.upsert(
                 agency_id=agency_id,
                 platform=platform,
-                description_template=description_template,
+                description_template=upsert.description_template,
+                title_template=upsert.title_template,
+                hashtags=upsert.hashtags,
             )
         return self.list_for_agency(agency_id)
 

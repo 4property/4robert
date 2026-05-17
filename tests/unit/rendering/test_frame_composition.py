@@ -120,6 +120,7 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
         template,
         working_dir,
         layout_variant="classic",
+        music_tracks=None,
     ):
         captured["prepare"].append(
             {
@@ -128,6 +129,7 @@ def _patch_primitives(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[st
                 "template": template,
                 "working_dir": working_dir,
                 "layout_variant": layout_variant,
+                "music_tracks": music_tracks,
             }
         )
         working_dir.mkdir(parents=True, exist_ok=True)

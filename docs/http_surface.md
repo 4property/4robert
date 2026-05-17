@@ -6,7 +6,7 @@ Generated from the real FastAPI app with:
 python scripts/generate_http_surface.py --write
 ```
 
-Total routes: 55
+Total routes: 70
 
 | Method | Path | Tag | Handler | Module |
 |---|---|---|---|---|
@@ -31,20 +31,34 @@ Total routes: 55
 | POST | `/v1/admin/agencies/{agency_id}/ghl-connection` | Admin · GHL connection | `attach_admin_agency_ghl_connection` | `modules.publishing.transport.http.connections_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/ghl-connection` | Admin · GHL connection | `rotate_admin_agency_ghl_credentials` | `modules.publishing.transport.http.connections_router` |
 | POST | `/v1/admin/agencies/{agency_id}/ghl-connection/test` | Admin · GHL connection | `probe_admin_agency_ghl_connection` | `modules.publishing.transport.http.connections_router` |
+| DELETE | `/v1/admin/agencies/{agency_id}/intro` | Admin · Intro | `delete_admin_agency_intro` | `modules.configuration.transport.http.intro_router` |
+| GET | `/v1/admin/agencies/{agency_id}/intro/file` | Admin · Intro | `stream_admin_agency_intro` | `modules.configuration.transport.http.intro_router` |
+| POST | `/v1/admin/agencies/{agency_id}/intro/upload` | Admin · Intro | `upload_admin_agency_intro` | `modules.configuration.transport.http.intro_router` |
 | GET | `/v1/admin/agencies/{agency_id}/music` | Admin · Music | `list_admin_agency_music_tracks` | `modules.configuration.transport.http.music_router` |
 | POST | `/v1/admin/agencies/{agency_id}/music` | Admin · Music | `register_admin_agency_music_track` | `modules.configuration.transport.http.music_router` |
+| POST | `/v1/admin/agencies/{agency_id}/music/upload` | Admin · Music | `upload_admin_agency_music_track` | `modules.configuration.transport.http.music_upload_router` |
 | DELETE | `/v1/admin/agencies/{agency_id}/music/{music_id}` | Admin · Music | `decommission_admin_agency_music_track` | `modules.configuration.transport.http.music_router` |
 | GET | `/v1/admin/agencies/{agency_id}/music/{music_id}` | Admin · Music | `inspect_admin_agency_music_track` | `modules.configuration.transport.http.music_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/music/{music_id}` | Admin · Music | `reconfigure_admin_agency_music_track` | `modules.configuration.transport.http.music_router` |
+| GET | `/v1/admin/agencies/{agency_id}/music/{music_id}/file/{filename}` | Admin · Music | `stream_admin_agency_music_track` | `modules.configuration.transport.http.music_upload_router` |
+| DELETE | `/v1/admin/agencies/{agency_id}/outro` | Admin · Outro | `delete_admin_agency_outro` | `modules.configuration.transport.http.outro_router` |
+| GET | `/v1/admin/agencies/{agency_id}/outro/file` | Admin · Outro | `stream_admin_agency_outro` | `modules.configuration.transport.http.outro_router` |
+| POST | `/v1/admin/agencies/{agency_id}/outro/upload` | Admin · Outro | `upload_admin_agency_outro` | `modules.configuration.transport.http.outro_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reel-profile` | Admin · Reel profile (raw) | `get_admin_agency_reel_profile` | `modules.configuration.transport.http.reel_profile_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/reel-profile` | Admin · Reel profile (raw) | `upsert_admin_agency_reel_profile` | `modules.configuration.transport.http.reel_profile_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reels` | Admin · Content | `list_admin_agency_reels` | `modules.reels.transport.http.admin_reels_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}` | Admin · Content | `get_admin_agency_reel` | `modules.reels.transport.http.admin_reels_router` |
 | POST | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/approve` | Admin · Content | `approve_admin_agency_reel` | `modules.reels.transport.http.admin_reels_router` |
+| PATCH | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/descriptions` | Admin · Content | `patch_admin_agency_reel_descriptions` | `modules.reels.transport.http.admin_reels_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/images` | Admin · Content | `list_admin_agency_reel_images` | `modules.reels.transport.http.admin_reels_assets` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/images/{position}/file` | Admin · Content | `stream_admin_agency_reel_image` | `modules.reels.transport.http.admin_reels_assets` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/manifest` | Admin · Content | `get_admin_agency_reel_manifest` | `modules.reels.transport.http.admin_reels_assets` |
+| PATCH | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/music` | Admin · Content | `patch_admin_agency_reel_music` | `modules.reels.transport.http.admin_reels_router` |
+| PATCH | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/photos` | Admin · Content | `patch_admin_agency_reel_photos` | `modules.reels.transport.http.admin_reels_router` |
+| POST | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/regenerate` | Admin · Content | `regenerate_admin_agency_reel` | `modules.reels.transport.http.admin_reels_router` |
 | POST | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/reject` | Admin · Content | `reject_admin_agency_reel` | `modules.reels.transport.http.admin_reels_router` |
+| PATCH | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/slides` | Admin · Content | `patch_admin_agency_reel_slides` | `modules.reels.transport.http.admin_reels_router` |
+| PATCH | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/subtitles` | Admin · Content | `patch_admin_agency_reel_subtitles` | `modules.reels.transport.http.admin_reels_router` |
 | GET | `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/video` | Admin · Content | `stream_admin_agency_reel_video` | `modules.reels.transport.http.admin_reels_assets` |
 | PUT | `/v1/admin/agencies/{agency_id}/render-template` | Admin · Render templates | `select_admin_agency_render_template` | `modules.configuration.transport.http.render_templates_router` |
 | GET | `/v1/admin/agencies/{agency_id}/render-templates` | Admin · Render templates | `list_admin_agency_render_templates` | `modules.configuration.transport.http.render_templates_router` |
@@ -56,6 +70,7 @@ Total routes: 55
 | DELETE | `/v1/admin/agencies/{agency_id}/sources/{ingestion_source_id}` | Admin - Sources | `decommission_ingestion_source_endpoint` | `modules.ingestion.transport.http.sources_router` |
 | GET | `/v1/admin/agencies/{agency_id}/sources/{ingestion_source_id}` | Admin - Sources | `inspect_ingestion_source_endpoint` | `modules.ingestion.transport.http.sources_router` |
 | PUT | `/v1/admin/agencies/{agency_id}/sources/{ingestion_source_id}` | Admin - Sources | `reconfigure_ingestion_source_endpoint` | `modules.ingestion.transport.http.sources_router` |
+| GET | `/v1/admin/fonts` | Admin · Fonts | `list_admin_fonts` | `modules.configuration.transport.http.fonts_router` |
 | GET | `/v1/admin/wordpress-sources` | Admin · Sources | `list_admin_wordpress_sources` | `modules.ingestion.transport.http.wordpress_sources_router` |
 | GET | `/v1/admin/wordpress-sources/{site_id}` | Admin · Sources | `get_admin_wordpress_source` | `modules.ingestion.transport.http.wordpress_sources_router` |
 | PUT | `/v1/admin/wordpress-sources/{site_id}` | Admin · Sources | `upsert_admin_wordpress_source` | `modules.ingestion.transport.http.wordpress_sources_router` |

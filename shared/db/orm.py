@@ -175,6 +175,56 @@ class ReelORM(Base):
     publish_target_snapshot: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    descriptions_override: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, server_default=None
+    )
+    # Feature 25: per-reel background music override. ``NULL`` means
+    # "fall back to the agency pool resolver" (features 23 / 24);
+    # otherwise the value must reference an ``agency_music_tracks.id``
+    # row belonging to the same agency. ``ON DELETE SET NULL`` keeps the
+    # reel renderable if the agency later deletes the picked track.
+    music_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("agency_music_tracks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Feature 36: per-reel subtitle override. ``NULL`` means "no
+    # override — fall back to the historical autoCaptions flow (if the
+    # agency keeps ``automation.autoCaptions`` enabled) or render no
+    # subtitles at all". Otherwise an ordered JSON array of
+    # ``{"index": int, "text": str, "in_seconds": float,
+    # "out_seconds": float}`` entries whose ``index`` keys are unique
+    # and monotonically increasing, and whose timing windows are
+    # non-overlapping with ``out_seconds > in_seconds`` and
+    # ``in_seconds >= 0``.
+    subtitles_override: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=None
+    )
+    # Feature 35 (retro-fix, closed by feature 37): per-reel photo
+    # override. ``NULL`` means "no override — render in the default
+    # property_images order". Otherwise an ordered JSON array of
+    # ``{"position": int, "selected": bool}`` entries whose ``position``
+    # keys cover the range ``[0, N)`` exactly once each. The column was
+    # added by migration ``20260515_0003_reels_photos_override`` but the
+    # ORM declaration was missed in feature 35; declared here so
+    # ``alembic revision --autogenerate`` does not propose a spurious
+    # ``drop_column``.
+    photos_override: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=None
+    )
+    # Feature 37: per-reel slide manifest override. ``NULL`` means "no
+    # override — fall back to the auto-generated manifest pipeline".
+    # Otherwise an ordered JSON array of
+    # ``{"slide_id": str, "position": int, "duration_seconds": float,
+    # "kind": str, ...kind-specific fields}`` entries whose ``position``
+    # keys cover the range ``[0, N)`` exactly once, whose ``slide_id``
+    # values are unique non-empty strings, whose ``duration_seconds``
+    # are positive floats summing to at most ``1.5 *
+    # target_duration_seconds``, and whose ``kind`` discriminator is one
+    # of ``{"photo", "voiceover", "text", "intro_card", "outro_card"}``.
+    manifest_override: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=None
+    )
     render_template_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("render_templates.template_id"),
