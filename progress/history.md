@@ -753,4 +753,212 @@ se limpiara en una feature futura aparte si procede).
   - Fallback color: `BrandSettings.primary_color` de la agencia.
   - Naming: `template_id="side_banner"`, `display_name="Side Banner"`, `sort_order=1`.
 - **Veredicto reviewer pass-2**: APPROVED sin reservas. Cero regresiones, cero imports inter-modulo prohibidos, cero tests eliminados.
+
+## 2026-05-13 — feature 17 side_banner_ribbon_polish
+
+# Sesion actual
+
+> Este archivo se vacia al cerrar cada sesion y se mueve a `history.md`.
+> Mientras trabajas, **mantenlo actualizado en tiempo real**, no al final.
+
+- **Feature en curso:** 17 — side_banner_ribbon_polish
+- **Inicio:** 2026-05-13
+- **Agente:** implementer
+- **Modulos afectados:** `modules/rendering/infrastructure/preparation.py`, `modules/rendering/infrastructure/layout/panels.py`
+- **Toca schema?:** no
+
+## Plan
+
+- Anadir constante `_SIDE_BANNER_RIBBON_BACKGROUND = "#FECF4D"` en `preparation.py` (hardcode temporal documentado en comentario).
+- Usar la constante en la llamada a `_render_vertical_status_banner` y forzar `alpha=1.0` en el `apply_alpha_to_hex` del drawbox de fondo (rama principal + fallback). Subir `body_height` a `max(420, round(settings.height * 0.325))`. Bajar `font_size` rotado a `max(20, round(horizontal_height * 0.40))`. Mantener `text_hex` dinamico.
+- En `panels.py`, mover BER badge en `side_banner`: `side_ber_x = round(width * 0.36)`.
+- Actualizar `tests/unit/rendering/test_layout_composition_side_banner.py` (BER x: 0.36) y anadir un test nuevo que verifique que `_render_vertical_status_banner` recibe `background_hex='#FECF4D'` ignorando el accent_background_color de la propiedad (mockeando `subprocess.run`).
+- Verificacion final: `pytest tests/unit/rendering/ tests/integration/rendering/`, `apps.api --check`, `apps.worker --check`.
+
+## Bitacora
+
+- Leidas spec 16 + 17, panels/preparation/formatting + apply_alpha_to_hex; el helper retorna `0xRRGGBB@A`. Con `alpha=1.0` quedaria `0xfecf4d@1.00`, formato valido para `drawbox=color=...` en ffmpeg.
+- No hay tests existentes que asercien sobre alpha 0.85 del banner vertical, font_size del ribbon, ni body_height: el unico cambio en tests existentes es el BER x del side_banner.
+- Aplicados los 4 cambios surgicales: constante `_SIDE_BANNER_RIBBON_BACKGROUND="#FECF4D"`, hardcode en llamada a `_render_vertical_status_banner`, `body_height = max(420, round(h*0.325))`, `font_size = max(20, round(h*0.40))`, alpha 1.0 en drawbox (rama principal + fallback), `side_ber_x = round(width*0.36)`.
+- Test actualizado: `test_layout_composition_side_banner.py` BER x ahora `round(1080 * 0.36)`.
+- Test nuevo: `tests/unit/rendering/test_preparation_side_banner_ribbon_hardcode.py` (4 tests; constante, subprocess captura, `inspect.getsource` wiring, body_height >= 0.325).
+- Verificacion: `pytest tests/unit/rendering/ tests/integration/rendering/` 121 passed; `apps.api --check` exit 0; `apps.worker --check` exit 0; `bash ./init.sh` exit 0 (3 fallos baseline ya documentados en sesion previa).
+
+## Proximo paso
+
+- Pasar a reviewer. Informe completo en `progress/impl_17_side_banner_ribbon_polish.md`. No marcar `done` hasta que el reviewer apruebe.
 - **Cierre**: feature 16 `status: "done"` en `feature_list.json`.
+
+## 2026-05-14 — feature 19: include_pinterest_in_reel_defaults_platforms
+
+- **Resultado:** done (APPROVED por review local, 0 blockers, 1 nit informativo).
+- **Archivos principales:**
+  - `alembic/versions/20260514_0001_include_pinterest_in_reel_defaults.py` (NEW) — `revision="20260514_0001"`, `down_revision="20260513_0005"`.
+  - `modules/configuration/infrastructure/orm.py` — `server_default` de `AgencyReelDefaultsORM.platforms` sincronizado con el array de 7 plataformas.
+  - `docs/API.md` §3 — default canónico actualizado y nota referenciando la migración y la decisión de downgrade.
+  - `tests/integration/configuration/test_pinterest_in_reel_defaults_platforms.py` (NEW) — 3 tests integración.
+- **Cambios clave:**
+  - `ALTER COLUMN agency_reel_defaults.platforms SET DEFAULT ARRAY['tiktok','instagram','linkedin','youtube','facebook','gbp','pinterest']::text[]` (la columna es `text[]`, no JSONB; sintaxis adaptada).
+  - Data migration idempotente: `UPDATE agency_reel_defaults SET platforms = array_append(platforms, 'pinterest') WHERE NOT ('pinterest' = ANY(platforms))`.
+  - `downgrade()` revierte solo el `server_default`; deliberadamente NO arranca pinterest de filas existentes (decisión documentada en el docstring de la migración para preservar configuración intencional del usuario).
+- **Tests reportados:**
+  - `pytest tests/integration/configuration/test_pinterest_in_reel_defaults_platforms.py -q`: 3 passed.
+  - `pytest tests/integration/configuration/ -q`: 64 passed (61 baseline + 3 nuevos).
+  - `bash ./init.sh`: exit 0 (los 3 fallos baseline de `test_http_surface_contract.py` y `test_http_transport.py` siguen iguales, no introducidos por feature 19).
+  - `apps.api --check` y `apps.worker --check`: exit 0.
+  - `alembic heads`: `20260514_0002` (la migración del hotfix de Codex `classic_render_template_preview` quedó encadenada con `down_revision="20260514_0001"`).
+- **Documentos:** `progress/impl_19_include_pinterest_in_reel_defaults_platforms.md`, `progress/review_19_include_pinterest_in_reel_defaults_platforms.md`.
+
+## 2026-05-14 — feature 20: extend_social_templates_payload_with_title_and_hashtags
+
+- **Resultado:** done (APPROVED por review local, 0 blockers; 4 nits/fyi puramente documentales, sin cambios de código requeridos).
+- **Archivos principales:**
+  - Transport: `modules/configuration/transport/payloads/social_templates.py` (union `str | SocialTemplateRichPayload`), `modules/configuration/transport/http/social_templates_router.py` (`_normalize_templates`, `_collect_unknown_template_variables` ampliado a `title_template`, nuevos `_collect_hashtag_errors` y `_invalid_hashtag_response`).
+  - Domain: `modules/configuration/domain/agency_settings.py` (nuevo `SocialTemplateUpsert`), `modules/configuration/domain/social_templates_variables.py` (`HASHTAG_PATTERN`, `MAX_HASHTAGS_PER_PLATFORM=30`, `is_valid_hashtag`, `find_invalid_hashtags`), `modules/configuration/domain/__init__.py`.
+  - Application/Infrastructure: `modules/configuration/application/use_cases/replace_social_templates.py`, `modules/configuration/infrastructure/social_template_repository.py` (persiste los 3 campos vía `upsert`).
+  - Reels/ingestion pipeline: `modules/reels/domain/types.py` (`SocialPublishContext` con `social_title_templates` y `social_hashtags`, `from_dict`/`to_dict` backward-compat), `modules/reels/application/content_generator.py` (`append_hashtags`, render de title), `modules/reels/application/use_cases/_ingest_property_planning.py`, `modules/ingestion/application/use_cases/ingest_wordpress_property.py`.
+  - Tests: `tests/integration/configuration/test_social_templates_router.py` (+6), `tests/unit/configuration/test_social_templates_payload.py` (nuevo), `tests/unit/configuration/test_social_templates_hashtags.py` (nuevo), `tests/unit/reels/test_content_generator_hashtags_and_titles.py` (nuevo), `tests/unit/configuration/test_replace_social_templates.py` (+1), `tests/unit/ingestion/test_ingest_wordpress_property.py` (+1), `tests/unit/configuration/_uow_stubs.py` (firma rica).
+  - Docs: `docs/API.md` (shape union, 2 códigos 422 y regla de concatenación de hashtags).
+- **Cambios clave:**
+  - Payload union backward-compat: el PUT acepta `dict[str, str]` legacy y `dict[str, {description_template, title_template, hashtags}]` rico; el GET mantiene `templates: dict[str, str]` y expone los 3 campos en `items[]` (no breaking).
+  - Pipeline title+hashtags: `content_generator` renderiza `title_template` con las mismas variables canónicas y concatena hashtags al final de la descripción con separador `\n\n`; `PublishMediaRequest.title` (preexistente) se rellena vía `publish_titles_by_platform` para redes que lo soportan (Pinterest, YouTube).
+  - Validaciones nuevas: `SOCIAL_TEMPLATE_UNKNOWN_VARIABLE` con shape mixto (lista plana para description-only, dict `{description_template, title_template}` cuando title participa) y `SOCIAL_TEMPLATE_INVALID_HASHTAG` con `details.hashtag_errors_by_platform[platform] = {invalid:[...], count, max}`.
+- **Tests reportados:**
+  - `pytest tests/integration/configuration/test_social_templates_router.py -q`: 15 passed (9 originales + 6 nuevos).
+  - `pytest tests/unit/configuration/test_social_templates_payload.py tests/unit/configuration/test_social_templates_hashtags.py tests/unit/reels/test_content_generator_hashtags_and_titles.py -v`: 22 passed.
+  - `pytest tests/integration/reels/ -q`: 29 passed.
+  - `pytest -q` global: 3 failed, 699 passed (los 3 fallos = baseline preexistente: `test_http_surface_contract` + 2 `test_http_transport`).
+  - `apps.api --check` y `apps.worker --check`: exit 0.
+  - `alembic heads`: `20260514_0002` (sin cambios, feature 20 no añade migración).
+- **Documentos:** `progress/impl_20_extend_social_templates_payload_with_title_and_hashtags.md`, `progress/review_20_extend_social_templates_payload_with_title_and_hashtags.md`.
+
+## 2026-05-14 — feature 21: per_reel_description_override_endpoint
+
+- **Resultado:** done (APPROVED por review local, 0 blockers, 0 cambios solicitados; cierre del lado backend — frontend pendiente como cross-repo).
+- **Archivos principales:**
+  - Schema/ORM: `alembic/versions/20260514_0003_reels_descriptions_override.py` (NEW; `down_revision="20260514_0002"`), `shared/db/orm.py` (`reels.descriptions_override` JSONB nullable).
+  - Dominio + persistencia: `modules/reels/domain/reel_state.py` (campo `descriptions_override`), `modules/reels/infrastructure/reel_state_repository.py` (helpers `_override_to_jsonb_param` / `_jsonb_to_optional_mapping`, INSERT con `CAST(:descriptions_override AS jsonb)`, propagación en `ON CONFLICT DO UPDATE` y en `update_publish_status`/`update_workflow_state`/`save_local_artifacts`).
+  - Aplicación: `modules/reels/application/use_cases/update_reel_descriptions_override.py` (NEW), `modules/reels/application/use_cases/ingest_property_into_reel.py` (helper `_apply_descriptions_override` aplicado tras calcular `publish_descriptions_by_platform` y antes del snapshot), `modules/reels/application/use_cases/_ingest_property_assets.py` (propaga `state.descriptions_override` en re-ingest).
+  - Transport: `modules/reels/transport/payloads/reel_descriptions_override.py` (NEW; `extra='forbid'`), `modules/reels/transport/http/admin_reels_router.py` (PATCH `/v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/descriptions` con mapping 404/409/422).
+  - Docs: `docs/API.md`, `docs/http_surface.md`.
+  - Tests: `tests/integration/reels/test_admin_reels_descriptions_override.py` (NEW, 7 tests), `tests/unit/reels/test_ingest_applies_descriptions_override.py` (NEW, 5 tests).
+- **Cambios clave:**
+  - Override per-reel en columna nueva `reels.descriptions_override` (JSONB nullable, default NULL); `None` y `{}` mapean al mismo sentinel SQL NULL, así `WHERE descriptions_override IS NULL` sigue siendo equivalente a "no override".
+  - Worker honra la precedencia override → snapshot: el merge per-platform se aplica en `IngestPropertyIntoReelUseCase` justo antes de construir `publish_target_snapshot`, así tanto la ingestión inicial como el flujo approve→publish (que re-encola un job que pasa por `ReelPipeline.handle` → ingest → publish) ven el override en `context.publish_descriptions_by_platform`. `publish_reel.py` queda intacto.
+  - Endpoint PATCH con state guard: solo edita reels en `publish_status in {needs-approval, pending_review, pending, ''}`; estados terminales rechazan con **409 `REEL_NOT_EDITABLE`** (semántico, en vez del genérico `RESOURCE_LOCKED`); platform fuera de `agency_reel_defaults.platforms` → **422 `PLATFORM_NOT_ENABLED`**; cuerpo con campo extra → 422 (Pydantic `extra='forbid'`).
+  - Path real del endpoint adaptado al esquema de tupla del router admin: `(agency_id, site_id, source_property_id)` en vez del `reel_id` UUID literal del plan (no existe ningún endpoint admin que use UUID).
+- **Tests reportados:**
+  - `pytest tests/integration/reels/test_admin_reels_descriptions_override.py tests/unit/reels/test_ingest_applies_descriptions_override.py -q`: 12 passed.
+  - `pytest tests/integration/reels/ tests/unit/reels/ -q`: 123 passed.
+  - `pytest -q` global vía `bash ./init.sh`: 711 passed, 3 fallos baseline preexistentes (`test_http_surface_contract` + 2 `test_http_transport`).
+  - `apps.api --check` y `apps.worker --check`: exit 0.
+  - `alembic upgrade head` / `downgrade -1` / `upgrade head`: OK.
+  - `alembic heads`: `20260514_0003` (head única, encadenada tras el hotfix Codex `20260514_0002_classic_render_template_preview`).
+- **Documentos:** `progress/impl_21_per_reel_description_override_endpoint.md`, `progress/review_21_per_reel_description_override_endpoint.md`.
+
+## 2026-05-14 — feature 22: agency_music_upload (back)
+
+- **Resultado:** done (APPROVED por review local, 0 blockers; 1 fyi cleanup-on-fail ordering, 1 nit kwarg muerto, 4 fyi informativos).
+- **Archivos principales:**
+  - Transport (nuevo): `modules/configuration/transport/http/music_upload_router.py` (multipart parser stdlib + `POST /music/upload` + `GET /music/{music_id}/file/{filename}`).
+  - Transport (modificado): `modules/configuration/transport/http/music_router.py` (POST metadata-only retirado a 405; PUT ya no propaga `object_key`/`duration_seconds`), `modules/configuration/transport/payloads/music.py` (`MusicTrackPatchPayload` reducido a `display_name`+`is_default`, `extra='forbid'`).
+  - Application (nuevo): `modules/configuration/application/use_cases/upload_music_track.py` (`UploadMusicTrackUseCase` con atomic write → ffprobe → register + cleanup-on-fail).
+  - Storage: `shared/storage/site_layout.py` (`resolve_agency_music_destination`, `resolve_agency_music_local_path`, constante `AGENCY_MUSIC_UPLOAD_DIRNAME`).
+  - Wiring: `apps/api/app_factory.py` (include del router nuevo).
+  - Docs: `docs/API.md`, `docs/http_surface.md`, `docs/openapi.json` regenerado.
+  - Tests: `tests/integration/configuration/test_music_upload_router.py` (11), `tests/integration/configuration/test_music_router.py` (refresh 7), `tests/unit/configuration/test_upload_music_track.py` (5), fixtures `tests/integration/configuration/_fixtures/`.
+- **Cambios clave:** `POST /v1/admin/agencies/{id}/music/upload` recibe multipart (file + display_name + is_default) y persiste el blob bajo la carpeta de la agencia derivando `object_key` y `duration_seconds` vía `ffprobe`; `GET .../music/{music_id}/file/{filename}` streamea el blob con admin auth scope-checked; el POST metadata-only queda retirado a 405 y el PUT bloquea `object_key`/`duration_seconds` con 422 (`extra='forbid'`); helper `resolve_agency_music_destination` en `shared/storage/site_layout` para tener S3 enchufable mañana sin tocar HTTP.
+- **Tests reportados:**
+  - `pytest tests/integration/configuration/test_music_upload_router.py tests/integration/configuration/test_music_router.py tests/unit/configuration/ -v`: 134 passed (11 upload + 7 router + 5 unit + resto suite configuration).
+  - `pytest tests/integration/configuration/ tests/integration/tenancy/ -q`: 89 passed.
+  - `bash ./init.sh`: exit 0 — 731 passed, 3 fallos baseline preexistentes (`test_http_surface_contract` + 2 `test_http_transport`), sin nuevos fallos introducidos.
+  - `apps.api --check` y `apps.worker --check`: exit 0.
+  - `alembic heads`: `20260514_0004` (sin nueva migración para feature 22; head única encadenada tras feature 21).
+- **Documentos:** `progress/impl_22_agency_music_upload_back.md`, `progress/review_22_agency_music_upload.md`.
+- **Cross-repo:** Frontend feature 22 sigue `in_progress` (code-complete awaiting back deploy). Tras el reinicio del API+worker quedará pendiente solo la verificación manual cross-repo para cerrarla.
+
+## 2026-05-14 — feature 23: wire_render_to_agency_music_tracks (back)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:**
+  - Alembic: `alembic/versions/20260514_0005_seed_existing_agencies_with_ncs_music_tracks.py` (NEW; seed por agencia + copia de blobs con marker `_seed_ncs_`).
+  - Rendering/runtime: `modules/rendering/infrastructure/runtime/assets.py` (`resolve_background_audio_paths` con kwarg `music_tracks`, helper nuevo `resolve_agency_music_local_paths`), `modules/rendering/infrastructure/preparation.py`, `modules/rendering/infrastructure/manifest.py`, `modules/rendering/infrastructure/readiness.py` (3 call sites en lockstep), `modules/rendering/infrastructure/default_media_renderer.py` (propaga `music_tracks=` a `prepare_reel_render_assets`).
+  - Reels application: `modules/reels/application/use_cases/_resolve_agency_music_pool.py` (NEW; default → library → raise `MUSIC_NO_TRACKS`), `modules/reels/application/use_cases/ingest_property_into_reel.py` (resuelve candidatos antes del render), `PropertyContext` extendido con `background_audio_candidates`.
+  - Configuration/domain: lectura de tracks vía repositorio existente de `agency_music_tracks`.
+  - Tenancy/application: `modules/tenancy/application/use_cases/register_agency.py` (hook seed tras social_templates: `seed_default_music_tracks_for_agency`).
+  - Tests: `tests/integration/rendering/`, `tests/unit/rendering/`, `tests/integration/reels/` (20 tests nuevos cubriendo agency con/ sin default, library fallback, MUSIC_NO_TRACKS, cross-agency isolation, blob ausente).
+  - Docs: `docs/API.md` (sección Rendering), `REFACTOR_STATUS.md`.
+- **Cambios clave:** Migración `20260514_0005` semilla cada agencia preexistente con copia propia de las 4 NCS y dispara hook idéntico en `RegisterAgencyUseCase` para agencias nuevas; `resolve_background_audio_paths` acepta kwarg opcional `music_tracks` que tiene prioridad sobre el scan legacy de `assets/music/` (fallback dev preservado); helper `resolve_agency_music_local_paths` traduce `object_key`→`Path` y nuevo `_resolve_agency_music_pool` aplica la regla default→library→raise, con marker `_seed_ncs_` para que el downgrade selectivo solo borre lo creado por la migración.
+- **Tests reportados:** 752 passed, 3 baseline failed, 20 tests nuevos.
+- **Documentos:** `progress/impl_23_wire_render_to_agency_music_tracks.md`, `progress/review_23_wire_render_to_agency_music_tracks.md`, `progress/explore_23_render_to_agency_music_tracks.md`.
+- **Bloquea-resuelto:** features 24 y 25 pueden arrancar.
+- **Cross-repo:** Frontend feature 23 es noop (sin cambios de código); el leader la marcará done en el siguiente paso.
+
+## 2026-05-14 — feature 24: agency_music_selection_rules (back)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** modules/configuration/transport/payloads/defaults.py (SettingsMusicPayload + SettingsMusicSelectionRulesPayload, validator), modules/configuration/application/use_cases/{update_aggregated_reel_profile.py, read_aggregated_reel_profile.py} (asimétrico read/write + helper resolve_music_selection_rules), modules/reels/application/use_cases/_resolve_agency_music_pool.py (acepta fallback_to_full_library kwarg), modules/reels/application/use_cases/ingest_property_into_reel.py (helper _resolve_music_selection_rules), tests, docs/API.md.
+- **Cambios clave:** payload Pydantic anidado opcional bajo settings.music.selection_rules.fallback_to_full_library (extra='forbid' en ambas capas; default true surfaced solo en GET). _resolve_agency_music_pool honra el flag: default vacío + false → MUSIC_NO_DEFAULT_TRACKS; true → fallback a library (comportamiento previo).
+- **Tests reportados:** 763 passed, 3 baseline failed (sin regresión). Tests específicos: 224 passed.
+- **Documentos:** progress/impl_24_agency_music_selection_rules.md, progress/review_24_agency_music_selection_rules.md.
+- **Caveats follow-up (no bloqueantes):** (1) update_reel_defaults usa merge shallow a settings.*; si feature 25 añade hermanas a music.selection_rules, considerar deep merge; (2) error code Pydantic `extra_forbidden` cuando se manda clave desconocida bajo settings.music.* — coincide con "equivalente" del acceptance.
+- **Cross-repo:** Frontend feature 24 sigue pending; el leader la arrancará en el siguiente paso tras reiniciar servicios.
+
+## 2026-05-14 — feature 25: per_reel_music_override (back)
+
+- **Resultado:** done (APROBADO por review local).
+- **Archivos principales:** alembic/versions/20260514_0006_reels_music_id_override.py, shared/db/orm.py (columna nueva), modules/reels/{domain/reel_state.py, infrastructure/reel_state_repository.py, application/use_cases/update_reel_music_override.py, application/use_cases/_ingest_property_planning.py, application/use_cases/regenerate_reel.py, transport/payloads/reel_music_override.py, transport/http/admin_reels_router.py}, modules/reels/domain/types.py (SocialPublishContext.override_music_track_id), tests, docs/API.md, docs/http_surface.md.
+- **Cambios clave:** PATCH /v1/admin/agencies/{a}/reels/{s}/{p}/music (body {music_id: str|null}) persiste override y re-encola job de render con override_music_track_id en publish_context. Worker sustituye la pool por la pista única; si la track fue borrada en race → warning + fallback a pool default. Cross-agency colapsado a 404 ADMIN_MUSIC_TRACK_NOT_FOUND (no leak existencia). Estados editables iguales que feature 21 (needs-approval/pending_review/pending/'').
+- **Tests reportados:** 778 passed, 3 baseline failed (sin relación). 15 tests nuevos focalizados (9 integration + 6 unit).
+- **Documentos:** progress/impl_25_per_reel_music_override.md, progress/review_25_per_reel_music_override.md.
+- **Caveats follow-up (no bloqueantes):** (1) `_maybe_enqueue_publish_job` duplicado entre update_music_override y regenerate_reel; (2) PATCH no fuerza transición de workflow_state; (3) import privado `_EDITABLE_PUBLISH_STATUSES` desde feature 21.
+- **Bloquea-resuelto:** backlog música completo (22-24 ya done, 25 cerrada). Frontend 25 sigue pending; el leader la arrancará tras este cierre.
+- **Cross-repo:** Frontend feature 25 pending — selector de pista per-reel en /reels editor.
+
+## 2026-05-14 — feature 28: font_catalog_and_brand_font_in_render (back)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** assets/fonts/{Manrope,Plus_Jakarta_Sans,Montserrat,Poppins,Roboto}/{Regular.ttf,Bold.ttf,OFL.txt}, modules/configuration/domain/font_catalog.py, modules/configuration/application/use_cases/list_available_fonts.py, modules/configuration/transport/http/fonts_router.py, modules/configuration/transport/payloads/brand.py (validator), modules/reels/application/use_cases/ingest_property_into_reel.py (_resolve_brand_font_descriptor + inyección al render dict), apps/api/app_factory.py (montar router), tests, docs/API.md, docs/http_surface.md, docs/openapi.json.
+- **Cambios clave:** catálogo Google OFL de 6 fuentes (Inter+Manrope+Plus Jakarta Sans+Montserrat+Poppins+Roboto) servido por GET /v1/admin/fonts; Pydantic validator UNKNOWN_FONT_FAMILY en BrandSettingsUpsertPayload.font_family (Option A: mensaje en detail[0].msg con allowed families); ingest resuelve FontDescriptor por agency.brand.font_family (fallback Inter con warning si la family está fuera de catálogo) e inyecta font_path/bold_font_path en render_template_reel_settings + _poster_settings. Renderer ya consumía el atributo del template; no requirió cambios.
+- **Tests reportados:** 803 passed, 3 baseline failed (sin regresión). 35 tests nuevos focalizados (13 unit catalog + 3 integration fonts router + 4 brand router + 3 ingest injection + suites colaterales).
+- **Documentos:** progress/impl_28_..., progress/review_28_..., progress/explore_brand_colors_and_fonts.md, progress/design_email_notifications_and_brand_customisation.md.
+- **Follow-ups no bloqueantes:** (1) Option B del 422 (handler RequestValidationError que serialice allowed_families como objeto) si el frontend lo necesita programático; (2) 4 fuentes (Manrope/PJS/Montserrat/Roboto) tienen Bold = Regular duplicado del TTF variable upstream — estético, no funcional; (3) docstring de _resolve_brand_font_descriptor dice "three axes" pero cubre 5-6 caminos.
+- **Cross-repo:** Frontend feature 28 sigue pending (dropdown dinámico + reset to default); el leader la arrancará tras este cierre y reinicio.
+
+## 2026-05-14 — feature 29: secondary_color_side_banner (back, sin frontend counterpart)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** modules/reels/application/use_cases/ingest_property_into_reel.py (_resolve_brand_secondary_color + key side_banner_ribbon_background_color en render_template_reel_settings), modules/rendering/application/scripted_video/frame_composition.py (_build_render_data lifte la key + _RENDERER_INTERNAL_OVERRIDE_KEYS), modules/rendering/application/scripted_video/models.py (PropertyRenderData.side_banner_ribbon_background_color), modules/rendering/infrastructure/preparation.py:209,236 (call site del fallback + constante preservada), tests, docs/API.md.
+- **Cambios clave:** Cascada de 2 niveles BrandSettings.secondary_color → #FECF4D (el webhook WP no trae color secundario; el feed solo tiene wppd_accent_text/background consumidos como par primario por feature 16). El render del template side_banner ahora lee side_banner_ribbon_background_color del template; classic intacto. Hotfixes Codex en filters.py y panels.py NO tocados.
+- **Tests reportados:** 811 passed, 3 baseline failed (sin regresión). 8 tests nuevos (3 integration rendering + 1 integration reels-2 casos + 1 unit composition + 1 unit settings + 2 unit preparation).
+- **Documentos:** progress/impl_29_secondary_color_side_banner.md, progress/review_29_secondary_color_side_banner.md.
+- **Cadena brand customisation completa:** feature 28 (font_catalog + dynamic dropdown + reset) + feature 29 (secondary_color en side_banner) cerradas. Features 26-27 (email notifications) siguen pending por decisión del usuario.
+
+## 2026-05-15 — feature 31: subtitle_settings_wiring (back)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** modules/rendering/infrastructure/models.py (SubtitleStyle en PropertyRenderData), modules/rendering/infrastructure/render_template_settings.py (_RENDERER_INTERNAL_OVERRIDE_KEYS +11 keys), modules/rendering/application/frame_composition.py (_build_subtitle_style + propagación), modules/rendering/infrastructure/layout/subtitles.py (max_chars + position + uppercase + alignment), modules/rendering/infrastructure/ffmpeg/filters.py (drawtext con SubtitleStyle + skip si enabled=False), modules/reels/application/use_cases/ingest_property_into_reel.py (_resolve_subtitle_settings_overrides), modules/configuration/domain/font_catalog.py (resolve_weighted), tests.
+- **Cambios clave:** 10 settings sub* + auto_captions cableados end-to-end desde defaults.settings hasta el filter graph ffmpeg. `pill` colapsa a `block` en MVP. `font_family` desconocida → fallback al subtitle_font_path legacy. Color default subtítulo cambia de 0xF4D03F a 0xffffff alineado con el preview del front.
+- **Tests reportados:** 842 passed, 3 baseline failed; 21 tests nuevos (5 font_catalog + 7 unit subtitle_style + 9 integration wiring).
+- **Documentos:** progress/impl_31_subtitle_settings_wiring.md, progress/review_31_subtitle_settings_wiring.md.
+- **Cross-repo:** Frontend feature 31 (cleanup + autoCaptions switch) sigue pending; el leader la arrancará tras este cierre y reinicio.
+
+## 2026-05-15 — feature 26: email_notification_infrastructure (back)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** shared/email/{__init__.py, sender.py, factory.py, backends/__init__.py, backends/console_sender.py, backends/smtp_sender.py}, settings/notifications.py, settings/__init__.py (re-exports), alembic/versions/20260514_0007_email_notifications.py, modules/notifications/{__init__.py, domain/{__init__.py, email_record.py, status.py}, infrastructure/{__init__.py, email_notification_repository.py}}, shared/db/uow.py (NotificationsNamespace.emails), .env.example, docs/API.md (sección 7b Notifications), docs/conventions.md, tests/unit/notifications/{test_email_message,test_console_sender,test_smtp_sender,test_factory}.py, tests/integration/notifications/{test_migration_20260514_0007,test_email_notification_repository}.py.
+- **Cambios clave:** Capa pura `shared/email/` con `EmailSender` Protocol + dos backends (`ConsoleEmailSender` para dev/tests y `SmtpEmailSender` con stdlib `smtplib`, STARTTLS opcional, auth opcional, `Message-ID` generado vía `email.utils.make_msgid` y conexión cerrada en `finally`). Factory `build_email_sender(settings)` selecciona backend según `EMAIL_BACKEND ∈ {console, smtp}` (otro valor → `ValueError`). `settings/notifications.py::load_notification_settings()` parsea `EMAIL_BACKEND`, `SMTP_HOST/PORT/USER/PASSWORD/USE_TLS/FROM_ADDRESS/FROM_NAME`, `FRONTEND_BASE_URL` con defaults seguros. Migración `20260514_0007` crea tabla `email_notifications` (FK agency_id ON DELETE CASCADE + UNIQUE `uq_email_notifications_dedup` sobre (agency_id, site_id, source_property_id, recipient_email, event_kind) + 2 índices status y agency_id+created_at DESC). `EmailNotificationRepository` con `insert_pending` idempotente (`ON CONFLICT DO UPDATE SET updated_at` para devolver siempre la fila), `mark_sent`, `mark_failed`, `find_recent_sent` (preparación throttle de #27), `list_by_agency/status`. Enchufado al UoW como `uow.notifications.emails`. **Sin business logic**: publish_reel intacto, sin handler `email_send` en worker, sin templates — eso es #27.
+- **Tests reportados:** 869 passed + 27 nuevos (4 unit + 2 integration), 3 baseline failed sin regresión. `apps.api --check` y `apps.worker --check` exit 0 (kinds=reel_publish, scripted_render).
+- **Desviaciones aceptadas:** (1) `EmailRecord.sent_at` como `str` ISO-8601 (no `datetime`) por consistencia con `repository_helpers.isoformat`; la API tipada se preserva en parámetros del repo. (2) `insert_pending` usa `ON CONFLICT DO UPDATE SET updated_at = EXCLUDED.updated_at RETURNING *` (no `DO NOTHING`) para garantizar fila devuelta. (3) Sin `__init__.py` en `tests/unit/notifications/` ni `tests/integration/notifications/` (consistente con hermanos).
+- **Documentos:** progress/impl_26_email_notification_infrastructure.md, progress/review_26_email_notification_infrastructure.md, progress/design_email_notifications_and_brand_customisation.md §A, progress/explore_email_notifications_back.md.
+- **Cross-repo:** Backlog email continúa. Próximo paso: arrancar back #27 `email_notification_review_requested` (subscriber del outbox + handler worker `email_send` + templates). Frontend #26 (chip editor multi-email en /automation) sigue pending, depende de back #26+#27 desplegadas.
+
+## 2026-05-15 — feature 27: email_notification_review_requested (back + cross-repo close pipeline email)
+
+- **Resultado:** done (APPROVED por review local).
+- **Archivos principales:** shared/email/{validators,url_builder,templates}.py, assets/email/templates/review_requested.{txt,html}, modules/notifications/application/{__init__.py, use_cases/{__init__.py, dispatch_review_requested_email.py, send_email_job_handler.py}}, apps/worker/outbox_subscriber.py (NUEVO loop), apps/worker/{runtime.py, main.py}, modules/delivery/infrastructure/outbox_repository.py (+mark_status +claim_pending_event), shared/email/__init__.py, docs/email_notifications.md, docs/API.md (sección 7c Notifications review_requested flow), docs/architecture.md, tests/unit/notifications/{test_review_emails_normaliser, test_url_builder, test_template_renderer}.py, tests/integration/notifications/{test_review_requested_flow, test_review_requested_throttle, test_review_requested_resent, test_email_send_handler_failure}.py.
+- **Cambios clave:** Subscriber del outbox (`apps/worker/outbox_subscriber.py`, primer relay real del repo) que polea `outbox_events.status='pending'` por tipo registrado vía `OutboxRepository.claim_pending_event` con `FOR UPDATE SKIP LOCKED LIMIT 1` (multi-worker safe), transición `pending → processing → dispatched|failed`. `DispatchReviewRequestedEmailUseCase` lee `defaults.settings.automation.reviewEmails` (acepta `list[str]` o CSV legacy), normaliza vía `normalise_review_emails` (lowercase + dedup + regex), aplica throttle de 60s por (agency, recipient) vía `find_recent_sent`, resuelve `event_kind` (`review_requested` vs `review_requested_resent` para preservar la UNIQUE en re-envíos), inserta N filas en `email_notifications` y encola 1 job `email_send` con shape rico `{recipient_emails, email_notification_ids, context}`. `SendEmailJobHandler` renderiza plain + HTML (renderer minimal `str.format` + `html.escape`, sin Jinja), manda con el `EmailSender` inyectado y propaga `provider_message_id` a las N filas. Templates en `assets/email/templates/review_requested.{txt,html}` con placeholders `{agency_name}, {property_title}, {property_address}, {reel_url}`. URL builder `build_reel_editor_url(FRONTEND_BASE_URL, site_id, property_id)` con percent-escape del site_id. Worker arranca `OutboxSubscriber` antes del `JobDispatcher` y lo para en `finally`. `--check` reporta `kinds=email_send, reel_publish, scripted_render outbox_events=review_requested`. `publish_reel.py` intacto (0 líneas diff).
+- **Tests reportados:** 897 passed + 28 nuevos (10 normaliser + 6 URL + 7 templates en unit; 4 flow + 1 throttle + 1 resent + 1 failure en integration), 3 baseline failed sin regresión.
+- **Desviaciones aceptadas:** (1) `mark_status` genérico en `OutboxRepository` en vez de transición ad-hoc por estado — soporta `processing/dispatched/failed` con la misma firma; (2) **Workaround `webhook_events` sintético** con `source_kind='notification'`: el dispatcher inserta una fila previa al `enqueue_job(email_send)` porque el runtime del worker (`JobDispatcher._process_next_job`) hace `update_event_status(event_id)` sobre `webhook_events`. Verificado que ninguna query filtra por `source_kind`, así que no rompe semánticas. Refactor (desacoplar `webhook_events` del runtime) marcado como follow-up no bloqueante; (3) `property_title/property_address` se resuelven en el dispatcher desde `properties.raw_json` (fallback a payload outbox) porque `publish_reel.py` no incluye esos campos en `_build_workflow_payload` y la feature acordó NO tocar el publisher.
+- **Documentos:** progress/impl_27_email_notification_review_requested.md, progress/review_27_email_notification_review_requested.md, progress/design_email_notifications_and_brand_customisation.md §A+§D.
+- **Cross-repo:** Cierra el pipeline email completo end-to-end. (a) **back #26** done previa — infra `shared/email/` + tabla + repo. (b) **back #27** done con este cierre — subscriber + handler + templates. (c) **front #26** (chip editor multi-email en `/automation`) cerrado autónomamente por el equipo front; ya manda `list[str]` y `normalise_review_emails` mantiene backward compat con CSV legacy. Flujo activo tras restart del :8001: `publish_reel(approval_required) → outbox.review_requested → OutboxSubscriber → DispatchReviewRequestedEmailUseCase → email_notifications×N pending + 1 job email_send → SendEmailJobHandler → EmailSender.send → mark_sent×N`. Próximas features email (publish_completed, etc.) reutilizan el subscriber con un `register_handler` adicional.
