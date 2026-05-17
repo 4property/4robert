@@ -119,6 +119,20 @@ class IngestWordPressPropertyUseCase:
             for template in social_templates_records
             if str(template.platform).strip()
         )
+        social_title_templates = tuple(
+            (str(template.platform).strip().lower(), str(template.title_template or ""))
+            for template in social_templates_records
+            if str(template.platform).strip()
+            and str(template.title_template or "").strip()
+        )
+        social_hashtags_map = {
+            str(template.platform).strip().lower(): [
+                str(tag) for tag in (template.hashtags or ()) if str(tag).strip()
+            ]
+            for template in social_templates_records
+            if str(template.platform).strip()
+            and any(str(tag).strip() for tag in (template.hashtags or ()))
+        }
 
         publish_context: dict[str, Any] = {
             "provider": "gohighlevel",
@@ -126,6 +140,8 @@ class IngestWordPressPropertyUseCase:
             "platforms": list(platforms),
             "approval_required": approval_required,
             "social_templates": list(social_templates),
+            "social_title_templates": list(social_title_templates),
+            "social_hashtags": social_hashtags_map,
             "render_template_id": render_template_id or "classic",
         }
         provider_secret_bundle = json.dumps(

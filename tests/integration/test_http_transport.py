@@ -650,7 +650,14 @@ class HttpTransportIntegrationTests(unittest.TestCase):
                     headers=_ADMIN_BEARER,
                 )
                 self.assertEqual(resp.status_code, 200)
-                self.assertEqual(resp.json(), {"items": [], "count": 0})
+                payload = resp.json()
+                # Feature 32 added pagination metadata. The legacy
+                # ``items``/``count`` contract is preserved; the extra
+                # fields are additive.
+                self.assertEqual(payload["items"], [])
+                self.assertEqual(payload["count"], 0)
+                self.assertEqual(payload["count_total"], 0)
+                self.assertFalse(payload["has_more"])
 
     def test_admin_social_accounts_returns_disconnected_when_no_ghl(self) -> None:
         with temporary_workspace() as workspace_dir:

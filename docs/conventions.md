@@ -1,4 +1,4 @@
-# Convenciones de código (`4reels back/`)
+# Convenciones de código (`/opt/projects/4Reels-Backend`)
 
 > Homogeneidad extrema. La IA predice mejor cuando el repositorio se parece
 > a sí mismo en todas partes.
@@ -129,6 +129,28 @@ referencias a tickets ("added for #123"), o "// removed code".
   deben funcionar limpio sobre una DB vacía.
 - Renames van con `op.alter_column(..., new_column_name=...)`, no con
   drop+create (preserva los datos).
+
+## Email backends (`shared/email/`)
+
+- `EmailSender` es un `Protocol`. Cada backend nuevo (p. ej. `Resend`,
+  `Postmark`) vive en `shared/email/backends/<provider>_sender.py` y
+  expone una clase con un único método `send(message: EmailMessage) ->
+  SentEmail`.
+- Reglas duras:
+  - El módulo del backend **no** importa de `settings/` ni de
+    `modules/`. La factory (`shared/email/factory.py`) es el único
+    punto de acoplamiento con `NotificationSettings`.
+  - El backend devuelve siempre un `SentEmail`. Si el envío falla,
+    propaga la excepción nativa del SDK / `smtplib`; el handler del
+    worker la atrapa y marca `email_notifications.status='failed'`.
+  - `EmailMessage` es inmutable (`frozen=True`, `slots=True`,
+    `tuple[str, ...]` para `to`). No agregues campos mutables.
+- Para registrar el backend nuevo: añade la rama en
+  `build_email_sender(settings)` y un test unit en
+  `tests/unit/notifications/test_factory.py`.
+- Re-export en `shared/email/__init__.py` solo si el backend forma
+  parte del API público (los dos actuales — `Console`, `Smtp` — sí lo
+  están porque los tests integration los instancian directamente).
 
 ## Auth en `/v1/admin/*`
 

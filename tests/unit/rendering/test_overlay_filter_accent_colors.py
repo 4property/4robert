@@ -62,8 +62,25 @@ def test_overlay_filter_side_banner_uses_reference_panel_positions() -> None:
     # The classic script has non-zero panel x/y coordinates from outer
     # margins; side_banner uses the reference top band and inset footer card.
     assert "drawbox=x=0:y=111:w=1080:h=405" in script_side
-    assert "drawbox=x=32:y=1500:w=1015:h=217" in script_side
+    assert "color=c=black:s=1015x217" in script_side
+    assert "overlay=x=32:y=1500[video_with_side_banner_footer_panel]" in script_side
+    assert "drawbox=x=32:y=1500:w=1015:h=217" not in script_side
     assert "drawbox=x=0:y=111:w=1080:h=405" not in script_classic
+
+
+def test_overlay_filter_side_banner_footer_panel_has_rounded_alpha_mask() -> None:
+    script = build_overlay_filter(
+        build_property_data(title="Donnybrook, Dublin 4"),
+        build_template(width=1080, height=1920),
+        slide_captions=("Caption",),
+        slide_duration=2.5,
+        layout_variant="side_banner",
+    )
+
+    assert "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)'" in script
+    assert "max(max(24-X\\,X-990)\\,0)" in script
+    assert "max(max(24-Y\\,Y-192)\\,0)" in script
+    assert "\\,576)\\,117\\,0)'[side_banner_footer_panel]" in script
 
 
 def test_overlay_filter_includes_vertical_banner_overlay() -> None:
@@ -93,9 +110,19 @@ def test_overlay_filter_text_override_color_applied_to_text_blocks() -> None:
     assert "fontcolor=0xe22f8c" in script
 
 
-def test_side_banner_poster_panels_use_more_transparent_accent_color() -> None:
+def test_side_banner_poster_panels_use_brand_primary_panel_color() -> None:
+    """Hotfix 2026-05-15: ``side_banner_panel_color`` (brand primary)
+    paints the panels with the 0.55 alpha overlay. The previous wiring
+    pulled from ``accent_background_color`` (webhook); the new wiring
+    ignores the webhook accent feed entirely.
+    """
     script = _build_poster_filter_script(
-        property_data=build_property_data(accent_background_color="#e22f8c"),
+        property_data=build_property_data(
+            # Brand primary is set on the dedicated side_banner field.
+            side_banner_panel_color="#e22f8c",
+            # Webhook accent (present but no longer consulted).
+            accent_background_color="#123456",
+        ),
         settings=build_template(width=1080, height=1920),
         include_agency_logo=False,
         include_ber_icon=False,
@@ -106,4 +133,30 @@ def test_side_banner_poster_panels_use_more_transparent_accent_color() -> None:
     )
 
     assert "color=0xe22f8c@0.55" in script
-    assert "color=0xe22f8c@0.85" not in script
+    # Webhook accent must NOT appear in the filter graph.
+    assert "0x123456" not in script
+
+
+def test_side_banner_poster_panels_fall_back_to_grey_when_no_brand() -> None:
+    """Without a brand primary colour, the panels render with the
+    Tailwind ``gray-700`` (``#374151``) fallback at 0.55 alpha."""
+    script = _build_poster_filter_script(
+        property_data=build_property_data(
+            # No brand override.
+            side_banner_panel_color=None,
+            # Webhook accent ignored — would have leaked in the legacy
+            # cascade.
+            accent_background_color="#e22f8c",
+        ),
+        settings=build_template(width=1080, height=1920),
+        include_agency_logo=False,
+        include_ber_icon=False,
+        agent_input_index=1,
+        agency_logo_input_index=None,
+        ber_icon_input_index=None,
+        layout_variant="side_banner",
+    )
+
+    assert "color=0x374151@0.55" in script
+    # Webhook accent must NOT participate.
+    assert "0xe22f8c" not in script

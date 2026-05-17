@@ -9,6 +9,7 @@ Moved from ``application/pipeline/content_generation.py`` during sub-feature
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -40,6 +41,8 @@ class ContentGenerator(Protocol):
         property_url: str,
         platforms: tuple[str, ...],
         templates_by_platform: dict[str, str] | None = None,
+        title_templates_by_platform: dict[str, str] | None = None,
+        hashtags_by_platform: dict[str, tuple[str, ...]] | None = None,
     ) -> GeneratedPropertyContent:
         ...
 
@@ -114,6 +117,35 @@ def render_template_with_property(
     return html.unescape(rendered)
 
 
+def _normalise_hashtag_list(hashtags: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    """Drop empty/whitespace entries; preserve order; trim each tag."""
+    if not hashtags:
+        return ()
+    normalised: list[str] = []
+    for raw in hashtags:
+        candidate = str(raw or "").strip()
+        if candidate:
+            normalised.append(candidate)
+    return tuple(normalised)
+
+
+def append_hashtags(description: str, hashtags: tuple[str, ...]) -> str:
+    """Append `hashtags` (space-joined) to `description` with a blank-line gap.
+
+    Returns ``description`` unchanged when ``hashtags`` is empty so the
+    fallback deterministic caption never gains a stray blank tail. If the
+    description is empty but hashtags exist, the joined hashtags become the
+    full caption (the network would otherwise receive a blank string).
+    """
+    cleaned = _normalise_hashtag_list(hashtags)
+    if not cleaned:
+        return description
+    joined = " ".join(cleaned)
+    if not description:
+        return joined
+    return f"{description}\n\n{joined}"
+
+
 class DeterministicPropertyContentGenerator:
     def generate_property_content(
         self,
@@ -122,6 +154,8 @@ class DeterministicPropertyContentGenerator:
         property_url: str,
         platforms: tuple[str, ...],
         templates_by_platform: dict[str, str] | None = None,
+        title_templates_by_platform: dict[str, str] | None = None,
+        hashtags_by_platform: dict[str, tuple[str, ...]] | None = None,
     ) -> GeneratedPropertyContent:
         deterministic_captions = build_platform_descriptions_for_property_with_url(
             property_item,
@@ -134,8 +168,19 @@ class DeterministicPropertyContentGenerator:
             for key, value in (templates_by_platform or {}).items()
             if str(key).strip() and str(value).strip()
         }
+        normalized_title_templates = {
+            str(key).strip().lower(): str(value)
+            for key, value in (title_templates_by_platform or {}).items()
+            if str(key).strip() and str(value).strip()
+        }
+        normalized_hashtags = {
+            str(key).strip().lower(): _normalise_hashtag_list(value)
+            for key, value in (hashtags_by_platform or {}).items()
+            if str(key).strip()
+        }
         for platform in platforms:
-            template = normalized_templates.get(str(platform).lower())
+            platform_key = str(platform).lower()
+            template = normalized_templates.get(platform_key)
             if template:
                 rendered = render_template_with_property(
                     template,
@@ -144,10 +189,37 @@ class DeterministicPropertyContentGenerator:
                 )
                 if rendered:
                     captions_by_platform[platform] = rendered
-        titles_by_platform = build_platform_titles_for_property(
-            property_item,
-            platforms=platforms,
+            # Append hashtags to whatever caption ended up being assigned
+            # (either the agency template rendered above or the deterministic
+            # fallback seeded at the top of the function).
+            tags = normalized_hashtags.get(platform_key, ())
+            if tags:
+                captions_by_platform[platform] = append_hashtags(
+                    captions_by_platform.get(platform, ""),
+                    tags,
+                )
+        titles_by_platform: dict[str, str] = dict(
+            build_platform_titles_for_property(
+                property_item,
+                platforms=platforms,
+            )
         )
+        # Render agency-defined title templates on top of the deterministic
+        # baseline so networks with a dedicated title slot (Pinterest,
+        # YouTube) honour the admin's copy. An empty rendered title falls
+        # back to the deterministic value.
+        for platform in platforms:
+            platform_key = str(platform).lower()
+            title_template = normalized_title_templates.get(platform_key)
+            if not title_template:
+                continue
+            rendered_title = render_template_with_property(
+                title_template,
+                property_item,
+                property_url=property_url,
+            )
+            if rendered_title:
+                titles_by_platform[platform] = rendered_title
         return GeneratedPropertyContent(
             default_caption=build_property_caption(
                 property_url=property_url,
@@ -167,4 +239,5 @@ __all__ = [
     "ContentGenerator",
     "DeterministicPropertyContentGenerator",
     "GeneratedPropertyContent",
+    "append_hashtags",
 ]

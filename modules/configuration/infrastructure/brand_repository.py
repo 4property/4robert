@@ -1,10 +1,34 @@
 from __future__ import annotations
 
+from typing import Final
+
 from sqlalchemy import text
 
 from modules.configuration.domain import BrandSettings
 from modules.configuration.infrastructure.repository_helpers import isoformat
 from shared.db.repository_base import ModuleRepository, utcnow
+
+
+class _Unset:
+    """Sentinel for ``BrandSettingsRepository.upsert`` callers that want to
+    keep the existing value untouched. Distinct from ``None``, which now
+    means "clear the override / persist the empty string"."""
+
+    _instance: "_Unset | None" = None
+
+    def __new__(cls) -> "_Unset":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return "UNSET"
+
+    def __bool__(self) -> bool:  # pragma: no cover - defensive
+        return False
+
+
+UNSET: Final[_Unset] = _Unset()
 
 
 class BrandSettingsRepository(ModuleRepository):
@@ -35,34 +59,50 @@ class BrandSettingsRepository(ModuleRepository):
         self,
         *,
         agency_id: str,
-        primary_color: str | None = None,
-        secondary_color: str | None = None,
-        logo_position: str | None = None,
-        logo_object_key: str | None = None,
-        intro_logo_object_key: str | None = None,
-        font_family: str | None = None,
+        primary_color: str | None | _Unset = UNSET,
+        secondary_color: str | None | _Unset = UNSET,
+        logo_position: str | None | _Unset = UNSET,
+        logo_object_key: str | None | _Unset = UNSET,
+        intro_logo_object_key: str | None | _Unset = UNSET,
+        font_family: str | None | _Unset = UNSET,
     ) -> BrandSettings:
+        """Upsert the brand row.
+
+        ``UNSET`` (the default) means "leave the column untouched", so
+        callers that only want to change one field can omit the rest.
+        ``None`` (explicit) means "clear the override — persist the
+        empty string", which is what the Reset to default button in the
+        frontend sends. A non-``None`` string is persisted verbatim.
+
+        The schema declares each colour / position / object_key column
+        ``NOT NULL`` with a server_default, so a "cleared" override is
+        always stored as ``""`` (empty string). The renderer treats
+        ``""`` and the absence of a row identically when deciding which
+        fallback to apply.
+        """
         existing = self.get(agency_id)
         timestamp = utcnow()
+
+        def _resolve(
+            value: str | None | _Unset,
+            attr: str,
+            default: str,
+        ) -> str:
+            if isinstance(value, _Unset):
+                return getattr(existing, attr) if existing else default
+            if value is None:
+                return ""
+            return value
+
         merged = {
-            "primary_color": primary_color
-            if primary_color is not None
-            else (existing.primary_color if existing else "#0F172A"),
-            "secondary_color": secondary_color
-            if secondary_color is not None
-            else (existing.secondary_color if existing else "#FFFFFF"),
-            "logo_position": logo_position
-            if logo_position is not None
-            else (existing.logo_position if existing else "top-right"),
-            "logo_object_key": logo_object_key
-            if logo_object_key is not None
-            else (existing.logo_object_key if existing else ""),
-            "intro_logo_object_key": intro_logo_object_key
-            if intro_logo_object_key is not None
-            else (existing.intro_logo_object_key if existing else ""),
-            "font_family": font_family
-            if font_family is not None
-            else (existing.font_family if existing else ""),
+            "primary_color": _resolve(primary_color, "primary_color", "#0F172A"),
+            "secondary_color": _resolve(secondary_color, "secondary_color", "#FFFFFF"),
+            "logo_position": _resolve(logo_position, "logo_position", "top-right"),
+            "logo_object_key": _resolve(logo_object_key, "logo_object_key", ""),
+            "intro_logo_object_key": _resolve(
+                intro_logo_object_key, "intro_logo_object_key", ""
+            ),
+            "font_family": _resolve(font_family, "font_family", ""),
         }
         self.session.execute(
             text(
@@ -95,4 +135,4 @@ class BrandSettingsRepository(ModuleRepository):
         return result
 
 
-__all__ = ["BrandSettingsRepository"]
+__all__ = ["BrandSettingsRepository", "UNSET"]

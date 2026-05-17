@@ -39,7 +39,13 @@ def test_render_templates_list_returns_seeded_classic() -> None:
             classic = payload["items"][0]
             assert classic["template_id"] == "classic"
             assert classic["display_name"] == "Classic"
-            assert classic["preview_images"] == []
+            assert classic["preview_images"] == [
+                {
+                    "kind": "preview",
+                    "image_url": "/assets/render-templates/classic-template.png",
+                    "alt": "Classic template preview",
+                }
+            ]
             assert classic["layout_variant"] == "classic"
             assert classic["selected"] is True
 

@@ -14,11 +14,17 @@ from pathlib import Path
 from typing import Protocol
 
 from modules.delivery.domain import Job
+from modules.notifications.application.use_cases import (
+    DispatchReviewRequestedEmailUseCase,
+    SendEmailJobHandler,
+)
 from modules.reels.application.orchestrator import ReelPipeline
 from modules.reels.application.use_cases.render_scripted_video import (
     RenderScriptedVideoUseCase,
 )
+from settings.notifications import load_notification_settings
 from shared.db import DatabaseUnitOfWork
+from shared.email.factory import build_email_sender
 from shared.errors import extract_error_details
 from shared.observability import format_console_block, format_detail_line
 
@@ -276,7 +282,54 @@ def build_default_dispatcher(*, settings: WorkerSettings) -> JobDispatcher:
         "scripted_render",
         scripted_render.execute,
     )
+
+    # Feature 27: email_send handler. Resolves the SMTP/console backend
+    # at boot via :func:`shared.email.factory.build_email_sender` so
+    # the worker honours ``EMAIL_BACKEND`` without per-job overhead.
+    notification_settings = load_notification_settings()
+    email_sender = build_email_sender(notification_settings)
+    email_handler = SendEmailJobHandler(
+        sender=email_sender,
+        notification_settings=notification_settings,
+        database_locator=settings.database_locator,
+    )
+    dispatcher.register_handler("email_send", email_handler)
     return dispatcher
+
+
+def build_default_outbox_subscriber(*, settings: WorkerSettings):
+    """Build the production outbox subscriber for the notifications bridge.
+
+    Imported lazily by callers that want to run the subscriber loop
+    alongside the job dispatcher (typically ``apps.worker.main``).
+    The subscriber binds ``review_requested`` outbox events to the
+    feature-27 dispatcher use case.
+    """
+
+    # Imported here (vs at module top) so unit tests of the job
+    # dispatcher do not pay the cost of touching the subscriber tree.
+    from apps.worker.outbox_subscriber import (
+        OutboxSubscriber,
+        OutboxSubscriberSettings,
+    )
+
+    notification_settings = load_notification_settings()
+    subscriber = OutboxSubscriber(
+        settings=OutboxSubscriberSettings(
+            base_dir=settings.base_dir,
+            database_locator=settings.database_locator,
+        )
+    )
+    dispatcher_use_case = DispatchReviewRequestedEmailUseCase(
+        frontend_base_url=notification_settings.frontend_base_url,
+        job_max_attempts=settings.job_max_attempts,
+    )
+
+    def _review_requested(event, uow):  # type: ignore[no-untyped-def]
+        return dispatcher_use_case.execute(event, uow=uow)
+
+    subscriber.register_handler("review_requested", _review_requested)
+    return subscriber
 
 
 __all__ = [
@@ -284,4 +337,5 @@ __all__ = [
     "JobHandler",
     "WorkerSettings",
     "build_default_dispatcher",
+    "build_default_outbox_subscriber",
 ]

@@ -5,16 +5,16 @@ Coverage matrix for :class:`IngestPropertyIntoReelUseCase`'s
 the returned ``PropertyContext.publish_context.scheduled_at``):
 
 1. Quiet hours active, weekday outside the window, ``approval_required=False``
-   → context has ``scheduled_at`` poblado con un ISO8601 UTC futuro.
+   → context has ``scheduled_at`` populated with a future ISO8601 UTC.
 2. All Automation toggles off → ``scheduled_at`` stays ``None`` (preserves
    the pre-feature-13 "publish immediately" contract).
-3. ``approval_required=True`` con quiet hours activas → el slot **se
-   computa de todas formas** (decisión técnica: el helper es puro y
-   barato; ``regenerate_reel`` puede aprovecharlo al approve). El test
-   afirma que ``scheduled_at`` está poblado aunque downstream el flujo
-   parque el reel.
-4. ``social_publishing_enabled=False`` → ``publish_context is None`` y
-   el helper devuelve ``None`` sin intentar un ``replace(None, ...)``.
+3. ``approval_required=True`` with quiet hours active → the slot **is
+   still computed** (design decision: the helper is pure and cheap;
+   ``regenerate_reel`` can take advantage of it on approve). The test
+   asserts that ``scheduled_at`` is populated even though downstream the
+   flow will park the reel.
+4. ``social_publishing_enabled=False`` → ``publish_context is None`` and
+   the helper returns ``None`` without attempting a ``replace(None, ...)``.
 """
 
 from __future__ import annotations
@@ -316,11 +316,11 @@ def test_ingest_property_approval_required_true_does_not_block_scheduled_at(
 ) -> None:
     """``approval_required=True`` does NOT short-circuit slot computation.
 
-    Decisión técnica documentada en :func:`_apply_scheduled_publish_slot`:
-    el slot se computa siempre (es puro y barato) para que el approve
-    manual posterior pueda inspeccionarlo. El downstream reel queda
-    parked porque el orchestrator/publisher mira
-    ``publish_context.approval_required``, no este campo.
+    Design decision documented on :func:`_apply_scheduled_publish_slot`:
+    the slot is always computed (the helper is pure and cheap) so the
+    subsequent manual approve can inspect it. The downstream reel stays
+    parked because the orchestrator/publisher looks at
+    ``publish_context.approval_required``, not this field.
     """
     rules = _build_automation_rules(
         approval_required=True,

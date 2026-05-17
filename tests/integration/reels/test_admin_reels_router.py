@@ -40,7 +40,13 @@ def test_list_reels_returns_empty_for_a_fresh_agency() -> None:
                 headers=ADMIN_BEARER,
             )
             assert response.status_code == 200
-            assert response.json() == {"items": [], "count": 0}
+            payload = response.json()
+            # Feature 32 added pagination metadata. The legacy "items + "
+            # count" contract is preserved; the extra fields are additive.
+            assert payload["items"] == []
+            assert payload["count"] == 0
+            assert payload["count_total"] == 0
+            assert payload["has_more"] is False
 
 
 def test_list_reels_returns_seeded_reel() -> None:

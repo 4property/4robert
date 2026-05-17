@@ -36,6 +36,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from apps.api.admin_auth import AdminAccessPolicy, build_admin_access_policy
@@ -51,7 +52,17 @@ from modules.configuration.transport.http.brand_logo_router import (
 )
 from modules.configuration.transport.http.brand_router import create_brand_router
 from modules.configuration.transport.http.defaults_router import create_defaults_router
+from modules.configuration.transport.http.fonts_router import create_fonts_router
 from modules.configuration.transport.http.music_router import create_music_router
+from modules.configuration.transport.http.music_upload_router import (
+    create_music_upload_router,
+)
+from modules.configuration.transport.http.intro_router import (
+    create_intro_router,
+)
+from modules.configuration.transport.http.outro_router import (
+    create_outro_router,
+)
 from modules.configuration.transport.http.reel_profile_router import (
     create_reel_profile_router,
 )
@@ -256,6 +267,14 @@ def build_api_app(
         allow_headers=["*"],
         allow_private_network=True,
     )
+    app.mount(
+        "/assets/render-templates",
+        StaticFiles(
+            directory=resolved_workspace / "assets" / "render-templates",
+            check_dir=False,
+        ),
+        name="render_template_assets",
+    )
     register_logging_middleware(app)
 
     _include_module_routers(
@@ -361,6 +380,12 @@ def _include_module_routers(
         )
     )
     app.include_router(
+        create_fonts_router(
+            admin_access_policy=admin_access_policy,
+            workspace_dir=resolved_workspace,
+        )
+    )
+    app.include_router(
         create_automation_router(
             unit_of_work_factory=unit_of_work_factory,
             admin_access_policy=admin_access_policy,
@@ -376,6 +401,27 @@ def _include_module_routers(
         create_music_router(
             unit_of_work_factory=unit_of_work_factory,
             admin_access_policy=admin_access_policy,
+        )
+    )
+    app.include_router(
+        create_music_upload_router(
+            unit_of_work_factory=unit_of_work_factory,
+            admin_access_policy=admin_access_policy,
+            workspace_dir=resolved_workspace,
+        )
+    )
+    app.include_router(
+        create_outro_router(
+            unit_of_work_factory=unit_of_work_factory,
+            admin_access_policy=admin_access_policy,
+            workspace_dir=resolved_workspace,
+        )
+    )
+    app.include_router(
+        create_intro_router(
+            unit_of_work_factory=unit_of_work_factory,
+            admin_access_policy=admin_access_policy,
+            workspace_dir=resolved_workspace,
         )
     )
     app.include_router(

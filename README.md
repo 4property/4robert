@@ -15,34 +15,42 @@ It ingests WordPress property payloads, prepares images, renders short reels wit
 
 ## Layout
 
-- `application/` — orchestration, dispatch, pipeline stages, admin
-- `services/` — transport (HTTP), media (rendering, storage), publishing (social), AI adapters
-- `repositories/` — PostgreSQL persistence
-- `settings/` — environment configuration
-- `tests/` — regression and architecture coverage
+- `apps/` — process entry points (`apps.api`, `apps.worker`) and their bootstrap (`app_factory`, `runtime`, readiness)
+- `modules/` — bounded contexts: `ingestion`, `reels`, `rendering`, `delivery`, `publishing`, `configuration`, `tenancy`, `notifications` (each with `domain/`, `application/`, `infrastructure/`, `transport/` per Phase 4 layering)
+- `shared/` — cross-module primitives: `db/` (ORM, security, unit-of-work), `http/`, `storage/`, `logging/`, etc.
+- `settings/` — Pydantic environment configuration; one source of truth for every `.env` value
+- `alembic/` — schema migrations; head is the source of truth for the database shape
+- `tests/` — `unit/`, `integration/`, `architecture/` regression coverage
+- `docs/`, `deploy/`, `docker/`, `compose.yml`, `init.sh` — operational entrypoints
 
 ## Setup
 
 ```bash
-python -m venv .venv
-.venv/Scripts/activate    # or source .venv/bin/activate on Linux
+python3.12 -m venv .venv
+source .venv/bin/activate            # or .venv/Scripts/activate on Windows
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
-cp .env.example .env      # then fill in the values
+cp .env.example .env                 # then fill in DATABASE_URL, secrets, etc.
+.venv/bin/python -m alembic upgrade head
 ```
+
+The fastest path to a working stack (postgres + api + worker) is `docker compose up -d`. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the three deployment modes (local docker, test/staging on the dev box, production).
 
 ## Run
 
 ```bash
-python -m apps.api            # start the API server
-python -m apps.api --check    # readiness check, no server
-python -m apps.api --check --readiness-json   # machine-readable output
+.venv/bin/python -m apps.api                       # start the API server
+.venv/bin/python -m apps.api --check               # readiness check, no server
+.venv/bin/python -m apps.api --check --readiness-json   # machine-readable output
+.venv/bin/python -m apps.worker                    # start the job worker
+.venv/bin/python -m apps.worker --check            # worker readiness check
 ```
 
 ## Test
 
 ```bash
-python -m pytest -q
+bash ./init.sh                                     # full harness used by Codex/Claude (init.sh has no exec bit by design)
+.venv/bin/python -m pytest -q                      # plain pytest run
 ```
 
 ## Runtime folders (gitignored)
@@ -57,8 +65,10 @@ python -m pytest -q
 - A reel is only considered complete if its companion poster also exists.
 - Optional capabilities (AI copy, AI narration, notifications, review) can stay disabled without blocking the core flow.
 - Google Business Profile must already be connected to the target HighLevel sub-account in Social Planner before webhooks are sent.
-- Rocky Linux deployment guide: [`deploy/rocky-linux/README.md`](deploy/rocky-linux/README.md).
-- Architecture detail: [`ARCHITECTURE.md`](ARCHITECTURE.md).
+- A single agency can register N WordPress sites via `PUT /v1/admin/wordpress-sources/{site_id}` (per feature 38). Secrets persist in `ingestion_sources.secrets_encrypted` — no service restart required when adding sites.
+- Deployment (compose, systemd test/staging, production from sibling repo): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- Rocky Linux walkthrough (canonical manual install): [`deploy/rocky-linux/README.md`](deploy/rocky-linux/README.md).
+- Architecture detail: [`ARCHITECTURE.md`](ARCHITECTURE.md). Frontend pairing: [`/opt/projects/4Reels-Frontend`](../4Reels-Frontend).
 
 ## License
 

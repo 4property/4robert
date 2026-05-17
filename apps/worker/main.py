@@ -13,7 +13,11 @@ import logging
 import sys
 from pathlib import Path
 
-from apps.worker.runtime import WorkerSettings, build_default_dispatcher
+from apps.worker.runtime import (
+    WorkerSettings,
+    build_default_dispatcher,
+    build_default_outbox_subscriber,
+)
 from settings import (
     DATABASE_URL,
     LOG_LEVEL,
@@ -64,9 +68,11 @@ def _check() -> int:
 
     settings = _build_settings()
     dispatcher = build_default_dispatcher(settings=settings)
+    subscriber = build_default_outbox_subscriber(settings=settings)
     logger.info(
-        "Worker --check OK: kinds=%s worker_count=%d lease=%ds poll=%.2fs",
+        "Worker --check OK: kinds=%s outbox_events=%s worker_count=%d lease=%ds poll=%.2fs",
         ", ".join(dispatcher.registered_kinds),
+        ", ".join(subscriber.registered_event_types),
         settings.worker_count,
         settings.lease_seconds,
         settings.poll_interval_seconds,
@@ -99,7 +105,12 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = _build_settings()
     dispatcher = build_default_dispatcher(settings=settings)
-    dispatcher.run_forever()
+    subscriber = build_default_outbox_subscriber(settings=settings)
+    subscriber.start()
+    try:
+        dispatcher.run_forever()
+    finally:
+        subscriber.stop()
     return 0
 
 

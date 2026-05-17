@@ -172,6 +172,101 @@ def test_admin_agencies_router_returns_validation_error_for_duplicate_slug() -> 
             assert second.json()["code"] == "ADMIN_AGENCY_SLUG_TAKEN"
 
 
+def test_create_agency_seeds_default_social_templates() -> None:
+    """Creating a new agency must pre-populate `agency_social_templates`
+    with the canonical defaults (one row per platform) so the agency
+    publishes a usable caption from day one without manual configuration.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            client = _build_client(database_url=database.url, workspace_dir=workspace_dir)
+
+            created = client.post(
+                "/v1/admin/agencies",
+                json={"name": "Defaults Test Agency"},
+                headers=_ADMIN_BEARER,
+            )
+            assert created.status_code == 201
+            agency_id = created.json()["agency"]["agency_id"]
+
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.configuration is not None
+                rows = uow.configuration.social_templates.list_for_agency(agency_id)
+
+            platforms = {row.platform for row in rows}
+            assert platforms == {
+                "instagram",
+                "tiktok",
+                "facebook",
+                "linkedin",
+                "youtube",
+                "pinterest",
+                "gbp",
+            }
+            for row in rows:
+                assert row.title_template == "{{property_title}}"
+                assert "{{property_title}}" in row.description_template
+                assert "{{price}}" in row.description_template
+                # GBP gets the agent_email variant; the rest get agent_phone.
+                if row.platform == "gbp":
+                    assert "{{agent_email}}" in row.description_template
+                    assert "{{agent_phone}}" not in row.description_template
+                else:
+                    assert "{{agent_phone}}" in row.description_template
+
+
+def test_create_agency_seeds_default_music_tracks() -> None:
+    """Creating a new agency must pre-populate ``agency_music_tracks``
+    with the canonical NCS defaults (Feature 23) plus matching blobs
+    under ``workspace/generated_media/_agency_music/<agency>/`` so the
+    reel renderer always has something to play.
+    """
+    from modules.configuration.domain import DEFAULT_NCS_MUSIC_TRACK_SEEDS
+    from shared.storage.site_layout import (
+        AGENCY_MUSIC_UPLOAD_DIRNAME,
+        GENERATED_MEDIA_ROOT_DIRNAME,
+    )
+
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            client = _build_client(database_url=database.url, workspace_dir=workspace_dir)
+
+            created = client.post(
+                "/v1/admin/agencies",
+                json={"name": "Music Seed Test Agency"},
+                headers=_ADMIN_BEARER,
+            )
+            assert created.status_code == 201
+            agency_id = created.json()["agency"]["agency_id"]
+
+            with DatabaseUnitOfWork(database.url, workspace_dir) as uow:
+                assert uow.configuration is not None
+                tracks = uow.configuration.music.list_for_agency(agency_id)
+
+            assert len(tracks) == len(DEFAULT_NCS_MUSIC_TRACK_SEEDS)
+            display_names = {track.display_name for track in tracks}
+            expected_names = {seed.display_name for seed in DEFAULT_NCS_MUSIC_TRACK_SEEDS}
+            assert display_names == expected_names
+            for track in tracks:
+                assert track.is_default is True
+                assert track.object_key.startswith(f"agencies/{agency_id}/music/")
+
+            music_dir = (
+                workspace_dir
+                / GENERATED_MEDIA_ROOT_DIRNAME
+                / AGENCY_MUSIC_UPLOAD_DIRNAME
+                / agency_id
+            )
+            assert music_dir.exists()
+            blobs = sorted(p.name for p in music_dir.iterdir())
+            expected_blobs = sorted(
+                seed.destination_filename for seed in DEFAULT_NCS_MUSIC_TRACK_SEEDS
+            )
+            assert blobs == expected_blobs
+            for blob_name in blobs:
+                assert (music_dir / blob_name).stat().st_size > 0
+
+
 def _build_client(*, database_url: str, workspace_dir: Path) -> TestClient:
     app = FastAPI()
     register_error_handlers(app)

@@ -49,7 +49,11 @@ EXPECTED_CLASSIC_FILTER_GRAPH = (
     "fontsize=38:x=275:y=1677:fix_bounds=1,"
     "drawtext=fontfile='<FONT_Regular>':text='jane@example.com':fontcolor=white:"
     "fontsize=38:x=275:y=1723:fix_bounds=1,"
-    "drawtext=fontfile='<FONT_Bold>':text='Caption.':fontcolor=0xF4D03F:"
+    # Feature 31 changes the default subtitle color from the legacy
+    # yellow (``0xF4D03F``) to white (``0xffffff``) and switches the
+    # builder to ``SubtitleStyle``. The geometry / outline / shadow
+    # values remain byte-for-byte identical.
+    "drawtext=fontfile='<FONT_Bold>':text='Caption.':fontcolor=0xffffff:"
     "fontsize=28:x=69+max((942-text_w)/2\\,0):y=1521:borderw=2:bordercolor=black@0.80:"
     "shadowx=0:shadowy=3:shadowcolor=black@0.75:text_shaping=1:fix_bounds=1:"
     "enable='between(t\\,0.000\\,2.500)'"

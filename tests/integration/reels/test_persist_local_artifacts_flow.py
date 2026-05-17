@@ -79,7 +79,9 @@ def test_execute_writes_rendered_state_revision_and_outbox_event_on_postgres(
 ) -> None:
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seeded = seed_tenant(
+                database.url, site_id="ckp.ie", workspace_dir=workspace_dir
+            )
 
             # Step 1 — ingest creates the reels + properties rows.
             ingest = IngestPropertyIntoReelUseCase(

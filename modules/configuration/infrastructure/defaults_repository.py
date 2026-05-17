@@ -20,7 +20,7 @@ class ReelDefaultsRepository(ModuleRepository):
             text(
                 "SELECT agency_id, platforms, duration_seconds, music_id, "
                 "intro_enabled, caption_template, render_template_id, settings, "
-                "created_at, updated_at "
+                "outro_enabled, created_at, updated_at "
                 "FROM agency_reel_defaults WHERE agency_id = :agency_id"
             ),
             {"agency_id": agency_id},
@@ -36,6 +36,7 @@ class ReelDefaultsRepository(ModuleRepository):
             caption_template=str(row.caption_template or ""),
             render_template_id=str(row.render_template_id or "classic"),
             settings=jsonb_to_mapping(row.settings),
+            outro_enabled=bool(row.outro_enabled),
             created_at=isoformat(row.created_at) or "",
             updated_at=isoformat(row.updated_at) or "",
         )
@@ -51,6 +52,7 @@ class ReelDefaultsRepository(ModuleRepository):
         caption_template: str | None = None,
         render_template_id: str | None = None,
         settings: Mapping[str, Any] | None = None,
+        outro_enabled: bool | None = None,
     ) -> ReelDefaults:
         existing = self.get(agency_id)
         timestamp = utcnow()
@@ -100,16 +102,22 @@ class ReelDefaultsRepository(ModuleRepository):
                 if settings is not None
                 else (existing.settings if existing else {})
             ),
+            "outro_enabled": bool(
+                outro_enabled
+                if outro_enabled is not None
+                else (existing.outro_enabled if existing else False)
+            ),
         }
         self.session.execute(
             text(
                 "INSERT INTO agency_reel_defaults ("
                 "agency_id, platforms, duration_seconds, music_id, intro_enabled, "
-                "caption_template, render_template_id, settings, created_at, updated_at"
+                "caption_template, render_template_id, settings, outro_enabled, "
+                "created_at, updated_at"
                 ") VALUES ("
                 ":agency_id, :platforms, :duration_seconds, :music_id, "
                 ":intro_enabled, :caption_template, :render_template_id, "
-                "CAST(:settings AS jsonb), :created_at, :updated_at"
+                "CAST(:settings AS jsonb), :outro_enabled, :created_at, :updated_at"
                 ") ON CONFLICT (agency_id) DO UPDATE SET "
                 "platforms = EXCLUDED.platforms, "
                 "duration_seconds = EXCLUDED.duration_seconds, "
@@ -118,6 +126,7 @@ class ReelDefaultsRepository(ModuleRepository):
                 "caption_template = EXCLUDED.caption_template, "
                 "render_template_id = EXCLUDED.render_template_id, "
                 "settings = EXCLUDED.settings, "
+                "outro_enabled = EXCLUDED.outro_enabled, "
                 "updated_at = EXCLUDED.updated_at"
             ),
             {

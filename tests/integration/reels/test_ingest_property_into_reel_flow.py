@@ -50,7 +50,9 @@ def _build_job(*, agency_id: str, ingestion_source_id: str, site_id: str) -> Pro
 def test_execute_persists_reel_state_and_property_on_postgres() -> None:
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            seeded = seed_tenant(
+                database.url, site_id="ckp.ie", workspace_dir=workspace_dir
+            )
             use_case = IngestPropertyIntoReelUseCase(
                 workspace_dir=workspace_dir,
                 property_url_template="",

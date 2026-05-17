@@ -36,6 +36,9 @@ from modules.configuration.infrastructure.brand_repository import (
 from modules.configuration.infrastructure.defaults_repository import (
     ReelDefaultsRepository,
 )
+from modules.configuration.infrastructure.intro_outro_asset_repository import (
+    IntroOutroAssetRepository,
+)
 from modules.configuration.infrastructure.music_track_repository import (
     MusicTracksRepository,
 )
@@ -49,6 +52,9 @@ from modules.delivery.infrastructure.job_repository import JobRepository
 from modules.delivery.infrastructure.outbox_repository import OutboxRepository
 from modules.delivery.infrastructure.webhook_event_repository import WebhookEventRepository
 from modules.ingestion.infrastructure.ingestion_source_repository import IngestionSourceRepository
+from modules.notifications.infrastructure.email_notification_repository import (
+    EmailNotificationRepository,
+)
 from modules.publishing.infrastructure.provider_connection_repository import (
     ProviderConnectionRepository,
 )
@@ -99,6 +105,7 @@ class ConfigurationNamespace:
     social_templates: SocialTemplatesRepository
     music: MusicTracksRepository
     render_templates: RenderTemplateRepository
+    intro_outro_assets: IntroOutroAssetRepository
 
 
 @dataclass(slots=True)
@@ -106,6 +113,11 @@ class DeliveryNamespace:
     jobs: JobRepository
     outbox: OutboxRepository
     webhook_events: WebhookEventRepository
+
+
+@dataclass(slots=True)
+class NotificationsNamespace:
+    emails: EmailNotificationRepository
 
 
 class DatabaseUnitOfWork:
@@ -134,6 +146,7 @@ class DatabaseUnitOfWork:
         self.reels: ReelsNamespace | None = None
         self.configuration: ConfigurationNamespace | None = None
         self.delivery: DeliveryNamespace | None = None
+        self.notifications: NotificationsNamespace | None = None
 
     def __enter__(self) -> "DatabaseUnitOfWork":
         self.session = create_session(self.database_locator)
@@ -161,11 +174,15 @@ class DatabaseUnitOfWork:
             social_templates=SocialTemplatesRepository(self.session),
             music=MusicTracksRepository(self.session),
             render_templates=RenderTemplateRepository(self.session),
+            intro_outro_assets=IntroOutroAssetRepository(self.session),
         )
         self.delivery = DeliveryNamespace(
             jobs=JobRepository(self.session),
             outbox=OutboxRepository(self.session),
             webhook_events=WebhookEventRepository(self.session),
+        )
+        self.notifications = NotificationsNamespace(
+            emails=EmailNotificationRepository(self.session),
         )
         return self
 
@@ -187,6 +204,7 @@ class DatabaseUnitOfWork:
             self.reels = None
             self.configuration = None
             self.delivery = None
+            self.notifications = None
 
     def commit(self) -> None:
         if self.session is None:

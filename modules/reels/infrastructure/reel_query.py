@@ -16,6 +16,52 @@ from sqlalchemy import text
 from shared.db.repository_base import ModuleRepository
 
 
+def _build_filter_clause(
+    *,
+    workflow_state: tuple[str, ...] | None,
+    publish_status: tuple[str, ...] | None,
+    q: str | None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the shared WHERE fragment + bound params for list/count queries.
+
+    The same predicate must run in both ``list_recent_for_agency`` and
+    ``count_for_agency`` so the page totals stay consistent with the page
+    body. The agency scoping (``p.agency_id = :agency_id``) is appended
+    by the caller, not by this helper.
+    """
+    fragments: list[str] = []
+    params: dict[str, Any] = {}
+    if workflow_state:
+        placeholders = ", ".join(
+            f":workflow_state_{idx}" for idx in range(len(workflow_state))
+        )
+        fragments.append(f"r.workflow_state IN ({placeholders})")
+        for idx, value in enumerate(workflow_state):
+            params[f"workflow_state_{idx}"] = str(value)
+    if publish_status:
+        placeholders = ", ".join(
+            f":publish_status_{idx}" for idx in range(len(publish_status))
+        )
+        fragments.append(f"r.publish_status IN ({placeholders})")
+        for idx, value in enumerate(publish_status):
+            params[f"publish_status_{idx}"] = str(value)
+    if q:
+        # Three-column ILIKE over the columns a real-estate user actually
+        # types when looking for a reel: the reel title, the URL-safe
+        # slug, and the property reference (``properties.list_reference``,
+        # the human reference printed on the listing). ``q`` is already
+        # trimmed by the router; we add the wildcards here so the bound
+        # parameter carries the exact pattern.
+        fragments.append(
+            "(p.title ILIKE :q_pattern "
+            "OR p.slug ILIKE :q_pattern "
+            "OR p.list_reference ILIKE :q_pattern)"
+        )
+        params["q_pattern"] = f"%{q}%"
+    clause = " AND ".join(fragments)
+    return clause, params
+
+
 def _isoformat(value: object | None) -> str | None:
     if value is None:
         return None
@@ -158,11 +204,32 @@ class ReelQuery(ModuleRepository):
     `reels` is the central aggregate the admin UI navigates."""
 
     def list_recent_for_agency(
-        self, *, agency_id: str, limit: int = 50
+        self,
+        *,
+        agency_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        workflow_state: tuple[str, ...] | None = None,
+        publish_status: tuple[str, ...] | None = None,
+        q: str | None = None,
     ) -> tuple[AgencyReelSummary, ...]:
         normalized_agency_id = str(agency_id or "").strip()
         if not normalized_agency_id:
             return ()
+        filter_clause, filter_params = _build_filter_clause(
+            workflow_state=workflow_state,
+            publish_status=publish_status,
+            q=q,
+        )
+        where_sql = "WHERE p.agency_id = :agency_id"
+        if filter_clause:
+            where_sql = f"{where_sql} AND {filter_clause}"
+        params: dict[str, Any] = {
+            "agency_id": normalized_agency_id,
+            "limit": int(max(1, min(limit, 500))),
+            "offset": int(max(0, offset)),
+            **filter_params,
+        }
         rows = self.session.execute(
             text(
                 "SELECT p.external_source_id, p.source_property_id, p.slug, "
@@ -188,14 +255,11 @@ class ReelQuery(ModuleRepository):
                 "  AND m.source_property_id = p.source_property_id "
                 "  ORDER BY m.created_at DESC LIMIT 1"
                 ") AS mr ON TRUE "
-                "WHERE p.agency_id = :agency_id "
+                f"{where_sql} "
                 "ORDER BY r.updated_at DESC NULLS LAST, p.fetched_at DESC NULLS LAST "
-                "LIMIT :limit"
+                "LIMIT :limit OFFSET :offset"
             ),
-            {
-                "agency_id": normalized_agency_id,
-                "limit": int(max(1, min(limit, 500))),
-            },
+            params,
         ).all()
         return tuple(
             AgencyReelSummary(
@@ -230,6 +294,54 @@ class ReelQuery(ModuleRepository):
             )
             for row in rows
         )
+
+    def count_for_agency(
+        self,
+        *,
+        agency_id: str,
+        workflow_state: tuple[str, ...] | None = None,
+        publish_status: tuple[str, ...] | None = None,
+        q: str | None = None,
+    ) -> int:
+        """Total rows that satisfy the same WHERE as ``list_recent_for_agency``.
+
+        The two queries share ``_build_filter_clause`` so a request always
+        gets a count that matches the body it received. The JOIN on
+        ``reels`` stays a LEFT JOIN so the IN-list filters still match
+        properties whose ``reels`` row has the matching value — and so
+        rows without a ``reels`` row are excluded when a workflow/publish
+        filter is set (the JOINed value is ``NULL`` and ``NULL IN (...)``
+        is false).
+        """
+        normalized_agency_id = str(agency_id or "").strip()
+        if not normalized_agency_id:
+            return 0
+        filter_clause, filter_params = _build_filter_clause(
+            workflow_state=workflow_state,
+            publish_status=publish_status,
+            q=q,
+        )
+        where_sql = "WHERE p.agency_id = :agency_id"
+        if filter_clause:
+            where_sql = f"{where_sql} AND {filter_clause}"
+        params: dict[str, Any] = {
+            "agency_id": normalized_agency_id,
+            **filter_params,
+        }
+        row = self.session.execute(
+            text(
+                "SELECT COUNT(*) AS total "
+                "FROM properties AS p "
+                "LEFT JOIN reels AS r "
+                "  ON r.external_source_id = p.external_source_id "
+                "  AND r.source_property_id = p.source_property_id "
+                f"{where_sql}"
+            ),
+            params,
+        ).first()
+        if row is None:
+            return 0
+        return int(row.total or 0)
 
     def get_property_reel_record(
         self,

@@ -33,15 +33,58 @@ class StubAgencies:
 
 
 class StubReelQuery:
-    def __init__(self, *, items: tuple = ()) -> None:
+    def __init__(
+        self,
+        *,
+        items: tuple = (),
+        count_total: int | None = None,
+    ) -> None:
         self.items = tuple(items)
+        self._count_total = count_total
         self.calls: list[dict[str, Any]] = []
+        self.count_calls: list[dict[str, Any]] = []
 
     def list_recent_for_agency(
-        self, *, agency_id: str, limit: int
+        self,
+        *,
+        agency_id: str,
+        limit: int,
+        offset: int = 0,
+        workflow_state: tuple[str, ...] | None = None,
+        publish_status: tuple[str, ...] | None = None,
+        q: str | None = None,
     ) -> tuple:
-        self.calls.append({"agency_id": agency_id, "limit": limit})
+        self.calls.append(
+            {
+                "agency_id": agency_id,
+                "limit": limit,
+                "offset": offset,
+                "workflow_state": workflow_state,
+                "publish_status": publish_status,
+                "q": q,
+            }
+        )
         return self.items
+
+    def count_for_agency(
+        self,
+        *,
+        agency_id: str,
+        workflow_state: tuple[str, ...] | None = None,
+        publish_status: tuple[str, ...] | None = None,
+        q: str | None = None,
+    ) -> int:
+        self.count_calls.append(
+            {
+                "agency_id": agency_id,
+                "workflow_state": workflow_state,
+                "publish_status": publish_status,
+                "q": q,
+            }
+        )
+        if self._count_total is not None:
+            return int(self._count_total)
+        return len(self.items)
 
 
 class StubReelStates:

@@ -1,0 +1,10 @@
+Hi,
+
+A new reel is awaiting your approval at {agency_name}.
+
+Property: {property_title}
+Address:  {property_address}
+
+Review and approve here: {reel_url}
+
+— 4Reels

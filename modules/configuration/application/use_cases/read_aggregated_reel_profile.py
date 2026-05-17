@@ -41,6 +41,69 @@ _DEFAULT_PLATFORMS = (
 )
 
 
+# Feature 24: default the music selection rules block when the agency
+# has never persisted one. The default mirrors the pre-feature-24 behaviour
+# of `_resolve_agency_music_pool` (fallback to library when default pool
+# empty). The default is **only** applied on read; the upsert path keeps
+# the JSONB document exactly as sent so the DB never accumulates implicit
+# state and a future migration can introduce new sub-keys without legacy
+# rows blocking it.
+_DEFAULT_MUSIC_SELECTION_RULES: dict[str, Any] = {
+    "fallback_to_full_library": True,
+}
+
+
+def _merge_music_selection_rules_default(
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a copy of ``settings`` with the music selection-rule defaults.
+
+    The merge is non-destructive: keys the agency explicitly persisted
+    win over the defaults. The merge is also shallow — only the
+    ``selection_rules`` block is back-filled when ``music`` is empty or
+    missing; any sibling key the frontend adds under ``music.*`` keeps
+    its value verbatim. The function never mutates its input.
+    """
+    merged: dict[str, Any] = dict(settings)
+    raw_music = merged.get("music")
+    music_dict: dict[str, Any]
+    if isinstance(raw_music, Mapping):
+        music_dict = dict(raw_music)
+    else:
+        music_dict = {}
+    raw_rules = music_dict.get("selection_rules")
+    if isinstance(raw_rules, Mapping):
+        rules_dict: dict[str, Any] = {
+            **_DEFAULT_MUSIC_SELECTION_RULES,
+            **dict(raw_rules),
+        }
+    else:
+        rules_dict = dict(_DEFAULT_MUSIC_SELECTION_RULES)
+    music_dict["selection_rules"] = rules_dict
+    merged["music"] = music_dict
+    return merged
+
+
+def resolve_music_selection_rules(
+    settings: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve the effective ``music.selection_rules`` for a settings dict.
+
+    Helper for downstream code (e.g. the reels pipeline) that needs the
+    flag with its documented default applied. Returns a fresh dict so
+    callers can safely mutate it.
+    """
+    if not settings:
+        return dict(_DEFAULT_MUSIC_SELECTION_RULES)
+    raw_music = settings.get("music")
+    if not isinstance(raw_music, Mapping):
+        return dict(_DEFAULT_MUSIC_SELECTION_RULES)
+    raw_rules = raw_music.get("selection_rules")
+    if not isinstance(raw_rules, Mapping):
+        return dict(_DEFAULT_MUSIC_SELECTION_RULES)
+    return {**_DEFAULT_MUSIC_SELECTION_RULES, **dict(raw_rules)}
+
+
 @dataclass(frozen=True, slots=True)
 class AggregatedReelProfile:
     agency_id: str
@@ -78,6 +141,10 @@ class AggregatedReelProfile:
         extras: Mapping[str, Any] = (
             dict(defaults.settings) if defaults is not None else {}
         )
+        # Feature 24: surface the music selection rules with their
+        # documented default when the agency has never set them. The
+        # default is **not** persisted — it only fills the read shape.
+        extras = _merge_music_selection_rules_default(extras)
         if self.social_templates:
             extras = {
                 **extras,
@@ -172,4 +239,5 @@ class ReadAggregatedReelProfileUseCase:
 __all__ = [
     "AggregatedReelProfile",
     "ReadAggregatedReelProfileUseCase",
+    "resolve_music_selection_rules",
 ]

@@ -47,6 +47,15 @@ from settings.posters import (
 )
 
 
+# Hotfix 2026-05-15: neutral grey fallback for the side_banner top /
+# bottom panels when the agency has not configured a brand primary
+# colour. Picked to match Tailwind's ``gray-700`` so the panels read
+# as "unconfigured" rather than as a deliberate brand colour. The
+# value is the raw hex; ``apply_alpha_to_hex`` adds the 0.55 alpha
+# used by ``build_overlay_filter``.
+_SIDE_BANNER_PANEL_DEFAULT = "#374151"
+
+
 def generate_property_poster_from_data(
     base_dir: str | Path,
     property_data: PropertyRenderData,
@@ -376,11 +385,19 @@ def _build_poster_filter_script(
             f"[{ber_icon_input_index}:v]scale={ber_icon_width}:{ber_icon_height},format=rgba[ber_header_icon]"
         )
 
-    # Feature 16: side_banner gets accent-colored transparent panels and
-    # a pre-rendered vertical status banner overlay; classic falls back
-    # to the original black panel colors byte-for-byte.
+    # Hotfix 2026-05-15: side_banner panels are painted with the brand
+    # primary colour, falling back to a neutral grey when the agency
+    # has not configured one. The WordPress webhook accent feed used
+    # to participate in this cascade (feature 16) but is no longer
+    # consulted — colour now comes from the agency brand row only.
+    # Classic layout keeps the historical ``black@0.38`` /
+    # ``black@0.46`` defaults from ``build_overlay_filter``.
     poster_panel_color = (
-        apply_alpha_to_hex(property_data.accent_background_color, alpha=0.55)
+        apply_alpha_to_hex(
+            property_data.side_banner_panel_color
+            or _SIDE_BANNER_PANEL_DEFAULT,
+            alpha=0.55,
+        )
         if layout_variant == "side_banner"
         else None
     )

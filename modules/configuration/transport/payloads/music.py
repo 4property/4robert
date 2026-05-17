@@ -47,8 +47,12 @@ class MusicTrackPayload(BaseModel):
 class MusicTrackPatchPayload(BaseModel):
     """Body for `PUT /v1/admin/agencies/{agency_id}/music/{music_id}`.
 
-    Every field is optional: omitted fields preserve the previously stored
-    value.
+    Only ``display_name`` and ``is_default`` are editable post-upload.
+    ``object_key`` is owned by the upload endpoint (the binary lives on
+    disk and the key is opaque to clients) and ``duration_seconds`` is
+    derived from ``ffprobe`` — both would corrupt the on-disk/DB
+    invariant if clients could rewrite them. ``extra='forbid'`` makes the
+    HTTP layer return 422 when either field is supplied (feature 22).
     """
 
     model_config = ConfigDict(
@@ -57,8 +61,6 @@ class MusicTrackPatchPayload(BaseModel):
     )
 
     display_name: str | None = Field(default=None, min_length=1)
-    object_key: str | None = Field(default=None, min_length=1)
-    duration_seconds: int | None = Field(default=None, gt=0, le=600)
     is_default: bool | None = Field(default=None)
 
 

@@ -38,6 +38,27 @@ class ReelDefaults:
     caption_template: str
     render_template_id: str = "classic"
     settings: Mapping[str, Any] = field(default_factory=dict)
+    outro_enabled: bool = False
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class IntroOutroAsset:
+    """Per-agency intro or outro video asset.
+
+    ``source`` is the discriminator that controls how the renderer treats
+    the asset: ``'uploaded'`` concatenates the user-supplied MP4/MOV,
+    ``'brand_card'`` is reserved for a future auto-generated card (feature
+    pending — the renderer treats it as ``'none'`` today), and ``'none'``
+    means the agency has no outro and no concat is performed.
+    """
+
+    agency_id: str
+    kind: str
+    object_key: str
+    duration_seconds: int
+    source: str
     created_at: str = ""
     updated_at: str = ""
 
@@ -66,6 +87,21 @@ class SocialTemplate:
     hashtags: tuple[str, ...]
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SocialTemplateUpsert:
+    """Per-platform record bound for ``SocialTemplatesRepository.replace_all_for_agency``.
+
+    Mirrors the rich shape accepted by the PUT payload: ``description_template``
+    keeps the legacy caption body, ``title_template`` is forwarded to
+    networks that accept a dedicated title (Pinterest, YouTube), and
+    ``hashtags`` are appended to the rendered description at publish time.
+    """
+
+    description_template: str = ""
+    title_template: str = ""
+    hashtags: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,9 +144,11 @@ class RenderTemplate:
 __all__ = [
     "AutomationRules",
     "BrandSettings",
+    "IntroOutroAsset",
     "MusicTrack",
     "RenderTemplate",
     "RenderTemplatePreviewImage",
     "ReelDefaults",
     "SocialTemplate",
+    "SocialTemplateUpsert",
 ]

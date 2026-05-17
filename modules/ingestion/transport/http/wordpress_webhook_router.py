@@ -29,6 +29,7 @@ from modules.ingestion.transport.http.wordpress_webhook_payloads import (
     _resolve_site_id,
 )
 from shared.db import DatabaseUnitOfWork
+from shared.db.security import decrypt_text
 from shared.errors import (
     ApplicationError,
     ResourceNotFoundError,
@@ -61,6 +62,44 @@ class WordPressWebhookSettings:
     security_disabled: bool = False
     site_secrets: dict[str, str] = field(default_factory=dict)
     default_platforms: tuple[str, ...] = ()
+
+
+def _resolve_expected_secret(
+    *,
+    uow: DatabaseUnitOfWork,
+    site_id: str,
+    env_site_secrets: dict[str, str],
+    logger: logging.Logger,
+) -> str | None:
+    """Return the webhook signing secret for ``site_id``.
+
+    Priority order:
+
+    1. ``ingestion_sources.secrets_encrypted`` decrypted via Fernet — the
+       canonical location once a site has been provisioned through the
+       admin CRUD.
+    2. ``WEBHOOK_SITE_SECRETS`` (env) — legacy fallback while operators
+       migrate. Emits a warning so the gap is visible in logs.
+    3. ``None`` — caller renders 401 ``INVALID_WEBHOOK_CREDENTIALS``.
+    """
+    record = None
+    if uow.ingestion is not None:
+        record = uow.ingestion.sources.get_by_kind_external_id(
+            kind="wordpress", external_id=site_id
+        )
+    if record is not None and record.secrets_encrypted is not None:
+        decoded = decrypt_text(record.secrets_encrypted)
+        if decoded:
+            return decoded
+    env_secret = env_site_secrets.get(site_id)
+    if env_secret:
+        logger.warning(
+            "Webhook secret resolution: using legacy env secret for site_id=%s; "
+            "provision secret in DB to retire this fallback",
+            site_id,
+        )
+        return env_secret
+    return None
 
 
 def create_wordpress_webhook_router(
@@ -176,7 +215,13 @@ def create_wordpress_webhook_router(
             )
 
         if not settings.security_disabled:
-            expected_secret = settings.site_secrets.get(site_id)
+            with unit_of_work_factory() as secret_uow:
+                expected_secret = _resolve_expected_secret(
+                    uow=secret_uow,
+                    site_id=site_id,
+                    env_site_secrets=settings.site_secrets,
+                    logger=logger,
+                )
             if expected_secret is None:
                 _log_authentication_failure(
                     request=request,

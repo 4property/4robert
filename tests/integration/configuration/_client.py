@@ -17,7 +17,17 @@ from modules.configuration.transport.http.brand_logo_router import (
 )
 from modules.configuration.transport.http.brand_router import create_brand_router
 from modules.configuration.transport.http.defaults_router import create_defaults_router
+from modules.configuration.transport.http.fonts_router import create_fonts_router
 from modules.configuration.transport.http.music_router import create_music_router
+from modules.configuration.transport.http.music_upload_router import (
+    create_music_upload_router,
+)
+from modules.configuration.transport.http.intro_router import (
+    create_intro_router,
+)
+from modules.configuration.transport.http.outro_router import (
+    create_outro_router,
+)
 from modules.configuration.transport.http.reel_profile_router import (
     create_reel_profile_router,
 )
@@ -61,6 +71,12 @@ def build_configuration_client(
         )
     )
     app.include_router(
+        create_fonts_router(
+            admin_access_policy=policy,
+            workspace_dir=workspace_dir,
+        )
+    )
+    app.include_router(
         create_automation_router(
             unit_of_work_factory=factory, admin_access_policy=policy
         )
@@ -72,6 +88,27 @@ def build_configuration_client(
     )
     app.include_router(
         create_music_router(unit_of_work_factory=factory, admin_access_policy=policy)
+    )
+    app.include_router(
+        create_music_upload_router(
+            unit_of_work_factory=factory,
+            admin_access_policy=policy,
+            workspace_dir=workspace_dir,
+        )
+    )
+    app.include_router(
+        create_outro_router(
+            unit_of_work_factory=factory,
+            admin_access_policy=policy,
+            workspace_dir=workspace_dir,
+        )
+    )
+    app.include_router(
+        create_intro_router(
+            unit_of_work_factory=factory,
+            admin_access_policy=policy,
+            workspace_dir=workspace_dir,
+        )
     )
     app.include_router(
         create_reel_profile_router(

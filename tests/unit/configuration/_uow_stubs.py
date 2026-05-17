@@ -75,13 +75,13 @@ class StubSocialTemplates:
             SimpleNamespace(
                 agency_id=agency_id,
                 platform=platform,
-                description_template=description,
-                title_template="",
-                hashtags=(),
+                description_template=getattr(upsert, "description_template", ""),
+                title_template=getattr(upsert, "title_template", ""),
+                hashtags=tuple(getattr(upsert, "hashtags", ()) or ()),
                 created_at="",
                 updated_at="",
             )
-            for platform, description in templates.items()
+            for platform, upsert in templates.items()
         )
 
 

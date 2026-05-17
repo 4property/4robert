@@ -29,6 +29,55 @@ from modules.rendering.infrastructure.models import (
 from modules.rendering.infrastructure.runtime import resolve_font_path
 
 
+def _split_ffmpeg_color_alpha(color: str) -> tuple[str, int]:
+    base_color, separator, alpha_text = color.strip().rpartition("@")
+    if not separator or not base_color:
+        return color, 255
+    try:
+        alpha = float(alpha_text)
+    except ValueError:
+        return color, 255
+    return base_color, round(max(0.0, min(1.0, alpha)) * 255)
+
+
+def _build_rounded_panel_source(
+    *,
+    label: str,
+    color: str,
+    width: int,
+    height: int,
+    radius: int,
+) -> str:
+    color_source, alpha = _split_ffmpeg_color_alpha(color)
+    safe_radius = max(1, min(radius, width // 2, height // 2))
+    right = width - safe_radius - 1
+    bottom = height - safe_radius - 1
+    radius_squared = safe_radius * safe_radius
+    dx = f"max(max({safe_radius}-X\\,X-{right})\\,0)"
+    dy = f"max(max({safe_radius}-Y\\,Y-{bottom})\\,0)"
+    alpha_expr = (
+        f"if(lte(({dx})*({dx})+({dy})*({dy})\\,{radius_squared})\\,{alpha}\\,0)"
+    )
+    return (
+        f"color=c={color_source}:s={width}x{height},format=rgba,"
+        "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+        f"a='{alpha_expr}'[{label}]"
+    )
+
+
+def _resolve_side_banner_footer_radius(
+    *,
+    frame_height: int,
+    panel_width: int,
+    panel_height: int,
+) -> int:
+    return min(
+        panel_width // 2,
+        panel_height // 2,
+        max(12, round(frame_height * 0.0125)),
+    )
+
+
 def _build_drawtext_enable_expression(start_time: float, end_time: float) -> str:
     return f"enable='between(t\\,{start_time:.3f}\\,{end_time:.3f})'"
 
@@ -80,15 +129,42 @@ def build_overlay_filter(
     resolved_top_panel_color = top_panel_color or "black@0.38"
     resolved_bottom_panel_color = bottom_panel_color or "black@0.46"
 
+    filters: list[str] = []
+    current_base_label = video_input_label
     text_filters: list[str] = []
     if active_layout.bottom_panel is not None and active_layout.bottom_panel.visible:
-        text_filters.append(
-            (
-                f"drawbox=x={active_layout.bottom_panel.x}:y={active_layout.bottom_panel.y}:"
-                f"w={active_layout.bottom_panel.width}:h={active_layout.bottom_panel.height}:"
-                f"color={resolved_bottom_panel_color}:t=fill"
+        if layout_variant == "side_banner":
+            footer_panel_label = "side_banner_footer_panel"
+            footer_base_label = "video_with_side_banner_footer_panel"
+            filters.append(
+                _build_rounded_panel_source(
+                    label=footer_panel_label,
+                    color=resolved_bottom_panel_color,
+                    width=active_layout.bottom_panel.width,
+                    height=active_layout.bottom_panel.height,
+                    radius=_resolve_side_banner_footer_radius(
+                        frame_height=settings.height,
+                        panel_width=active_layout.bottom_panel.width,
+                        panel_height=active_layout.bottom_panel.height,
+                    ),
+                )
             )
-        )
+            filters.append(
+                (
+                    f"[{current_base_label}][{footer_panel_label}]"
+                    f"overlay=x={active_layout.bottom_panel.x}:y={active_layout.bottom_panel.y}"
+                    f"[{footer_base_label}]"
+                )
+            )
+            current_base_label = footer_base_label
+        else:
+            text_filters.append(
+                (
+                    f"drawbox=x={active_layout.bottom_panel.x}:y={active_layout.bottom_panel.y}:"
+                    f"w={active_layout.bottom_panel.width}:h={active_layout.bottom_panel.height}:"
+                    f"color={resolved_bottom_panel_color}:t=fill"
+                )
+            )
     if active_layout.top_panel is not None and active_layout.top_panel.visible:
         text_filters.append(
             (
@@ -112,32 +188,116 @@ def build_overlay_filter(
                 "fix_bounds=1"
             )
 
-    for segment in active_layout.subtitle_segments:
-        enable = _build_drawtext_enable_expression(
-            segment.start_time,
-            segment.end_time,
+    # Feature 31: per-agency subtitle styling cascades from
+    # ``PropertyRenderData.subtitle_style``. ``enabled=False`` skips
+    # every subtitle drawtext entirely (the agency toggled
+    # ``automation.autoCaptions`` off via ``/defaults``); the rest of
+    # the overlay (top/bottom panels, agent panel, etc.) is unaffected.
+    # Feature 36: when the reel carries a per-reel subtitles override
+    # the override always renders, even if the agency-level
+    # ``autoCaptions`` toggle is disabled — the editorial intent on
+    # the override row is the source of truth.
+    subtitle_style = getattr(property_data, "subtitle_style", None)
+    subtitle_enabled = bool(subtitle_style.enabled) if subtitle_style is not None else True
+    subtitles_override = getattr(property_data, "subtitles_override", None)
+    if subtitles_override:
+        subtitle_enabled = True
+    if subtitle_enabled:
+        # Resolve the per-render font path via the catalogue helper. When
+        # the agency picked a family from the brand catalogue we honour
+        # the chosen weight; otherwise we fall back to the template's
+        # historical ``subtitle_font_path``. Unknown families surface as
+        # ``ValueError`` from ``font_catalog.resolve_weighted`` — we fall
+        # back to the legacy path with no crash so a stale persisted
+        # family cannot break a render.
+        resolved_subtitle_font_path = subtitle_font_path
+        if subtitle_style is not None and subtitle_style.font_family:
+            try:
+                from modules.configuration.domain.font_catalog import (
+                    resolve_weighted,
+                )
+
+                primary_path, _bold = resolve_weighted(
+                    subtitle_style.font_family,
+                    subtitle_style.weight,
+                )
+                resolved_subtitle_font_path = escape_filter_path(
+                    resolve_font_path(primary_path)
+                )
+            except ValueError:
+                resolved_subtitle_font_path = subtitle_font_path
+
+        fontcolor_hex = (
+            subtitle_style.color.replace("#", "0x")
+            if subtitle_style is not None and subtitle_style.color
+            else "0xffffff"
         )
-        for index, line in enumerate(segment.lines):
-            text_filters.append(
-                "drawtext="
-                f"fontfile='{subtitle_font_path}':"
-                f"text='{escape_drawtext_text(line)}':"
-                f"fontcolor={resolve_text_color(segment.block)}:"
-                f"fontsize={segment.font_size}:"
-                f"x={segment.x}+max(({segment.max_width}-text_w)/2\\,0):"
-                f"y={segment.y + index * segment.line_gap}:"
-                f"borderw=2:bordercolor=black@0.80:"
-                f"shadowx=0:shadowy=3:shadowcolor=black@0.75:"
-                f"text_shaping=1:"
-                f"fix_bounds=1:"
-                f"{enable}"
+        bg_color_hex = (
+            subtitle_style.bg_color.replace("#", "0x")
+            if subtitle_style is not None and subtitle_style.bg_color
+            else "0x0f1729"
+        )
+        bg_opacity_raw = (
+            subtitle_style.bg_opacity if subtitle_style is not None else 82
+        )
+        bg_alpha = max(0.0, min(1.0, float(bg_opacity_raw or 0) / 100.0))
+        bg_style = (
+            (subtitle_style.bg_style or "outline").lower()
+            if subtitle_style is not None
+            else "outline"
+        )
+
+        def _subtitle_x_expr(seg) -> str:
+            align = (seg.alignment or "center").lower()
+            if align == "left":
+                return f"{seg.x}"
+            if align == "right":
+                return f"{seg.x}+max({seg.max_width}-text_w\\,0)"
+            return f"{seg.x}+max(({seg.max_width}-text_w)/2\\,0)"
+
+        for segment in active_layout.subtitle_segments:
+            enable = _build_drawtext_enable_expression(
+                segment.start_time,
+                segment.end_time,
             )
+            for index, line in enumerate(segment.lines):
+                drawtext_bits = [
+                    "drawtext=",
+                    f"fontfile='{resolved_subtitle_font_path}':",
+                    f"text='{escape_drawtext_text(line)}':",
+                    f"fontcolor={fontcolor_hex}:",
+                    f"fontsize={segment.font_size}:",
+                    f"x={_subtitle_x_expr(segment)}:",
+                    f"y={segment.y + index * segment.line_gap}:",
+                ]
+                # Feature 31: bg_style cascade.
+                # * "outline" → keep the legacy stroke-on-glyph look.
+                # * "block" / "pill" → ffmpeg box (pill collapses to a
+                #   rectangular box at MVP — true rounded background
+                #   would require a second filter pass).
+                # * "none" → no border, no box. The subtitle still
+                #   carries a soft drop shadow so it stays readable on
+                #   pale photos.
+                if bg_style == "outline":
+                    drawtext_bits.append("borderw=2:bordercolor=black@0.80:")
+                elif bg_style in {"block", "pill"}:
+                    drawtext_bits.append(
+                        f"box=1:boxcolor={bg_color_hex}@{bg_alpha:.2f}:boxborderw=8:"
+                    )
+                # ``none`` adds neither outline nor box.
+                drawtext_bits.append(
+                    "shadowx=0:shadowy=3:shadowcolor=black@0.75:"
+                )
+                drawtext_bits.append("text_shaping=1:")
+                drawtext_bits.append("fix_bounds=1:")
+                drawtext_bits.append(enable)
+                text_filters.append("".join(drawtext_bits))
 
     overlay_base_label = "video_with_property_panels"
     if text_filters:
-        filters = [f"[{video_input_label}]{','.join(text_filters)}[{overlay_base_label}]"]
+        filters.append(f"[{current_base_label}]{','.join(text_filters)}[{overlay_base_label}]")
     else:
-        filters = [f"[{video_input_label}]null[{overlay_base_label}]"]
+        filters.append(f"[{current_base_label}]null[{overlay_base_label}]")
 
     current_video_label = overlay_base_label
     if (

@@ -1,22 +1,28 @@
-# AGENTS.md — Mapa de navegación para agentes de IA (`4reels back/`)
+# AGENTS.md — Mapa de navegación para agentes de IA (`/opt/projects/4Reels-Backend`)
 
 > Este archivo es el **punto de entrada** para cualquier agente que trabaje
-> en el backend de 4reels. NO es una biblia de reglas: es un **mapa**. Lee
+> en el backend de 4Reels. NO es una biblia de reglas: es un **mapa**. Lee
 > solo lo que necesites cuando lo necesites (divulgación progresiva).
+>
+> **Repos en disco:**
+> - Backend (este): `/opt/projects/4Reels-Backend`
+> - Frontend: `/opt/projects/4Reels-Frontend`
+> - Producción legacy en :8000 (otro código fuente): `/opt/reels` — ver §7.
 
 ---
 
 ## 1. Antes de empezar (obligatorio)
 
-### Nota Windows 11 / PowerShell
+### Nota Windows 11 / PowerShell (legado, host actual = Linux)
 
-Este workspace se ejecuta normalmente en Windows 11 con PowerShell. En ese
+Este repo se desarrolló inicialmente en Windows 11 con PowerShell. En ese
 entorno `./init.sh` es un script Bash y puede fallar aunque el repo este bien,
 por ejemplo con `execvpe(/bin/bash) failed: No such file or directory` si no
-hay WSL/Git Bash disponible. Si `bash ./init.sh` falla por falta de Bash, no
-lo trates como fallo de producto: ejecuta este equivalente PowerShell desde
-`4reels back/` y exige el mismo resultado verde antes de tocar codigo o cerrar
-una feature:
+hay WSL/Git Bash disponible. **El host actual es Linux (Rocky)**: `./init.sh`
+funciona directamente y deberías usar esa vía. Si por algún motivo trabajas
+en Windows sin Bash, ejecuta este equivalente PowerShell desde
+`/opt/projects/4Reels-Backend` (o el path equivalente en Windows) y exige el
+mismo resultado verde antes de tocar codigo o cerrar una feature:
 
 ```powershell
 $ErrorActionPreference = "Stop"
@@ -76,27 +82,28 @@ if ($legacyImports) {
 & $PYTHON -m pytest -q --no-header
 ```
 
-1. Ejecuta `./init.sh` (o el equivalente PowerShell anterior si estas en
+1. Ejecuta `./init.sh` (o el equivalente PowerShell anterior si estás en
    Windows 11 sin Bash) y verifica que termina sin errores. Si falla por otra
    causa, **para** y resuelve el entorno antes de tocar código.
 2. Lee `progress/current.md` para entender en qué estado quedó la última
    sesión.
-3. Lee `feature_list.json` y elige **una** tarea con estado `pending`. No
-   trabajes en más de una a la vez. **Phase 2 está cerrada (feature 18
-   aprobada el 2026-05-06).** La fase activa es Phase 3 — URL rename
-   closeout + frontend lockstep (4 features, alcance reducido; ver
-   `REFACTOR_STATUS.md` § Phase 3).
-4. Si la feature pertenece a Phase 3, lee también
-   `docs/phase_3_operating_rules.md` (override autoritativo: si choca
-   con `feature_list.json`, gana el doc).
-   `docs/phase_2_operating_rules.md` queda como referencia histórica
-   (no aplica como override).
-5. Si la feature de Phase 3 ya tiene un spike en
-   `progress/explore_feature_<id>_*.md`, léelo antes de tocar código.
-   Las features 2 y 3 de Phase 3 son cross-repo: lee también
-   `4reels front/feature_list.json` y abre la entrada equivalente en
-   el front antes de modificar nada allí. (Los informes
-   `progress/explore_router_<id>_*.md` son de Phase 2; ya cerrados.)
+3. Lee `feature_list.json`. **Estado actual: Phases 1-4 cerradas; sin fase
+   activa.** Las 5 features registradas están en `done` y no se reabren. Hay
+   dos vías de trabajo válidas:
+   - **(a) Feature nueva**: el usuario la añade con `status: pending` y
+     sigues el flujo `leader → implementer → reviewer` normal (una a la vez).
+   - **(b) Hotfix**: el usuario incluye la palabra `hotfix` en su mensaje y
+     puedes saltarte el protocolo (ver `CLAUDE.md` §Hotfix). Documenta el
+     hotfix con prefijo `HOTFIX:` en `progress/current.md`.
+   - Si no hay feature `pending` ni la palabra `hotfix`, asume que la sesión
+     es de lectura/exploración y responde directamente.
+4. Las reglas operativas de Phase 3 (`docs/phase_3_operating_rules.md`) y
+   Phase 4 (`docs/phase_4_operating_rules.md`) son **post-mortem**, no
+   override. Léelas como contexto histórico, no como reglas activas.
+5. Si arrancas una feature cross-repo, abre la entrada equivalente en
+   `/opt/projects/4Reels-Frontend/feature_list.json` con el mismo `id` antes
+   de tocar código allí. Los `progress/explore_*` previos son histórico (de
+   Phase 2/3/4 ya cerradas).
 
 ## 2. Mapa del repositorio
 
@@ -205,3 +212,118 @@ Antes de terminar:
 - Si la herramienta no hace lo que esperas, **no inventes un workaround**:
   documenta el bloqueo en `progress/current.md` con estado `blocked` en
   `feature_list.json` y para la sesión.
+
+## 7. Runtime y servicios systemd (host actual: Linux Rocky)
+
+> Este SaaS corre con **dos despliegues distintos** en este host. Antes de
+> reiniciar nada, asegúrate de qué deploy estás tocando: producción y test
+> son **dos repos diferentes**, no dos despliegues del mismo código.
+
+### Mapa de servicios
+
+| Servicio systemd            | Puerto | Repo / código fuente                  | Usuario   | Estado típico    |
+|-----------------------------|--------|---------------------------------------|-----------|------------------|
+| `reels.service`             | 8000   | `/opt/reels/` (repo `4property/4robert`, branch `ghl`) | `4robert` | producción, `active` |
+| `reels-test.service`        | 8001   | `/opt/projects/4Reels-Backend` (este) | `support` | test, hoy `inactive` (se arranca a mano) |
+| `reels-test-worker.service` | —      | `/opt/projects/4Reels-Backend` (este) | `support` | test worker, dispatcher de jobs |
+
+**Implicaciones críticas:**
+
+- :8000 es **producción** y **NO comparte código** con este repo. Cualquier
+  cambio en `/opt/projects/4Reels-Backend` que quieras llevar a producción
+  requiere portarlo manualmente al repo `/opt/reels` — no hay deploy
+  automático. Reiniciar `reels.service` **no** refleja cambios hechos aquí.
+- :8001 es el entorno de test/staging que apunta el frontend dev y el proxy
+  público `https://4reelsback-test.4property.com`. Es el deploy "vivo" de
+  este repo.
+- Hoy (2026-05-14) el proceso real en :8001 está lanzado a mano con `nohup`
+  (PID escrito a `logs/test-api-8001.pid`), no por systemd. El servicio
+  `reels-test.service` existe pero está `inactive`.
+
+### Comandos de reinicio
+
+> Todos los `systemctl` requieren `sudo`. Claude **no debe ejecutarlos por
+> su cuenta** salvo en sesión de `hotfix` y, aun así, **nunca toca
+> `reels.service` (producción) sin confirmación explícita del usuario en el
+> mismo turno**. Para producción, normalmente solo informa el comando y
+> deja que el usuario lo ejecute.
+
+#### API de test (:8001)
+
+Hay dos modos. Usa el que coincida con cómo está arrancado ahora mismo
+(comprueba con `ss -ltnp | grep 8001` y `systemctl is-active reels-test.service`):
+
+**Modo systemd** (preferido si el servicio está activo):
+
+```bash
+sudo systemctl restart reels-test.service
+sudo systemctl status  reels-test.service --no-pager
+journalctl -u reels-test.service -n 50 --no-pager
+```
+
+**Modo manual** (lo que hay corriendo hoy en este host):
+
+```bash
+cd /opt/projects/4Reels-Backend
+# Parar el proceso actual (PID en logs/test-api-8001.pid)
+kill "$(cat logs/test-api-8001.pid)" 2>/dev/null || true
+# Esperar a que libere el puerto
+until ! ss -ltn | grep -q ':8001 '; do sleep 1; done
+# Relanzar
+nohup .venv/bin/python -m apps.api > logs/test-api-8001.log 2>&1 &
+echo $! > logs/test-api-8001.pid
+# Health check
+sleep 2 && curl -fsS http://127.0.0.1:8001/health
+```
+
+#### Worker de test
+
+Mismo dilema: o bien por systemd o bien manual.
+
+**Modo systemd**:
+
+```bash
+sudo systemctl restart reels-test-worker.service
+sudo systemctl status  reels-test-worker.service --no-pager
+tail -n 50 /opt/projects/4Reels-Backend/logs/test-worker.log
+```
+
+⚠️ Aviso: en este host `reels-test-worker.service` está actualmente en bucle
+de fallo (`status=209/STDOUT`, "Permission denied" al escribir
+`logs/test-worker.log` por colisión con `ProtectSystem=strict`). Si vas a
+depender del modo systemd, primero hay que arreglar permisos del log y/o
+relajar `ReadWritePaths` para incluir `logs/`.
+
+**Modo manual** (lo que hay corriendo hoy):
+
+```bash
+cd /opt/projects/4Reels-Backend
+# Encontrar y parar el worker manual
+pkill -f '.venv/bin/python -m apps.worker' || true
+# Esperar a que muera
+until ! pgrep -f 'apps.worker' >/dev/null; do sleep 1; done
+# Relanzar
+nohup .venv/bin/python -m apps.worker > logs/test-worker.log 2>&1 &
+echo $! > logs/test-worker.pid
+```
+
+#### Producción (:8000) — solo con confirmación explícita
+
+```bash
+sudo systemctl restart reels.service
+sudo systemctl status  reels.service --no-pager
+journalctl -u reels.service -n 50 --no-pager
+```
+
+Recordatorio: el código vive en `/opt/reels/`, NO en `/opt/projects/4Reels-Backend`.
+
+### Verificación post-reinicio
+
+```bash
+# Test
+curl -fsS http://127.0.0.1:8001/health
+# Producción
+curl -fsS http://127.0.0.1:8000/health
+```
+
+Respuesta esperada: `{"status":"ready","dispatcher_accepting_jobs":true}`.

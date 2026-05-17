@@ -35,6 +35,8 @@ def build_property_data(
     agency_psra: str | None = None,
     accent_text_color: str | None = None,
     accent_background_color: str | None = None,
+    side_banner_ribbon_background_color: str | None = None,
+    side_banner_panel_color: str | None = None,
 ) -> PropertyRenderData:
     return PropertyRenderData(
         site_id="ckp.ie",
@@ -65,6 +67,8 @@ def build_property_data(
         viewing_times=viewing_times,
         accent_text_color=accent_text_color,
         accent_background_color=accent_background_color,
+        side_banner_ribbon_background_color=side_banner_ribbon_background_color,
+        side_banner_panel_color=side_banner_panel_color,
     )
 
 

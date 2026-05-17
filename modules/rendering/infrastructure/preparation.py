@@ -54,6 +54,7 @@ def prepare_reel_render_assets(
     template: PropertyReelTemplate | None = None,
     working_dir: str | Path,
     layout_variant: str = "classic",
+    music_tracks: tuple[Path, ...] | None = None,
 ) -> PreparedReelAssets:
     workspace_dir = Path(base_dir).expanduser().resolve()
     settings = template or PropertyReelTemplate()
@@ -187,6 +188,7 @@ def prepare_reel_render_assets(
         workspace_dir,
         settings,
         shuffle_candidates=True,
+        music_tracks=music_tracks,
     )
 
     vertical_banner_path: Path | None = None
@@ -204,7 +206,10 @@ def prepare_reel_render_assets(
                 height=banner_layout["height"],
                 notch_height=banner_layout["notch_height"],
                 text=banner_text,
-                background_hex=property_data.accent_background_color,
+                background_hex=(
+                    property_data.side_banner_ribbon_background_color
+                    or _SIDE_BANNER_RIBBON_BACKGROUND
+                ),
                 text_hex=property_data.accent_text_color,
                 font_path=resolve_font_path(settings.bold_font_path),
                 property_data=property_data,
@@ -230,6 +235,17 @@ def prepare_reel_render_assets(
 
 _VERTICAL_BANNER_DEFAULT_BACKGROUND = "#0F172A"
 _VERTICAL_BANNER_DEFAULT_TEXT = "#FFFFFF"
+# Hotfix 2026-05-15: the brand secondary colour drives the side_banner
+# vertical ribbon. When the agency has not configured one yet,
+# ``property_data.side_banner_ribbon_background_color`` is ``None`` and
+# the renderer paints a neutral grey ribbon instead. The amber
+# ``#FECF4D`` from feature 17 was a temporary visual probe; per the
+# 2026-05-15 product call the default is now Tailwind's ``gray-400``
+# (``#9CA3AF``) so the ribbon reads as "not configured" rather than as
+# a deliberate yellow brand colour. The WordPress webhook accent feed
+# is intentionally not consulted at this layer any more — colour comes
+# from the agency brand row only.
+_SIDE_BANNER_RIBBON_BACKGROUND = "#9CA3AF"
 
 
 def _resolve_vertical_banner_layout(
@@ -245,7 +261,7 @@ def _resolve_vertical_banner_layout(
     """
     banner_width = max(96, round(settings.width * 0.122))
     notch_height = max(28, round(settings.height * 0.025))
-    body_height = max(360, round(settings.height * 0.281))
+    body_height = max(420, round(settings.height * 0.325))
     banner_height = body_height + notch_height
     if banner_width >= settings.width or banner_height >= settings.height:
         return None
@@ -287,8 +303,8 @@ def _render_vertical_status_banner(
     white text) when ``property_data`` does not provide accent colors
     and no fallback was injected upstream.
     """
-    background_drawbox = apply_alpha_to_hex(background_hex, alpha=0.85) or apply_alpha_to_hex(
-        _VERTICAL_BANNER_DEFAULT_BACKGROUND, alpha=0.85
+    background_drawbox = apply_alpha_to_hex(background_hex, alpha=1.0) or apply_alpha_to_hex(
+        _VERTICAL_BANNER_DEFAULT_BACKGROUND, alpha=1.0
     )
     text_color = _normalize_drawtext_color(text_hex) or "white"
     font_path_escaped = escape_filter_path(font_path)
@@ -298,7 +314,7 @@ def _render_vertical_status_banner(
     body_width = max(2, horizontal_width - normalized_notch_height)
     center_y = (horizontal_height - 1) / 2
     half_height = horizontal_height / 2
-    font_size = max(22, round(horizontal_height * 0.58))
+    font_size = max(20, round(horizontal_height * 0.40))
     text_down_shift = max(10, round(width * 0.18))
     escaped_text = escape_drawtext_text(text)
     if normalized_notch_height > 0:

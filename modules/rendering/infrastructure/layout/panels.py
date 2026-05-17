@@ -94,7 +94,7 @@ def compose_top_panel(
     ber_icon_width, ber_icon_height = resolve_ber_icon_size(settings)
     if is_side_banner:
         side_text_x = max(panel_padding_x, round(width * 0.086))
-        side_ber_x = round(width * 0.52)
+        side_ber_x = round(width * 0.36)
         header_text_width = max(
             300,
             (
