@@ -41,7 +41,12 @@ def build_overlay_layout(
     # margins entirely so the property photo runs edge to edge
     # (full-bleed). The top panel becomes a full-width band and the
     # vertical status ribbon floats near the right side.
-    if layout_variant == "side_banner":
+    # Feature 42: the ``galaxy`` variant inherits the same full-bleed
+    # behaviour (photo runs edge-to-edge) so the rounded top-left info
+    # panel sits above an unbroken background photograph. The top panel
+    # itself is narrower than the frame (compose_top_panel handles the
+    # geometry); the outer margins are only used by ``classic``.
+    if layout_variant in {"side_banner", "galaxy"}:
         outer_margin_x = 0
         outer_margin_y = 0
     else:

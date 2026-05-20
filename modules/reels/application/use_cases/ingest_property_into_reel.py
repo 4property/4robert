@@ -419,7 +419,16 @@ class IngestPropertyIntoReelUseCase:
             existing_snapshot_text != content_snapshot_json
             or state.content_fingerprint != content_fingerprint
         )
-        requires_render = content_changed or not has_local_artifacts
+        # Política 2026-05-19: cada webhook de ingest dispara render
+        # incondicionalmente. El content fingerprint no entra en el
+        # catálogo de brand/subtitle overrides (font_family, colores,
+        # subtítulos) — antes de este cambio cambiar la fuente brand no
+        # movía el fingerprint y la pipeline reutilizaba el MP4 antiguo
+        # via "EXISTING MEDIA PUBLISH" fast-path. El usuario prefiere
+        # pagar el coste de un render por webhook a tener artefactos
+        # stale. El endpoint manual `regenerate` (feature 40) usa otro
+        # use case y no se ve afectado.
+        requires_render = True
         requires_asset_preparation = _should_prepare_assets(
             state=state,
             property_item=property_item,

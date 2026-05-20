@@ -3,7 +3,8 @@
 Exposes three endpoints under ``/v1/admin/agencies/{agency_id}/intro``:
 
 * ``POST .../upload`` — multipart upload (``file`` field, MP4/MOV).
-  Validates MIME, size (<=50MB) and duration (1..10s via ffprobe).
+  Validates MIME only; size and duration are intentionally unbounded
+  so the SaaS admin can upload intros of any length and weight.
 * ``GET  .../file``    — stream the binary back to the admin UI.
 * ``DELETE ...``       — clear the metadata and remove the on-disk blob.
 
@@ -40,7 +41,6 @@ from modules.configuration.application.use_cases.read_intro_asset import (
     ReadIntroAssetUseCase,
 )
 from modules.configuration.application.use_cases.upload_intro_video import (
-    INTRO_MAX_UPLOAD_BYTES,
     UploadIntroVideoInput,
     UploadIntroVideoUseCase,
 )
@@ -136,7 +136,6 @@ def create_intro_router(
     upload_intro_video: UploadIntroVideoUseCase | None = None,
     read_intro_asset: ReadIntroAssetUseCase | None = None,
     delete_intro_video: DeleteIntroVideoUseCase | None = None,
-    max_upload_bytes: int = INTRO_MAX_UPLOAD_BYTES,
 ) -> APIRouter:
     router = APIRouter(
         prefix=admin_access_policy.base_path,
@@ -145,7 +144,6 @@ def create_intro_router(
     resolved_workspace = Path(workspace_dir).expanduser().resolve()
     upload_use_case = upload_intro_video or UploadIntroVideoUseCase(
         workspace_dir=resolved_workspace,
-        max_upload_bytes=max_upload_bytes,
     )
     read_use_case = read_intro_asset or ReadIntroAssetUseCase()
     delete_use_case = delete_intro_video or DeleteIntroVideoUseCase(
@@ -154,14 +152,15 @@ def create_intro_router(
 
     @router.post(
         "/agencies/{agency_id}/intro/upload",
-        summary="Upload the agency's intro video (multipart, MP4/MOV, <=50MB, 1-10s)",
+        summary="Upload the agency's intro video (multipart, MP4/MOV, unrestricted size/duration)",
         description=(
             "Accepts a multipart `file` field (MP4 or MOV) and stores it "
-            "under the agency's intro folder. Validates size (<=50MB) and "
-            "duration (1..10s via ffprobe). Returns the asset metadata "
-            "(`intro_object_key`, `intro_duration_seconds`, `intro_source = "
-            "\"uploaded\"`). Errors: 422 INTRO_INVALID_MIME, 413 "
-            "INTRO_FILE_TOO_LARGE, 422 INTRO_INVALID_DURATION, 404 "
+            "under the agency's intro folder. Validates MIME only; size "
+            "and duration are intentionally unrestricted so the SaaS "
+            "admin can upload intros of any length and weight. Returns "
+            "the asset metadata (`intro_object_key`, "
+            "`intro_duration_seconds`, `intro_source = \"uploaded\"`). "
+            "Errors: 422 INTRO_INVALID_MIME, 422 INTRO_FILE_EMPTY, 404 "
             "ADMIN_AGENCY_NOT_FOUND."
         ),
     )
@@ -183,16 +182,6 @@ def create_intro_router(
             )
 
         body = await request.body()
-        if len(body) > max_upload_bytes:
-            return json_error(
-                413,
-                "Intro upload exceeds the 50 MB size limit.",
-                code="INTRO_FILE_TOO_LARGE",
-                details={
-                    "received_bytes": len(body),
-                    "max_bytes": max_upload_bytes,
-                },
-            )
 
         try:
             field = _extract_file_field(body, content_type_header)
@@ -220,9 +209,8 @@ def create_intro_router(
                     ),
                 )
         except ValidationError as error:
-            status_code = 413 if error.code == "INTRO_FILE_TOO_LARGE" else 422
             return json_error(
-                status_code,
+                422,
                 str(error),
                 code=error.code,
                 hint=error.hint,

@@ -87,6 +87,17 @@ class ReelState:
     # and drives the scene list directly instead of running the
     # auto-generation pipeline.
     manifest_override: list[dict[str, Any]] | None = field(default=None)
+    # Feature 41: snapshot of the autoCaptions cues produced by the
+    # renderer on the most recent render whose ``subtitles_override``
+    # was ``None``. ``None`` means "no snapshot yet"; otherwise the
+    # list has the same shape as ``subtitles_override`` (cues of
+    # ``{"index": int, "text": str, "in_seconds": float,
+    # "out_seconds": float}``) so the editor can pre-fill the cue
+    # array from this column when no override has been set yet.
+    # Refreshed on every render that runs the autoCaptions flow;
+    # preserved untouched when the renderer consumes the override
+    # (since the autoCaptions flow does not run in that branch).
+    auto_subtitles_snapshot: list[dict[str, Any]] | None = field(default=None)
 
 
 def build_empty_reel_state(

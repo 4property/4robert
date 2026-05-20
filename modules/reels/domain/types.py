@@ -308,6 +308,15 @@ class RenderedMediaArtifact:
     metadata_path: Path | None
     mime_type: str
     revision_id: str
+    # Feature 41: cues the autoCaptions composer produced for this
+    # render. ``None`` signals "the autoCaptions flow did not run on
+    # this render — either because the reel carried a
+    # ``subtitles_override`` (in which case the previous snapshot stays
+    # authoritative) or because the renderer cannot expose any cues
+    # for this kind of artifact". A non-empty list is the canonical
+    # "refresh the snapshot to these values" signal consumed by
+    # ``PersistLocalArtifactsUseCase``.
+    auto_subtitles_snapshot: tuple[dict[str, Any], ...] | None
 
     def __init__(
         self,
@@ -320,6 +329,9 @@ class RenderedMediaArtifact:
         revision_id: str = "",
         manifest_path: Path | None = None,
         video_path: Path | None = None,
+        auto_subtitles_snapshot: (
+            tuple[dict[str, Any], ...] | list[dict[str, Any]] | None
+        ) = None,
     ) -> None:
         resolved_source = media_path or video_path
         if resolved_source is None:
@@ -335,6 +347,13 @@ class RenderedMediaArtifact:
         object.__setattr__(self, "metadata_path", resolved_metadata_path)
         object.__setattr__(self, "mime_type", resolved_mime_type)
         object.__setattr__(self, "revision_id", str(revision_id or ""))
+        if auto_subtitles_snapshot is None:
+            resolved_snapshot: tuple[dict[str, Any], ...] | None = None
+        else:
+            resolved_snapshot = tuple(dict(cue) for cue in auto_subtitles_snapshot)
+        object.__setattr__(
+            self, "auto_subtitles_snapshot", resolved_snapshot
+        )
 
     @property
     def manifest_path(self) -> Path | None:

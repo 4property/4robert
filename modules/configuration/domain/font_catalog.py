@@ -15,7 +15,7 @@ and by the reels ingest pipeline; transports decide how to surface a
 ``ValueError`` (the brand payload validator turns it into a 422
 ``UNKNOWN_FONT_FAMILY``).
 
-Feature 28: the MVP catalogue ships six families backed by Google OFL
+Feature 28: the MVP catalogue ships seven families backed by Google OFL
 fonts already present under ``assets/fonts/``:
 
 * ``Inter`` — original static cuts under ``assets/fonts/Inter/static/``.
@@ -28,6 +28,9 @@ fonts already present under ``assets/fonts/``:
 * ``Poppins`` — true static ``Regular`` / ``Bold`` TTFs from upstream.
 * ``Roboto`` — variable cut (width + weight axes), same duplication
   pattern as Manrope.
+* ``Barlow Semi Condensed`` — true static ``Regular`` / ``Bold`` TTFs
+  fetched from Google Fonts' CSS2 API (same upstream pattern as
+  Poppins).
 
 The ``available()`` helper on each descriptor returns ``False`` when the
 TTF is missing from disk; the fonts router surfaces that flag so a
@@ -131,6 +134,12 @@ AVAILABLE_FONTS: tuple[FontDescriptor, ...] = (
         display_name="Roboto",
         regular_path=Path("assets/fonts/Roboto/Regular.ttf"),
         bold_path=Path("assets/fonts/Roboto/Bold.ttf"),
+    ),
+    FontDescriptor(
+        family="Barlow Semi Condensed",
+        display_name="Barlow Semi Condensed",
+        regular_path=Path("assets/fonts/Barlow_Semi_Condensed/Regular.ttf"),
+        bold_path=Path("assets/fonts/Barlow_Semi_Condensed/Bold.ttf"),
     ),
 )
 

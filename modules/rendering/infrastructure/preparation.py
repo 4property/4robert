@@ -241,8 +241,16 @@ def prepare_reel_render_assets(
     vertical_banner_path: Path | None = None
     vertical_banner_x: int | None = None
     vertical_banner_y: int | None = None
-    if layout_variant == "side_banner":
-        banner_layout = _resolve_vertical_banner_layout(settings)
+    # Feature 42: galaxy reuses the side_banner vertical ribbon helper
+    # verbatim. Same dimensions, same notch, same ``FOR SALE`` cascade
+    # via ``build_status_ribbon_text``, same color cascade
+    # (``side_banner_ribbon_background_color`` → hardcoded grey
+    # fallback). No code duplication; only the conditional is widened.
+    if layout_variant in {"side_banner", "galaxy"}:
+        banner_layout = _resolve_vertical_banner_layout(
+            settings,
+            layout_variant=layout_variant,
+        )
         banner_text = build_status_ribbon_text(property_data)
         if banner_text and banner_layout is not None:
             vertical_banner_path = overlays_dir / "vertical_status_banner.png"
@@ -355,6 +363,8 @@ _SIDE_BANNER_RIBBON_BACKGROUND = "#9CA3AF"
 
 def _resolve_vertical_banner_layout(
     settings: PropertyReelTemplate,
+    *,
+    layout_variant: str = "side_banner",
 ) -> dict[str, int] | None:
     """Compute width/height/x/y for the rotated status banner.
 
@@ -364,9 +374,19 @@ def _resolve_vertical_banner_layout(
     Returns ``None`` when the frame is too small to fit a meaningful
     banner so the renderer can skip the asset.
     """
-    banner_width = max(96, round(settings.width * 0.122))
-    notch_height = max(28, round(settings.height * 0.025))
-    body_height = max(420, round(settings.height * 0.325))
+    if layout_variant == "galaxy":
+        banner_width = max(120, round(settings.width * 0.148))
+        notch_height = max(38, round(settings.height * 0.032))
+        # Century 21 polish v3 (2026-05-19): galaxy vertical ribbon
+        # shortened ~20% from polish v2 (0.360 -> 0.288, floor 450 ->
+        # 360) so the cinta is less dominant against the top photo
+        # crop. The side_banner branch below keeps its previous
+        # body_height untouched.
+        body_height = max(360, round(settings.height * 0.288))
+    else:
+        banner_width = max(96, round(settings.width * 0.122))
+        notch_height = max(28, round(settings.height * 0.025))
+        body_height = max(420, round(settings.height * 0.325))
     banner_height = body_height + notch_height
     if banner_width >= settings.width or banner_height >= settings.height:
         return None
@@ -376,7 +396,10 @@ def _resolve_vertical_banner_layout(
         "notch_height": notch_height,
         "x": min(
             settings.width - banner_width,
-            max(0, round(settings.width * 0.778)),
+            max(
+                0,
+                round(settings.width * (0.787 if layout_variant == "galaxy" else 0.778)),
+            ),
         ),
         "y": 0,
     }
@@ -672,21 +695,33 @@ def _normalize_agent_image(
 ) -> None:
     agent_image_size = resolve_agent_image_size(settings)
 <<<<<<< HEAD
+<<<<<<< HEAD
     filter_text = build_contained_image_filter(
         agent_image_size,
         agent_image_size,
         pixel_format="rgba",
 =======
+=======
+    # Feature 42: galaxy reuses the side_banner agent-image preparation
+    # (circular crop + fill) so the agent photo reads as a circular
+    # avatar inside the rounded footer card.
+    use_side_banner_avatar = layout_variant in {"side_banner", "galaxy"}
+>>>>>>> 4cde597 (release: v1.0.0 — first stable release)
     filter_text = build_fit_inside_rgba_filter(
         agent_image_size,
         agent_image_size,
         include_setsar=True,
+<<<<<<< HEAD
 <<<<<<< HEAD
 >>>>>>> 4fc9ba9 (fix: agente_photo error)
 =======
         fill=layout_variant == "side_banner",
         circular_mask=layout_variant == "side_banner",
 >>>>>>> 1749e02 (x)
+=======
+        fill=use_side_banner_avatar,
+        circular_mask=use_side_banner_avatar,
+>>>>>>> 4cde597 (release: v1.0.0 — first stable release)
     )
     _render_single_frame(
         ffmpeg_binary=ffmpeg_binary,

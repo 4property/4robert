@@ -1,9 +1,11 @@
 """Unit tests for the intro upload validator (feature 34).
 
 Symmetric to ``test_outro_validator.py``. The validator is the pure
-side of :class:`UploadIntroVideoUseCase` — MIME allow-list, size cap
-and duration window. We exercise it directly so the failure paths
-don't depend on a Postgres or ffprobe round-trip.
+side of :class:`UploadIntroVideoUseCase` — it checks the MIME
+allow-list and rejects empty bodies. Size and duration limits were
+removed: the SaaS admin can upload intros of any length and weight,
+so the validator no longer enforces a 50 MB cap or a [1, 10] s
+window.
 """
 
 from __future__ import annotations
@@ -11,10 +13,6 @@ from __future__ import annotations
 import pytest
 
 from modules.configuration.application.use_cases.upload_intro_video import (
-    INTRO_MAX_DURATION_SECONDS,
-    INTRO_MAX_UPLOAD_BYTES,
-    INTRO_MIN_DURATION_SECONDS,
-    validate_intro_duration,
     validate_intro_upload,
 )
 from shared.errors import ValidationError
@@ -58,32 +56,9 @@ def test_validator_rejects_empty_body() -> None:
     assert excinfo.value.code == "INTRO_FILE_EMPTY"
 
 
-def test_validator_rejects_payload_over_50mb() -> None:
-    oversized = b"x" * (INTRO_MAX_UPLOAD_BYTES + 1)
-    with pytest.raises(ValidationError) as excinfo:
-        validate_intro_upload(content_type="video/mp4", body=oversized)
-    assert excinfo.value.code == "INTRO_FILE_TOO_LARGE"
-    assert int(excinfo.value.context["received_bytes"]) == len(oversized)
-
-
-def test_validate_duration_accepts_range_extremes() -> None:
-    assert validate_intro_duration(INTRO_MIN_DURATION_SECONDS) == INTRO_MIN_DURATION_SECONDS
-    assert validate_intro_duration(INTRO_MAX_DURATION_SECONDS) == INTRO_MAX_DURATION_SECONDS
-
-
-def test_validate_duration_rejects_zero_seconds() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_intro_duration(0)
-    assert excinfo.value.code == "INTRO_INVALID_DURATION"
-
-
-def test_validate_duration_rejects_above_max() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_intro_duration(INTRO_MAX_DURATION_SECONDS + 1)
-    assert excinfo.value.code == "INTRO_INVALID_DURATION"
-
-
-def test_validate_duration_rejects_negative_value() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_intro_duration(-3)
-    assert excinfo.value.code == "INTRO_INVALID_DURATION"
+def test_validator_accepts_payload_well_over_50mb() -> None:
+    """Size limit was removed — a 60 MB payload must pass validation."""
+    oversized = b"x" * (60 * 1024 * 1024)
+    result = validate_intro_upload(content_type="video/mp4", body=oversized)
+    assert result.content_type == "video/mp4"
+    assert result.extension == ".mp4"

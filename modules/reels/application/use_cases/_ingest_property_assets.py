@@ -235,6 +235,13 @@ def _build_ingested_reel_state(
         # re-ingest preserves the editor's slide list edits. Same
         # rationale as ``photos_override`` / ``subtitles_override``.
         manifest_override=state.manifest_override,
+        # Feature 41: forward the persisted ``auto_subtitles_snapshot``
+        # so a re-ingest preserves the snapshot the renderer recorded
+        # on the previous render. The renderer refreshes the snapshot
+        # at the end of every autoCaptions-bearing render via
+        # ``save_local_artifacts``; this propagation guarantees the
+        # snapshot survives the intermediate "ingested" state.
+        auto_subtitles_snapshot=state.auto_subtitles_snapshot,
     )
 
 

@@ -250,4 +250,81 @@ def _build_subtitle_segments_from_raw(
     return tuple(measured_segments), tuple(accumulated_warnings)
 
 
-__all__ = ["compose_subtitle_segments"]
+def build_auto_subtitles_snapshot(
+    *,
+    slides: tuple[PropertyReelSlide, ...] | list[PropertyReelSlide],
+    settings: PropertyReelTemplate,
+    property_data: PropertyReelData,
+    slide_duration: float | None = None,
+) -> list[dict[str, object]]:
+    """Materialise the autoCaptions cues into the snapshot shape persisted
+    in ``reels.auto_subtitles_snapshot`` (feature 41).
+
+    Mirrors the cue construction the renderer uses inside
+    :func:`compose_subtitle_segments` for the autoCaptions branch: the
+    intro caption (when present), then one cue per slide spanning
+    ``[slide_start, slide_start + slide_duration)``. The ``text`` field
+    is the resolved caption ahead of the per-frame text-measurement
+    pass (we keep the raw text rather than the truncated / uppercased
+    variant the renderer paints onscreen so the editor sees what the
+    Gemini captioner produced verbatim). When the caller has no
+    ``slide_duration`` (the renderer cannot anchor cues), this function
+    returns an empty list — same fall-back contract as the autoCaptions
+    composer.
+
+    The returned cues use the same shape as ``subtitles_override`` so
+    the editor (feature 36) can swap one for the other without
+    translation.
+    """
+    if not slides:
+        return []
+    resolved_slide_duration = (
+        float(slide_duration)
+        if slide_duration is not None
+        else float(settings.seconds_per_slide)
+    )
+    if resolved_slide_duration <= 0:
+        return []
+    forced_subtitle = build_similar_required_subtitle(property_data)
+    intro_duration = (
+        float(settings.intro_duration_seconds)
+        if settings.include_intro
+        else 0.0
+    )
+    cues: list[dict[str, object]] = []
+    cue_index = 0
+    if settings.include_intro:
+        intro_caption = _resolve_subtitle_caption(
+            forced_subtitle,
+            slides[0].caption if slides else None,
+        )
+        if intro_caption:
+            cues.append(
+                {
+                    "index": cue_index,
+                    "text": intro_caption,
+                    "in_seconds": 0.0,
+                    "out_seconds": intro_duration,
+                }
+            )
+            cue_index += 1
+    slide_start_offset = intro_duration
+    for slide_index, slide in enumerate(slides):
+        caption_text = _resolve_subtitle_caption(forced_subtitle, slide.caption)
+        if not caption_text:
+            continue
+        in_seconds = slide_start_offset + (slide_index * resolved_slide_duration)
+        out_seconds = in_seconds + resolved_slide_duration
+        cues.append(
+            {
+                "index": cue_index,
+                "text": caption_text,
+                "in_seconds": float(in_seconds),
+                "out_seconds": float(out_seconds),
+            }
+        )
+        cue_index += 1
+    return cues
+
+
+__all__ = ["build_auto_subtitles_snapshot", "compose_subtitle_segments"]

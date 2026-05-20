@@ -5,6 +5,93 @@
 
 ---
 
+# force_render_on_every_webhook (Claude implementer)
+
+- **Feature en curso:** force_render_on_every_webhook — cada webhook de ingest dispara render incondicional.
+- **Inicio:** 2026-05-19
+- **Agente:** Claude (rol implementer lanzado por leader)
+- **Toca schema?:** No (cambio de política en el use case + tests).
+- **Modulos afectados:** `modules/reels/application/use_cases/ingest_property_into_reel.py`, `tests/unit/reels/test_ingest_property_into_reel.py`, `tests/integration/reels/` (test focal nuevo).
+
+## Plan
+- Forzar `requires_render = True` en `IngestPropertyIntoReelUseCase.execute` manteniendo el cálculo de `content_changed` solo para el log "Content changed: yes/no".
+- Renombrar `test_execute_is_noop_when_state_unchanged_and_artifacts_present` -> `test_execute_always_requires_render_even_when_state_unchanged` y ajustar asserciones (`requires_render is True`, `is_noop is False`, save fires).
+- Añadir test focal de integracion (`test_webhook_ingest_always_requires_render`) que re-ingesta el mismo property dos veces contra Postgres y exige `context.requires_render is True` en la segunda llamada.
+- No tocar `regenerate_reel.py` ni el orquestador; el cambio es puntual a la ingest policy.
+
+## Bitacora
+- 2026-05-19: arranque. Leida la zona 380-498 de `ingest_property_into_reel.py` y los tests con asserciones de `requires_render`/`is_noop`.
+- 2026-05-19: aplicado `requires_render = True` en `ingest_property_into_reel.py:422` con comentario de politica. Mantenidos `existing_snapshot_text`, `content_changed`, `has_local_artifacts` para el log "Property Ingest Decision".
+- 2026-05-19: renombrado `test_execute_is_noop_when_state_unchanged_and_artifacts_present` -> `test_execute_always_requires_render_even_when_state_unchanged`; asserciones nuevas `requires_render is True`, `is_noop is False`, `len(states.saved) == 1`.
+- 2026-05-19: añadido `tests/integration/reels/test_webhook_ingest_always_renders.py::test_webhook_ingest_always_requires_render` (doble ingest sobre Postgres real, ambos `requires_render=True` con mismo `content_fingerprint`).
+- 2026-05-19: focales `tests/unit/reels/test_ingest_property_into_reel.py + tests/integration/reels/test_ingest_property_into_reel_flow.py + test_webhook_ingest_always_renders.py` → 6 passed in 4.08s.
+- 2026-05-19: suite reels (`tests/unit/reels/ tests/integration/reels/`) → 242 passed in 220.41s.
+- 2026-05-19: `apps.api --check` y `apps.worker --check` verdes.
+- 2026-05-19: `bash ./init.sh` exit 0; 3 fallos baseline historicos (`test_http_surface_contract.py` + 2× `test_http_transport.py`), `1117 passed, 1 deselected, 14 warnings` (= 1116 baseline previo + 1 nuevo test focal).
+- 2026-05-19: Informe `progress/impl_force_render_on_every_webhook.md` escrito. Revision pendiente.
+
+---
+
+# Century 21 polish v3 (Claude implementer)
+
+- **Inicio:** 2026-05-19
+- **Agente:** Claude (implementer)
+- **Toca schema?:** No.
+- **Modulos afectados:** `modules/rendering/infrastructure/preparation.py`, `modules/rendering/infrastructure/ffmpeg/filters.py`, `modules/rendering/infrastructure/layout/panels.py`, `tests/unit/rendering/`.
+
+## Plan
+- Cambio 1: ribbon vertical galaxy `body_height` -> `max(360, round(H*0.288))` (-20%).
+- Cambio 2: logo header galaxy `logo_x = top_panel.x + round(W*0.520)` (antes `0.558`).
+- Cambio 3: address header galaxy permite 2 lineas; `header_text_width` factor galaxy 0.54 -> 0.460; comentario actualizado.
+- Tests asociados modificados/anadidos. Sin tocar classic/side_banner.
+
+## Bitacora
+- 2026-05-19: arranque polish v3 sobre HEAD limpio (commit `66875ac`).
+- 2026-05-19: cambio 1 (ribbon -20%) en `preparation.py::_resolve_vertical_banner_layout` rama galaxy; test renombrado en `test_preparation_galaxy_ribbon.py`.
+- 2026-05-19: cambio 2 (logo_x 0.558 -> 0.520) en `filters.py::_append_galaxy_header_logo_overlay`; test focal en `test_overlay_filter_accent_colors.py` actualizado a `overlay=x=580:y=95`.
+- 2026-05-19: cambio 3 (`address` max_lines=2 + `header_text_width = round(W*0.460)` solo galaxy) en `panels.py::compose_top_panel`; tests modificados/anadidos en `test_layout_composition_galaxy.py` incluyendo guard geometrico texto/logo y regresion classic/side_banner.
+- 2026-05-19: focales verdes: `pytest -q tests/unit/rendering` 183 passed; `pytest -q tests/integration/rendering` 60 passed; subset `classic_filter_graph_matches_pinned_snapshot or side_banner` 38 passed.
+- 2026-05-19: `bash ./init.sh` exit 0; 3 fallos baseline historico (`test_http_surface_contract.py` + 2x `test_http_transport.py`), 1115 passed (= 1110 v2 + 5 nuevos), 1 deselected, 14 warnings.
+- 2026-05-19: Informe `progress/impl_century21_polish_v3.md` escrito. Revision pendiente.
+
+
+- **Inicio:** 2026-05-18
+- **Agente:** Codex
+- **Modulos afectados:** `modules/rendering/infrastructure/layout/`, `modules/rendering/infrastructure/ffmpeg/`, `modules/rendering/infrastructure/preparation.py`, `tests/unit/rendering/`
+- **Toca schema?:** No
+
+## Plan
+- Ajustar la geometria de Galaxy contra `example-template-galaxy.png`.
+- Añadir barra vertical e iconos de contacto en el footer.
+- Pintar el nombre del agente con el color secundario de marca.
+- Iterar con `tests/integration/rendering/test_galaxy_iter.py -m visual_iter`.
+
+## Bitacora
+- 2026-05-18: `./init.sh` falla por falta de bit ejecutable (`Permission denied`); validacion lanzada con `bash ./init.sh`.
+- 2026-05-18: Detectado arbol sucio con cambios previos de features 41/42/Galaxy; el hotfix trabaja sobre esos archivos sin revertir cambios existentes.
+- 2026-05-18: Ajustada geometria Galaxy contra `example-template-galaxy.png`: header ancho, footer alto, avatar grande, foto full-bleed en poster y ribbon con proporciones de referencia.
+- 2026-05-18: Añadidos barra vertical, iconos de telefono/email dibujados con `drawbox` y nombre de agente en `side_banner_ribbon_background_color` (secundario).
+- 2026-05-18: Generadas iteraciones visuales `progress/galaxy_iter_4.png` y `progress/galaxy_iter_5.png`; la 5 es la referencia actual del hotfix.
+- 2026-05-18: `bash ./init.sh` final exit 0; mantiene 3 fallos de baseline ya existentes (`test_http_surface_contract.py` y 2 en `test_http_transport.py`): 3 failed, 1094 passed, 1 deselected, 14 warnings. El arnes imprime entorno listo.
+- 2026-05-18: Focalizados finales verdes: `test_layout_composition_galaxy.py`, `test_filters_galaxy_radius.py`, `test_overlay_filter_accent_colors.py`, `test_galaxy_render.py`, `test_galaxy_iter.py -m "not visual_iter"` (34 passed, 1 deselected); `git diff --check` y `py_compile` verdes.
+- 2026-05-19: Usuario pide nueva iteracion contra `example-template-galaxy.png`: header aun distinto y phone/email icons del footer deben verse en color secundario.
+- 2026-05-19: Validacion inicial con `bash ./init.sh` exit 0; mantiene 3 fallos baseline historicos (`test_http_surface_contract.py` y 2 en `test_http_transport.py`): 3 failed, 1095 passed, 1 deselected, 14 warnings. `./init.sh` directo sigue fallando por bit ejecutable ausente.
+- 2026-05-19: Iteracion 7: header Galaxy omite BER y dibuja marca `C21` en color secundario; footer usa separador/iconos telefono/email en secundario puro, avatar/footer reposicionados mas cerca de la referencia. Corregido `build_filter_complex` para no crear stream BER desconectado en Galaxy.
+- 2026-05-19: Promovido `progress/galaxy_iter_7.png` a `assets/render-templates/galaxy-template.png`.
+- 2026-05-19: Verificacion final: focales Galaxy/filtros/render verdes (36 passed, 1 deselected), `git diff --check` verde, `py_compile` verde, `bash ./init.sh` exit 0 con baseline historico (3 failed, 1097 passed, 1 deselected, 14 warnings; arnes imprime entorno listo).
+- 2026-05-19: Reinicio solicitado por usuario aplicado en test: `sudo systemctl restart reels-test.service` no disponible por password, se relanza manualmente con `setsid`. API :8001 PID `780857`, worker PID `780858`; health `{"status":"ready","dispatcher_accepting_jobs":true,"configured_worker_count":1}`.
+- 2026-05-19: Nueva iteracion pedida por usuario: renombrar plantilla a `Century 21`, usar el PNG real `C21_Seal_OG_1C_Top_Crop_GoldTexture.png` en el header y reemplazar iconos deformes por assets descargados.
+- 2026-05-19: Copiado el logo a `assets/render-templates/century21/header-logo.png`; descargados SVGs oficiales de Lucide para phone/mail y rasterizados a PNG en `assets/render-templates/century21/`.
+- 2026-05-19: Añadida migracion de datos `20260519_0001_rename_galaxy_template_century21.py`; `template_id`/`layout_variant` siguen siendo `galaxy` para compatibilidad, display name queda `Century 21`.
+- 2026-05-19: Iteraciones visuales 8/9: 8 valida assets reales pero logo grande; 9 reduce y posiciona el logo cerca de la referencia. Promovido `progress/galaxy_iter_9.png` a `assets/render-templates/galaxy-template.png`.
+- 2026-05-19: Verificacion: focales Century21/Galaxy/router/assets verdes (`38 passed, 1 deselected`), `git diff --check` verde, `py_compile` verde, `bash ./init.sh` exit 0 con baseline historico (`3 failed, 1097 passed, 1 deselected, 14 warnings`).
+- 2026-05-19: `alembic upgrade head` aplicado en DB de test (`20260518_0002 -> 20260519_0001`); confirmado `render_templates.galaxy.display_name = 'Century 21'`.
+- 2026-05-19: Reinicio de test aplicado con `setsid` (sin sudo systemd): API :8001 PID `793009`, worker PID `793010`; health `{"status":"ready","dispatcher_accepting_jobs":true,"configured_worker_count":1}`.
+- 2026-05-19: Nueva peticion: hacer mas pequeno el logo del header y forzar la direccion Galaxy/Century 21 a una sola linea aunque se trunque.
+- 2026-05-19: Implementado: header logo reducido (`scale=158x173` en 1054x1492), direccion Galaxy medida con `max_lines=1` para truncar en vez de envolver. `progress/galaxy_iter_10.png` generado y promovido a `assets/render-templates/galaxy-template.png`.
+- 2026-05-19: Verificacion final: focales Century21/Galaxy verdes (`39 passed, 1 deselected`), `git diff --check` verde, `py_compile` verde, `bash ./init.sh` exit 0 con baseline historico (`3 failed, 1098 passed, 1 deselected, 14 warnings`).
+- 2026-05-19: Reinicio de test aplicado con `setsid`: API :8001 PID `803571`, worker PID `803572`; health `{"status":"ready","dispatcher_accepting_jobs":true,"configured_worker_count":1}`.
+
 # Feature 39 — test_reels_list_ordering_guard (Claude implementer)
 
 - **Inicio:** 2026-05-16
@@ -626,3 +713,29 @@ Decisiones del usuario (vía `AskUserQuestion`):
 
 - 2026-05-16: feature 40 lista para review; reporte en `progress/impl_40.md`. `bash ./init.sh` exit 0 (mismos 3 fallos de baseline; **1050 passed = 1042 + 8 nuevos**). `apps.api --check` + `apps.worker --check` verdes. Use case `RegenerateReelUseCase.execute` extendido con `mode: Literal['approve_and_regenerate','manual_only'] = 'approve_and_regenerate'` (default preserva approve handler) + `manual_reason: str | None`. Dos excepciones nuevas: `RegeneratePublishedForbidden` (code `REGENERATE_PUBLISHED_FORBIDDEN`) y `RegenerateAlreadyInFlight` (code `REGENERATE_ALREADY_IN_FLIGHT`). Endpoint nuevo `POST /v1/admin/agencies/{agency_id}/reels/{site_id}/{source_property_id}/regenerate`. 8 tests integration nuevos (`tests/integration/reels/test_regenerate_reel_manual.py`). Estado en `feature_list.json`: `in_progress`. No marcado `done`; espera reviewer.
 - 2026-05-16: Review feature 40 (back) APPROVED — ver `progress/review_40.md`. Auditoría per-decision OK (HTTP contract literal verificado; `mode='manual_only'` no muta workflow/publish state; 2 excepciones → 409; conflict pre-check via `find_active_job_for_property` reusado; sin schema). Divergencia 409 body-shape vs feature 35 confirmada pero front-compatible (`RegenerateReelButton.jsx:58-67` lee `body.error` como discriminator, mismo shape que el back emite). Re-run de `./init.sh` reproducido en 1050 passed + 3 known-flaky de baseline. Estado en `feature_list.json` → `done`. Doc-debt (`docs/API.md` + `docs/http_surface.md` + `docs/openapi.json`) diferido a follow-up dedicado (no bloqueante).
+
+---
+
+# Feature 41 — auto_subtitles_snapshot_for_editor (Claude implementer)
+
+- **Inicio:** 2026-05-17
+- **Agente:** Claude (rol implementer lanzado por leader)
+- **Toca schema?:** Sí — nueva columna `reels.auto_subtitles_snapshot JSONB NULL`; migración `20260517_0001_reels_auto_subtitles_snapshot.py` encadenada tras `20260515_0005`.
+- **Modulos afectados:** `alembic/versions/20260517_0001_reels_auto_subtitles_snapshot.py`, `shared/db/orm.py`, `modules/reels/{domain,application,infrastructure,transport}/`, `modules/rendering/application/frame_composition.py`, `tests/integration/reels/test_auto_subtitles_snapshot.py`, `tests/integration/rendering/test_render_persists_auto_subtitles.py`.
+
+## Plan
+
+- Replicar el 6-point pattern de features 35/36/37 (con `auto_subtitles_snapshot`):
+  1. Migración 20260517_0001 añade `reels.auto_subtitles_snapshot JSONB NULL`.
+  2. `ReelORM.auto_subtitles_snapshot` mapped JSONB nullable en `shared/db/orm.py`.
+  3. `ReelState.auto_subtitles_snapshot: list[dict] | None = None`.
+  4. `reel_state_repository.py`: extender `_REEL_COLUMNS` + INSERT + ON CONFLICT + bind + helpers `update_publish_status/update_workflow_state/save_local_artifacts` para que no clobereen el snapshot al guardar.
+  5. `_build_ingested_reel_state` propaga `state.auto_subtitles_snapshot`.
+  6. Render path: la renderer computa los cues autoCaptions a partir de `slides + slide_duration + intro` y los persiste en `auto_subtitles_snapshot` cuando `subtitles_override is None`. La persistencia ocurre en `PersistLocalArtifactsUseCase._persist_with_uow` (mismo lugar donde se guarda `save_local_artifacts`), recibiendo los cues vía un nuevo campo en `RenderedMediaArtifact`.
+- Transport: nuevo campo `publish_subtitles_snapshot: list[dict] | None = None` en `AgencyReelItemPayload` + `_serialize_agency_reel` lee la columna a través de `AgencyReelSummary.auto_subtitles_snapshot` (SELECT extendido en `ReelQuery.list_recent_for_agency`).
+- Tests: integration auto-snapshot survives + GET response + render persists; render integration que mockea Gemini caption generator.
+
+## Bitacora
+
+- 2026-05-17: feature 41 lista para review; reporte en `progress/impl_41.md`. `bash ./init.sh` exit 0 (mismos 3 fallos de baseline; **1063 passed = 1050 + 13 nuevos** — 7 integration auto-snapshot + 6 integration render-persist). `apps.api --check` + `apps.worker --check` verdes. Migración `20260517_0001_reels_auto_subtitles_snapshot` round-trip clean (up/down/up; head = `20260517_0001`). 6-point pattern aplicado en su totalidad (incluyendo `_UNSET` sentinel en `save_local_artifacts` para preservar el snapshot cuando el render consume el override). Front no requiere cambios (lee `publishSubtitlesSnapshot` desde feature 36). Estado en `feature_list.json`: `in_progress`. No marcado `done`; espera reviewer.
+- 2026-05-17: Review feature 41 (back) APPROVED — ver `progress/review_41.md`. 6-point audit y per-decision audit OK (todas las file:line verificadas). Sentinel `_UNSET` + `existing.auto_subtitles_snapshot` forward en los 3 helpers preserva el snapshot bajo cualquier path de re-save. Test `test_persist_local_artifacts_preserves_existing_snapshot_when_artifact_has_none` prueba end-to-end la preservación bajo override-set render. Re-run de `./init.sh` reproducido en **1063 passed + 3 known-flaky** de baseline. Migración round-trip `up/down/up` clean sobre BBDD limpia (reset previo necesario por drift FK `render_templates ↔ agency_reel_defaults` en migraciones anteriores, no relacionado con feature 41). Estado en `feature_list.json` → `done`. Follow-ups no-bloqueantes anotados: (a) front `hooks.js:147` necesita mapear el nuevo campo top-level `publish_subtitles_snapshot` (hoy lee del histórico `publish_target_snapshot.subtitles`); (b) docstring de `build_auto_subtitles_snapshot` contradice la implementación (dice "raw" pero el helper normaliza el caption); ambos para features dedicadas si producto las prioriza.

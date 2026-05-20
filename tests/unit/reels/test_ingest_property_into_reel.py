@@ -141,7 +141,19 @@ def test_execute_persists_state_and_returns_context_for_fresh_property(tmp_path:
     assert context.content_fingerprint  # non-empty hash.
 
 
-def test_execute_is_noop_when_state_unchanged_and_artifacts_present(tmp_path: Path) -> None:
+def test_execute_always_requires_render_even_when_state_unchanged(tmp_path: Path) -> None:
+    """Política 2026-05-19: cada webhook de ingest dispara render.
+
+    Antes del cambio, cuando un re-ingest llegaba con el mismo
+    ``content_fingerprint`` y los artefactos locales seguían en disco,
+    el use case devolvía ``requires_render=False`` y ``is_noop=True``,
+    activando el fast-path ``EXISTING MEDIA PUBLISH`` del orquestador.
+    Ese fast-path quedaba ciego a cambios de brand/subtitle overrides
+    (no incluidos en el fingerprint), así que la pipeline reutilizaba
+    artefactos stale. Ahora el ingest fuerza ``requires_render=True``
+    incondicionalmente y deja al orchestador re-renderizar siempre.
+    """
+
     # Run once to discover the fingerprints + snapshot the use case would produce.
     discovery_states = _StubReelStates(existing=None)
     discovery_properties = _StubProperties()
@@ -154,7 +166,9 @@ def test_execute_is_noop_when_state_unchanged_and_artifacts_present(tmp_path: Pa
     ).execute(_build_job(), uow=discovery_uow)
 
     # Now seed an existing state that matches the snapshot/fingerprint and
-    # has artifacts on disk so `_has_local_artifacts` returns True.
+    # has artifacts on disk so `_has_local_artifacts` returns True. Under
+    # the legacy policy this combo was the trigger for the fast-path; the
+    # new policy must ignore it and still require a render.
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
     media_file = artifact_dir / "reel.mp4"
@@ -204,10 +218,14 @@ def test_execute_is_noop_when_state_unchanged_and_artifacts_present(tmp_path: Pa
     )
     context = use_case.execute(_build_job(), uow=uow)
 
-    assert context.is_noop is True
-    assert context.requires_render is False
-    # No save should fire on a noop run.
-    assert states.saved == []
+    # New policy: a webhook always requires a render, even when the
+    # snapshot+fingerprint match the seeded row byte-for-byte.
+    assert context.requires_render is True
+    assert context.is_noop is False
+    # Because the run is not a noop, the use case must persist the
+    # ingested state again (workflow goes back through the render path).
+    assert len(states.saved) == 1
+    assert states.saved[0].workflow_state == "ingested"
 
 
 def test_execute_content_fingerprint_changes_with_render_template(tmp_path: Path) -> None:

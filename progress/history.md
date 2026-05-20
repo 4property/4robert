@@ -962,3 +962,40 @@ se limpiara en una feature futura aparte si procede).
 - **Desviaciones aceptadas:** (1) `mark_status` genérico en `OutboxRepository` en vez de transición ad-hoc por estado — soporta `processing/dispatched/failed` con la misma firma; (2) **Workaround `webhook_events` sintético** con `source_kind='notification'`: el dispatcher inserta una fila previa al `enqueue_job(email_send)` porque el runtime del worker (`JobDispatcher._process_next_job`) hace `update_event_status(event_id)` sobre `webhook_events`. Verificado que ninguna query filtra por `source_kind`, así que no rompe semánticas. Refactor (desacoplar `webhook_events` del runtime) marcado como follow-up no bloqueante; (3) `property_title/property_address` se resuelven en el dispatcher desde `properties.raw_json` (fallback a payload outbox) porque `publish_reel.py` no incluye esos campos en `_build_workflow_payload` y la feature acordó NO tocar el publisher.
 - **Documentos:** progress/impl_27_email_notification_review_requested.md, progress/review_27_email_notification_review_requested.md, progress/design_email_notifications_and_brand_customisation.md §A+§D.
 - **Cross-repo:** Cierra el pipeline email completo end-to-end. (a) **back #26** done previa — infra `shared/email/` + tabla + repo. (b) **back #27** done con este cierre — subscriber + handler + templates. (c) **front #26** (chip editor multi-email en `/automation`) cerrado autónomamente por el equipo front; ya manda `list[str]` y `normalise_review_emails` mantiene backward compat con CSV legacy. Flujo activo tras restart del :8001: `publish_reel(approval_required) → outbox.review_requested → OutboxSubscriber → DispatchReviewRequestedEmailUseCase → email_notifications×N pending + 1 job email_send → SendEmailJobHandler → EmailSender.send → mark_sent×N`. Próximas features email (publish_completed, etc.) reutilizan el subscriber con un `register_handler` adicional.
+
+## 2026-05-18 — feature 42 galaxy_render_template
+
+# Feature 42 — galaxy_render_template (Claude leader, en curso)
+
+- **Inicio:** 2026-05-18
+- **Agente:** Claude (rol leader; ningún subagente lanzado todavía)
+- **Toca schema?:** No (data-model intacto; reutiliza cascades side_banner_panel_color + side_banner_ribbon_background_color + accent_*).
+- **Modulos afectados:** `modules/rendering/infrastructure/{render_template_settings.py, layout/panels.py, layout/composition.py, ffmpeg/filters.py, preparation.py}`, `alembic/versions/20260518_0001*.py` + `20260518_0002*.py`, `assets/render-templates/galaxy-template.png`, `tests/{unit,integration}/rendering/`, `tests/integration/configuration/test_render_templates_router.py`, `tests/integration/apps_api/test_render_template_assets.py`.
+
+## Plan
+
+- **Referencia visual**: `example-template-galaxy.png` (1054×1492, portrait).
+- **Decisiones del usuario (este turno)**:
+  - El círculo central con el logo grande (visible en la referencia) se omite en v1.
+  - Colores/parámetros del template son modificables verbatim igual que side_banner — cero data-model nuevo.
+- **Baseline init.sh antes de delegar**: 3 failed (test_http_surface_contract.py + 2 en test_http_transport.py — históricos), 1063 passed, exit 0.
+- **Exploradores ya escritos**:
+  - `progress/explore_galaxy_arch.md` — geometría side_banner end-to-end (panels.py, filters.py, preparation.py).
+  - `progress/explore_galaxy_seed.md` — schema render_templates, repo, router, app_factory mount, cadena Alembic (HEAD = 20260517_0001).
+  - `progress/explore_galaxy_preview.md` — rig de iteración con `generate_property_poster_from_data(..., layout_variant='galaxy')` (~5s por frame, escrito a `progress/galaxy_iter_<N>.png`).
+- **Próximo paso**: dispatch implementer iteración 1 (un solo Agent call); el implementer escribe código + tests + migraciones + un PNG iter_1. Yo (leader) comparo visualmente contra `example-template-galaxy.png` y decido si re-iterar antes de lanzar reviewer.
+
+## Bitacora
+
+- 2026-05-18: 3 exploradores lanzados en paralelo (Explore subagent). Uno volcó contenido en chat sin file → leader lo persistió a `progress/explore_galaxy_arch.md`. Otro escribió a `/tmp` → leader lo movió a `progress/`.
+- 2026-05-18: Feature 42 abierta en `feature_list.json` con status `pending`. Total features = 39.
+- 2026-05-18 14:35: Implementer arranca. Status `pending` → `in_progress`.
+- 2026-05-18 14:46: Implementer cierra iteración 1. Reporte en `progress/impl_42.md`. `progress/galaxy_iter_1.png` (1054×1492) generado vía rig visual. `bash ./init.sh` exit 0 con 1087 passed + 3 baseline failed + 1 deselected (visual_iter). Status sigue `in_progress`; el reviewer lo marca `done` tras validar y decidir si promover el iter_1 PNG como asset preview o pedir iteración 2.
+- 2026-05-18 15:14: Implementer iter 2 cierra (sección "Iter 2" en `progress/impl_42.md`). Footer ancla a `frame_bottom - bottom_margin`; helper `_resolve_galaxy_panel_radius` (floor `max(24, round(h*0.020))`). `progress/galaxy_iter_2.png` generado. `bash ./init.sh` exit 0 con 1090 passed + 3 baseline failed.
+- 2026-05-18 15:30: Implementer iter 3 arranca. Plan acotado:
+  1. `panels.py compose_bottom_panel`: elevar floor `bottom_panel_height` galaxy de `max(round(h*0.113), …)` a `max(round(h*0.150), …)` (~224 px @ 1492); recalcular `bottom_panel.y` con la nueva altura conservando la fórmula iter 2 (`y = frame_height - bottom_panel_height - max(20, round(h*0.018))`).
+  2. `panels.py bottom_font_bounds`: bumpear bounds galaxy para `agent_name` (max 32, round h*0.022 / min 26) y `agent_phone|agent_email|agency_psra` (max 26, round h*0.017 / min 22). Side_banner conserva sus bounds; se diferencia vía un flag `is_galaxy`.
+  3. Actualizar tests galaxy con la nueva fórmula + comentario `# iter 3: chunky footer + bigger agent text`. No tocar side_banner ni classic.
+  4. Generar `progress/galaxy_iter_3.png` vía rig visual.
+  5. Verificación focal galaxy + regression side_banner + `bash ./init.sh`.
+- 2026-05-18 15:44: Implementer iter 3 cierra (sección "Iter 3" en `progress/impl_42.md`). Cambios: `panels.py` desdobla `bottom_font_bounds` y `bottom_panel_height` por variant (galaxy vs side_banner) sin helper nuevo. Tests galaxy +3 nuevos + 1 assert nuevo (chunky footer + bigger agent text + low-res floor). `progress/galaxy_iter_3.png` generado: footer claramente chunky, agent_name visiblemente bolder que contact rows. `bash ./init.sh` exit 0 con **1093 passed** + 3 baseline failed + 1 deselected. Side_banner / classic regression verde (38 passed). Status sigue `in_progress`; el reviewer decide si promover el iter_3 PNG como asset preview o pedir más iteración.

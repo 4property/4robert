@@ -41,6 +41,9 @@ from modules.rendering.infrastructure.ffmpeg import (
 )
 from modules.rendering.infrastructure.ffmpeg.intro_concat import concat_intro_to_reel
 from modules.rendering.infrastructure.ffmpeg.outro_concat import concat_outro_to_reel
+from modules.rendering.infrastructure.layout.subtitles import (
+    build_auto_subtitles_snapshot,
+)
 from modules.rendering.infrastructure.manifest import write_property_reel_manifest_from_data
 from modules.rendering.infrastructure.models import PropertyRenderData, SubtitleStyle
 from modules.rendering.infrastructure.poster import generate_property_poster_from_data
@@ -208,6 +211,35 @@ class DefaultMediaRenderer:
             template=poster_template,
             layout_variant=layout_variant,
         )
+        # Feature 41: snapshot the autoCaptions cues so the editor
+        # (feature 36) has a starting value the next time a user opens
+        # the subtitle panel. Only compute the snapshot when the reel
+        # is rendering without an override — when ``subtitles_override``
+        # is set, the autoCaptions composer is bypassed entirely and
+        # there are no cues to record. The persistence step
+        # (:class:`PersistLocalArtifactsUseCase`) skips the update when
+        # the artifact carries ``auto_subtitles_snapshot=None``, so the
+        # previously-persisted snapshot stays authoritative on that
+        # branch.
+        auto_subtitles_snapshot: list[dict[str, object]] | None = None
+        if context.subtitles_override is None:
+            try:
+                auto_subtitles_snapshot = build_auto_subtitles_snapshot(
+                    slides=property_render_data.selected_slides,
+                    settings=template,
+                    property_data=property_render_data,
+                    slide_duration=template.seconds_per_slide,
+                )
+            except Exception:  # pragma: no cover — defensive
+                logger.exception(
+                    "Failed to build auto_subtitles_snapshot for "
+                    "site_id=%s property_id=%s; persisting NULL.",
+                    context.site_id,
+                    context.property.id,
+                )
+                auto_subtitles_snapshot = None
+            if not auto_subtitles_snapshot:
+                auto_subtitles_snapshot = None
         logger.info(
             format_console_block(
                 "Reel Render Completed",
@@ -227,6 +259,7 @@ class DefaultMediaRenderer:
             media_path=media_path,
             metadata_path=manifest_path,
             revision_id=revision_id,
+            auto_subtitles_snapshot=auto_subtitles_snapshot,
         )
 
     @staticmethod

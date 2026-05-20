@@ -37,6 +37,12 @@ from modules.rendering.infrastructure.models import (
 )
 from modules.rendering.infrastructure.runtime import resolve_font_path
 
+_APPLICATION_ROOT = Path(__file__).resolve().parents[4]
+_CENTURY21_ASSET_DIR = _APPLICATION_ROOT / "assets" / "render-templates" / "century21"
+_CENTURY21_HEADER_LOGO_PATH = _CENTURY21_ASSET_DIR / "header-logo.png"
+_CENTURY21_PHONE_ICON_PATH = _CENTURY21_ASSET_DIR / "phone.png"
+_CENTURY21_MAIL_ICON_PATH = _CENTURY21_ASSET_DIR / "mail.png"
+
 
 def _split_ffmpeg_color_alpha(color: str) -> tuple[str, int]:
     base_color, separator, alpha_text = color.strip().rpartition("@")
@@ -85,6 +91,208 @@ def _resolve_side_banner_footer_radius(
         panel_height // 2,
         max(12, round(frame_height * 0.0125)),
     )
+
+
+def _resolve_galaxy_panel_radius(
+    *,
+    frame_height: int,
+    panel_width: int,
+    panel_height: int,
+) -> int:
+    """Resolve the shared Galaxy card radius for top and bottom panels."""
+    return min(
+        panel_width // 2,
+        panel_height // 2,
+        max(12, round(frame_height * 0.010)),
+    )
+
+
+def _normalize_hex_draw_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    candidate = candidate.split("@", 1)[0].strip()
+    if candidate.lower().startswith("0x"):
+        candidate = candidate[2:]
+    candidate = candidate.lstrip("#")
+    if len(candidate) == 3 and all(
+        ch in "0123456789abcdefABCDEF" for ch in candidate
+    ):
+        candidate = "".join(ch * 2 for ch in candidate)
+    if len(candidate) != 6 or any(
+        ch not in "0123456789abcdefABCDEF" for ch in candidate
+    ):
+        return None
+    return f"0x{candidate.lower()}"
+
+
+def _normalize_hex_box_color(value: str | None, *, alpha: float) -> str | None:
+    draw_color = _normalize_hex_draw_color(value)
+    if draw_color is None:
+        return None
+    return f"{draw_color}@{max(0.0, min(1.0, alpha)):.2f}"
+
+
+def _resolve_galaxy_secondary_text_color(
+    property_data: PropertyReelData,
+    text_override_color: str | None,
+) -> str:
+    secondary_color = _normalize_hex_draw_color(
+        property_data.side_banner_ribbon_background_color
+    )
+    if secondary_color is not None:
+        return secondary_color
+    return resolve_text_color("agent_name", text_override_color)
+
+
+def _resolve_galaxy_secondary_box_color(
+    property_data: PropertyReelData,
+    text_override_color: str | None,
+) -> str:
+    secondary_color = _normalize_hex_box_color(
+        property_data.side_banner_ribbon_background_color,
+        alpha=0.95,
+    )
+    if secondary_color is not None:
+        return secondary_color
+    fallback_color = _normalize_hex_box_color(text_override_color, alpha=0.95)
+    return fallback_color or "white@0.90"
+
+
+def _append_galaxy_footer_graphics(
+    text_filters: list[str],
+    *,
+    layout: OverlayLayout,
+    property_data: PropertyReelData,
+    text_override_color: str | None,
+) -> None:
+    if layout.bottom_panel is None or not layout.bottom_panel.visible:
+        return
+    accent_color = _resolve_galaxy_secondary_text_color(
+        property_data,
+        text_override_color,
+    )
+    if layout.agent_image_box is not None and layout.agent_image_box.visible:
+        separator_width = max(2, round(layout.frame_width * 0.0025))
+        separator_height = max(96, round(layout.agent_image_box.height * 0.72))
+        separator_x = (
+            layout.agent_image_box.x
+            + layout.agent_image_box.width
+            + max(14, round(layout.frame_width * 0.014))
+        )
+        separator_y = layout.agent_image_box.y + round(
+            (layout.agent_image_box.height - separator_height) / 2
+        )
+        text_filters.append(
+            "drawbox="
+            f"x={separator_x}:y={separator_y}:"
+            f"w={separator_width}:h={separator_height}:"
+            f"color={accent_color}:t=fill"
+        )
+
+
+def _append_static_png_overlay(
+    filters: list[str],
+    *,
+    base_label: str,
+    image_path: Path,
+    label_prefix: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> str:
+    image_source_label = f"{label_prefix}_source"
+    image_overlay_label = f"video_with_{label_prefix}"
+    image_path_escaped = escape_filter_path(image_path)
+    filters.append(
+        f"movie=filename='{image_path_escaped}',format=rgba,"
+        f"scale=w={width}:h={height}"
+        f"[{image_source_label}]"
+    )
+    filters.append(
+        f"[{base_label}][{image_source_label}]"
+        f"overlay=x={x}:y={y}"
+        f"[{image_overlay_label}]"
+    )
+    return image_overlay_label
+
+
+def _append_galaxy_header_logo_overlay(
+    filters: list[str],
+    *,
+    base_label: str,
+    layout: OverlayLayout,
+) -> str:
+    if layout.top_panel is None or not layout.top_panel.visible:
+        return base_label
+    # Century 21 polish v2 (2026-05-19): logo header bumped +50% so the
+    # seal reads from the thumbnail. With the previous 0.073 vertical
+    # anchor and a panel min height of ~0.237*H, the new 0.174*H logo
+    # height overflows the bottom edge of the top panel at 1492 px frame
+    # (e.g. 157+260=417 > panel_bottom=402). We therefore center the
+    # logo vertically inside the top panel so it cannot escape, while
+    # keeping the horizontal anchor at 0.558*W. The result is a logo
+    # ~1.5x bigger that stays inside the card on every supported frame
+    # size.
+    # Century 21 polish v3 (2026-05-19): horizontal anchor shifted
+    # slightly to the left (0.558 -> 0.520) so the seal moves ~3.5% of
+    # the frame width closer to the header text column. Vertical anchor
+    # logic unchanged. The header_text_width factor in
+    # ``compose_top_panel`` was tightened in tandem to 0.460 to keep the
+    # address column clear of the seal.
+    logo_width = max(192, round(layout.frame_width * 0.225))
+    logo_height = max(210, round(layout.frame_height * 0.174))
+    logo_x = layout.top_panel.x + round(layout.frame_width * 0.520)
+    logo_y = layout.top_panel.y + max(0, (layout.top_panel.height - logo_height) // 2)
+    return _append_static_png_overlay(
+        filters,
+        base_label=base_label,
+        image_path=_CENTURY21_HEADER_LOGO_PATH,
+        label_prefix="galaxy_header_logo",
+        x=logo_x,
+        y=logo_y,
+        width=logo_width,
+        height=logo_height,
+    )
+
+
+def _append_galaxy_contact_icon_overlays(
+    filters: list[str],
+    *,
+    base_label: str,
+    layout: OverlayLayout,
+) -> str:
+    current_label = base_label
+    contact_blocks = {
+        block.block: block
+        for block in layout.text_blocks
+        if block.block in {"agent_phone", "agent_email"} and block.visible
+    }
+    for block_name, image_path, label_prefix in (
+        ("agent_phone", _CENTURY21_PHONE_ICON_PATH, "galaxy_phone_icon"),
+        ("agent_email", _CENTURY21_MAIL_ICON_PATH, "galaxy_mail_icon"),
+    ):
+        block = contact_blocks.get(block_name)
+        if block is None:
+            continue
+        icon_slot = max(34, round(layout.frame_width * 0.040))
+        icon_size = max(22, round(block.font_size * 1.04))
+        icon_x = max(0, block.x - icon_slot)
+        icon_y = block.y + max(0, round((block.box_height - icon_size) / 2))
+        current_label = _append_static_png_overlay(
+            filters,
+            base_label=current_label,
+            image_path=image_path,
+            label_prefix=label_prefix,
+            x=icon_x,
+            y=icon_y,
+            width=icon_size,
+            height=icon_size,
+        )
+    return current_label
 
 
 def _build_drawtext_enable_expression(start_time: float, end_time: float) -> str:
@@ -142,16 +350,34 @@ def build_overlay_filter(
     current_base_label = video_input_label
     text_filters: list[str] = []
     if active_layout.bottom_panel is not None and active_layout.bottom_panel.visible:
-        if layout_variant == "side_banner":
-            footer_panel_label = "side_banner_footer_panel"
-            footer_base_label = "video_with_side_banner_footer_panel"
+        if layout_variant in {"side_banner", "galaxy"}:
+            # Feature 16 (side_banner) introduced the rounded footer
+            # card; feature 42 (galaxy) reuses the same helper and the
+            # same radius cascade so the bottom panel keeps a soft
+            # corner profile against the full-bleed photo. The top
+            # panel is rounded in a separate block below (galaxy only).
+            footer_panel_label = (
+                "side_banner_footer_panel"
+                if layout_variant == "side_banner"
+                else "galaxy_footer_panel"
+            )
+            footer_base_label = (
+                "video_with_side_banner_footer_panel"
+                if layout_variant == "side_banner"
+                else "video_with_galaxy_footer_panel"
+            )
+            footer_radius_resolver = (
+                _resolve_galaxy_panel_radius
+                if layout_variant == "galaxy"
+                else _resolve_side_banner_footer_radius
+            )
             filters.append(
                 _build_rounded_panel_source(
                     label=footer_panel_label,
                     color=resolved_bottom_panel_color,
                     width=active_layout.bottom_panel.width,
                     height=active_layout.bottom_panel.height,
-                    radius=_resolve_side_banner_footer_radius(
+                    radius=footer_radius_resolver(
                         frame_height=settings.height,
                         panel_width=active_layout.bottom_panel.width,
                         panel_height=active_layout.bottom_panel.height,
@@ -175,24 +401,91 @@ def build_overlay_filter(
                 )
             )
     if active_layout.top_panel is not None and active_layout.top_panel.visible:
-        text_filters.append(
-            (
-                f"drawbox=x={active_layout.top_panel.x}:y={active_layout.top_panel.y}:"
-                f"w={active_layout.top_panel.width}:h={active_layout.top_panel.height}:"
-                f"color={resolved_top_panel_color}:t=fill"
+        if layout_variant == "galaxy":
+            # Feature 42: galaxy rounds BOTH the top and bottom panels
+            # (side_banner only rounds the bottom). Same radius helper
+            # as the footer so the card has a consistent corner
+            # profile, drawn as a separate overlay so the rounded
+            # corners blend with the underlying photo alpha.
+            top_panel_label = "galaxy_top_panel"
+            top_base_label = "video_with_galaxy_top_panel"
+            filters.append(
+                _build_rounded_panel_source(
+                    label=top_panel_label,
+                    color=resolved_top_panel_color,
+                    width=active_layout.top_panel.width,
+                    height=active_layout.top_panel.height,
+                    radius=_resolve_galaxy_panel_radius(
+                        frame_height=settings.height,
+                        panel_width=active_layout.top_panel.width,
+                        panel_height=active_layout.top_panel.height,
+                    ),
+                )
             )
+            filters.append(
+                (
+                    f"[{current_base_label}][{top_panel_label}]"
+                    f"overlay=x={active_layout.top_panel.x}:y={active_layout.top_panel.y}"
+                    f"[{top_base_label}]"
+                )
+            )
+            current_base_label = top_base_label
+        else:
+            text_filters.append(
+                (
+                    f"drawbox=x={active_layout.top_panel.x}:y={active_layout.top_panel.y}:"
+                    f"w={active_layout.top_panel.width}:h={active_layout.top_panel.height}:"
+                    f"color={resolved_top_panel_color}:t=fill"
+                )
+            )
+
+    galaxy_secondary_text_color = (
+        _resolve_galaxy_secondary_text_color(property_data, text_override_color)
+        if layout_variant == "galaxy"
+        else None
+    )
+    if layout_variant == "galaxy":
+        current_base_label = _append_galaxy_header_logo_overlay(
+            filters,
+            base_label=current_base_label,
+            layout=active_layout,
+        )
+        current_base_label = _append_galaxy_contact_icon_overlays(
+            filters,
+            base_label=current_base_label,
+            layout=active_layout,
+        )
+        _append_galaxy_footer_graphics(
+            text_filters,
+            layout=active_layout,
+            property_data=property_data,
+            text_override_color=text_override_color,
         )
 
+    # Century 21 polish v2 (2026-05-19): galaxy renders the "OFFERS
+    # OVER:" status block in the regular weight so the price below it
+    # reads as the heavier element. Classic and side_banner keep the
+    # historical bold cascade for status/price/agent_name.
+    galaxy_bold_blocks = {"price", "agent_name"}
+    default_bold_blocks = {"status", "price", "agent_name"}
+    bold_blocks = (
+        galaxy_bold_blocks if layout_variant == "galaxy" else default_bold_blocks
+    )
     for block in active_layout.text_blocks:
         if not block.visible:
             continue
-        font_file = bold_font_path if block.block in {"status", "price", "agent_name"} else font_path
+        font_file = bold_font_path if block.block in bold_blocks else font_path
+        font_color = (
+            galaxy_secondary_text_color
+            if block.block == "agent_name" and galaxy_secondary_text_color is not None
+            else resolve_text_color(block.block, text_override_color)
+        )
         for index, line in enumerate(block.lines):
             text_filters.append(
                 "drawtext="
                 f"fontfile='{font_file}':"
                 f"text='{escape_drawtext_text(line)}':"
-                f"fontcolor={resolve_text_color(block.block, text_override_color)}:fontsize={block.font_size}:"
+                f"fontcolor={font_color}:fontsize={block.font_size}:"
                 f"x={block.x}:y={block.y + index * block.line_gap}:"
                 "fix_bounds=1"
             )
@@ -434,7 +727,12 @@ def build_filter_complex(
         f"{build_contained_image_filter(agent_image_size, agent_image_size, pixel_format='rgba')}"
         "[agent_panel_image]"
     )
-    if ber_icon_input_index is not None:
+    render_ber_icon = (
+        ber_icon_input_index is not None
+        and overlay_layout.ber_badge_box is not None
+        and overlay_layout.ber_badge_box.visible
+    )
+    if render_ber_icon:
         ber_height = (
             overlay_layout.ber_badge_box.height
             if overlay_layout.ber_badge_box is not None and overlay_layout.ber_badge_box.visible
@@ -539,7 +837,7 @@ def build_filter_complex(
                 and overlay_layout.agency_logo_box.visible
                 else None
             ),
-            ber_icon_label="ber_header_icon" if ber_icon_input_index is not None else None,
+            ber_icon_label="ber_header_icon" if render_ber_icon else None,
             output_label="vout",
             layout=overlay_layout,
             layout_variant=layout_variant,

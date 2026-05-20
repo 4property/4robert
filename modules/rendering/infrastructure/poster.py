@@ -145,7 +145,7 @@ def generate_property_poster_from_data(
             next_input_index += 1
         vertical_banner_input_index: int | None = None
         if (
-            layout_variant == "side_banner"
+            layout_variant in {"side_banner", "galaxy"}
             and prepared_assets.vertical_banner_path is not None
         ):
             vertical_banner_input_index = next_input_index
@@ -367,22 +367,30 @@ def _build_poster_filter_script(
         else resolve_ber_icon_size(settings)
     )
 
-    filter_parts = [
-        (
-            f"[0:v]scale=w={settings.width}:h={settings.height}:force_original_aspect_ratio=increase,"
-            f"crop={settings.width}:{settings.height},boxblur={POSTER_BACKGROUND_BLUR_RADIUS}:{POSTER_BACKGROUND_BLUR_POWER},"
-            "format=yuv420p,setsar=1[poster_blurred_background]"
-        ),
-        (
-            f"[0:v]scale=w={photo_box.width}:h={photo_box.height}:force_original_aspect_ratio=decrease,"
-            "format=rgba,setsar=1[poster_photo]"
-        ),
-        (
-            "[poster_blurred_background][poster_photo]"
-            f"overlay=x={photo_box.x}+floor(({photo_box.width}-w)/2):"
-            f"y={photo_box.y}+floor(({photo_box.height}-h)/2)[poster_base]"
-        ),
-    ]
+    if layout_variant == "galaxy":
+        filter_parts = [
+            (
+                f"[0:v]scale=w={settings.width}:h={settings.height}:force_original_aspect_ratio=increase,"
+                f"crop={settings.width}:{settings.height},format=yuv420p,setsar=1[poster_base]"
+            )
+        ]
+    else:
+        filter_parts = [
+            (
+                f"[0:v]scale=w={settings.width}:h={settings.height}:force_original_aspect_ratio=increase,"
+                f"crop={settings.width}:{settings.height},boxblur={POSTER_BACKGROUND_BLUR_RADIUS}:{POSTER_BACKGROUND_BLUR_POWER},"
+                "format=yuv420p,setsar=1[poster_blurred_background]"
+            ),
+            (
+                f"[0:v]scale=w={photo_box.width}:h={photo_box.height}:force_original_aspect_ratio=decrease,"
+                "format=rgba,setsar=1[poster_photo]"
+            ),
+            (
+                "[poster_blurred_background][poster_photo]"
+                f"overlay=x={photo_box.x}+floor(({photo_box.width}-w)/2):"
+                f"y={photo_box.y}+floor(({photo_box.height}-h)/2)[poster_base]"
+            ),
+        ]
     if overlay_layout.agent_image_box is not None and overlay_layout.agent_image_box.visible:
         filter_parts.append(
 <<<<<<< HEAD
@@ -427,18 +435,21 @@ def _build_poster_filter_script(
     # consulted — colour now comes from the agency brand row only.
     # Classic layout keeps the historical ``black@0.38`` /
     # ``black@0.46`` defaults from ``build_overlay_filter``.
+    # Feature 42: galaxy reuses the side_banner panel cascade verbatim
+    # so the rounded top + bottom cards stay aligned with the agency
+    # brand primary across both full-bleed variants.
     poster_panel_color = (
         apply_alpha_to_hex(
             property_data.side_banner_panel_color
             or _SIDE_BANNER_PANEL_DEFAULT,
             alpha=0.55,
         )
-        if layout_variant == "side_banner"
+        if layout_variant in {"side_banner", "galaxy"}
         else None
     )
     poster_text_override = (
         property_data.accent_text_color
-        if layout_variant == "side_banner"
+        if layout_variant in {"side_banner", "galaxy"}
         else None
     )
     vertical_banner_label: str | None = None

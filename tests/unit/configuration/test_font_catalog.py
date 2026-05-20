@@ -9,7 +9,7 @@ import pytest
 from modules.configuration.domain import font_catalog
 
 
-def test_available_fonts_contains_six_entries_in_canonical_order() -> None:
+def test_available_fonts_contains_seven_entries_in_canonical_order() -> None:
     families = [descriptor.family for descriptor in font_catalog.AVAILABLE_FONTS]
     assert families == [
         "Inter",
@@ -18,8 +18,9 @@ def test_available_fonts_contains_six_entries_in_canonical_order() -> None:
         "Montserrat",
         "Poppins",
         "Roboto",
+        "Barlow Semi Condensed",
     ]
-    assert len(font_catalog.AVAILABLE_FONTS) == 6
+    assert len(font_catalog.AVAILABLE_FONTS) == 7
 
 
 def test_allowed_font_families_matches_available_fonts() -> None:
@@ -48,6 +49,18 @@ def test_resolve_manrope_returns_canonical_paths() -> None:
     assert descriptor.family == "Manrope"
     assert descriptor.regular_path == Path("assets/fonts/Manrope/Regular.ttf")
     assert descriptor.bold_path == Path("assets/fonts/Manrope/Bold.ttf")
+
+
+def test_resolve_barlow_semi_condensed_returns_canonical_paths() -> None:
+    descriptor = font_catalog.resolve("Barlow Semi Condensed")
+    assert descriptor.family == "Barlow Semi Condensed"
+    assert descriptor.display_name == "Barlow Semi Condensed"
+    assert descriptor.regular_path == Path(
+        "assets/fonts/Barlow_Semi_Condensed/Regular.ttf"
+    )
+    assert descriptor.bold_path == Path(
+        "assets/fonts/Barlow_Semi_Condensed/Bold.ttf"
+    )
 
 
 @pytest.mark.parametrize("empty_value", [None, "", "   "])

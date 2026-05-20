@@ -1357,6 +1357,100 @@
         "Manual contra :8001: POST regenerate, verificar nuevo job + render completed."
       ],
       "status": "done"
+    },
+    {
+      "id": 41,
+      "name": "auto_subtitles_snapshot_for_editor",
+      "title": "Persistir los cues autoCaptions del render en reels.auto_subtitles_snapshot para que el editor parta de ellos",
+      "description": "Feature 36 añadió PATCH /subtitles para que el editor pueda EDITAR los cues, pero el editor arranca sin valor inicial cuando todavía no hay override (cae al fallback autoCaptions, que vive solo en memoria durante el render). Esta feature persiste los cues autoCaptions que la renderer compone en cada render (Gemini→caption por slide + timing window) en una nueva columna JSONB reels.auto_subtitles_snapshot. La renderer sólo guarda el snapshot cuando subtitles_override IS NULL (cuando hay override, el flujo autoCaptions no corre y el snapshot se queda como estaba). GET /v1/admin/agencies/{id}/reels/{site}/{prop} expone el snapshot en el JSON como publish_subtitles_snapshot (camelCase publishSubtitlesSnapshot en el front, que ya lo lee).",
+      "module": "modules/reels/, modules/rendering/application/, alembic/versions/, shared/db/orm.py, tests/",
+      "schema": "Sí (nueva columna `reels.auto_subtitles_snapshot JSONB NULL`).",
+      "scope": {
+        "back": [
+          "alembic/versions/20260517_0001_reels_auto_subtitles_snapshot.py: nueva migración (`down_revision=\"20260515_0005\"`) que añade la columna JSONB nullable. up/down/up clean.",
+          "shared/db/orm.py: añadir `ReelORM.auto_subtitles_snapshot: Mapped[list | None]` (JSONB, nullable, server_default=None) hermano de `subtitles_override`.",
+          "modules/reels/domain/reel_state.py: añadir `auto_subtitles_snapshot: list[dict[str, Any]] | None = None`.",
+          "modules/reels/infrastructure/reel_state_repository.py: extender `_REEL_COLUMNS`, INSERT, `ON CONFLICT DO UPDATE SET ...`, bind dict y los tres helper methods (`update_publish_status`, `update_workflow_state`, `save_local_artifacts`) que forward `existing.auto_subtitles_snapshot` para no clobberear el snapshot al guardar (lección de feature 35).",
+          "modules/reels/application/use_cases/_ingest_property_assets.py: `_build_ingested_reel_state` propaga `state.auto_subtitles_snapshot`.",
+          "modules/reels/application/use_cases/persist_local_artifacts.py: el `PersistLocalArtifactsUseCase._persist_with_uow` recibe el snapshot vía `RenderedMediaArtifact.auto_subtitles_snapshot` y lo forward a `save_local_artifacts(..., auto_subtitles_snapshot=...)`.",
+          "modules/reels/domain/types.py: `RenderedMediaArtifact` gana campo `auto_subtitles_snapshot: list[dict[str, Any]] | None = None`.",
+          "modules/rendering/application/frame_composition.py: cuando `subtitles_override is None`, computar los cues autoCaptions (a partir de slides + slide_duration + intro) y devolverlos en el `RenderedMediaArtifact`. Cuando hay override, no recomputar (el snapshot del row anterior se preserva vía el `existing.auto_subtitles_snapshot` forward en `save_local_artifacts`).",
+          "modules/reels/infrastructure/reel_query.py: añadir `auto_subtitles_snapshot` al SELECT de `list_recent_for_agency` y al `AgencyReelSummary` dataclass.",
+          "modules/reels/transport/payloads/admin_reels.py: añadir `publish_subtitles_snapshot: list[SubtitleCuePayload] | None = None` al `AgencyReelItemPayload` (reusar/import `ReelSubtitleCue` de `reel_subtitles_override.py`).",
+          "modules/reels/transport/http/admin_reels_assets.py: `_serialize_agency_reel` incluye `publish_subtitles_snapshot` desde `item.auto_subtitles_snapshot`.",
+          "tests/integration/reels/test_auto_subtitles_snapshot.py (nuevo): render → snapshot populated; GET response carries `publish_subtitles_snapshot`; re-ingest preserva el snapshot.",
+          "tests/integration/rendering/test_render_persists_auto_subtitles.py (nuevo): mock Gemini captions, render, assert snapshot persistido matches mock verbatim."
+        ],
+        "front": [
+          "Sin cambios. El front ya lee `publishSubtitlesSnapshot` en `ReelEditor.jsx:184`."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "Render de un reel sin `subtitles_override` → `reels.auto_subtitles_snapshot` se popula con la lista de cues (index, text, in_seconds, out_seconds).",
+        "Re-ingest preserva `auto_subtitles_snapshot` (no clobber).",
+        "GET /v1/admin/agencies/{id}/reels/{site}/{prop} devuelve `publish_subtitles_snapshot` en el JSON cuando la columna está populated; `null` en caso contrario.",
+        "Cuando `subtitles_override` está set, el snapshot se queda como estaba en el row anterior (no se recomputa).",
+        "Tests integration verdes; baseline 1050 preservada + N nuevos.",
+        "alembic upgrade head && alembic downgrade -1 && alembic upgrade head clean."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/integration/reels/test_auto_subtitles_snapshot.py tests/integration/reels/test_reel_subtitles_override.py tests/integration/rendering/test_render_persists_auto_subtitles.py -q -v",
+        ".venv/bin/python -m apps.api --check",
+        ".venv/bin/python -m apps.worker --check"
+      ],
+      "status": "done"
+    },
+    {
+      "id": 42,
+      "name": "galaxy_render_template",
+      "title": "Nuevo render template 'galaxy' (top panel redondeado azul + ribbon vertical 'FOR SALE' + footer redondeado oscuro) reutilizando cascades de color de side_banner",
+      "description": "Tercer layout_variant tras 'classic' y 'side_banner'. Visualmente: panel superior-izquierdo con esquinas redondeadas (precio + dirección + specs) sobre la foto full-bleed, cinta dorada vertical 'FOR SALE' anclada arriba-derecha (reutiliza el helper de side_banner), foto del agente + bloque de contacto + branding agencia en un footer inferior redondeado. La referencia visual está en example-template-galaxy.png. El círculo grande central con el logo de la agencia (visible en la referencia) queda EXPLÍCITAMENTE FUERA DE ESTA FEATURE; se omite en v1 por decisión del usuario. Todos los colores y parámetros del template son modificables exactamente igual que en side_banner: ningún cambio de data-model, ningún campo nuevo en BrandSettings ni en PropertyRenderData. Galaxy consume verbatim side_banner_panel_color (para los paneles top y bottom), side_banner_ribbon_background_color (para la cinta vertical) y accent_text_color / accent_background_color (per-property webhook fallback). Itera visualmente con generate_property_poster_from_data(..., layout_variant='galaxy') hasta que el frame producido se aproxime a la referencia.",
+      "module": "modules/rendering/infrastructure/render_template_settings.py, modules/rendering/infrastructure/layout/panels.py, modules/rendering/infrastructure/layout/composition.py, modules/rendering/infrastructure/ffmpeg/filters.py, modules/rendering/infrastructure/preparation.py, alembic/versions/, assets/render-templates/, tests/",
+      "schema": "No (zero cambios de schema; data-model intacto, cascades de color heredados de side_banner).",
+      "scope": {
+        "back": [
+          "modules/rendering/infrastructure/render_template_settings.py:23: añadir 'galaxy' al frozenset SUPPORTED_LAYOUT_VARIANTS y exponer constante GALAXY_RENDER_TEMPLATE_ID='galaxy'.",
+          "modules/rendering/infrastructure/layout/panels.py: en compose_top_panel y compose_bottom_panel añadir rama is_galaxy = layout_variant == 'galaxy'. Geometría target (vertical 1080x1920, escalable por %): top_panel x=4% width, y=3.5% height, width≈48% width, height≈18% height, corner_radius=max(18, round(height*0.014)); status='OFFERS OVER:' (mismo hardcode que side_banner cuando hay precio); price ~52-36px; address ~32-22px; specs ~28-20px alineados con BER badge. bottom_panel x=3% width, y=80% height, width=94% width, height≈12% height, corner_radius como top; agent image circular en bottom_panel.x + footer_padding_x con diámetro min(150, height*0.085); agent_name + phone + email en una columna central; agency_logo + agency tag-line ancladas a la derecha (logo_box_width=max(220, width*0.30), logo_box_height=max(78, height*0.062)).",
+          "modules/rendering/infrastructure/layout/composition.py: rama galaxy → outer_margin_x/y = 0 (full-bleed igual que side_banner).",
+          "modules/rendering/infrastructure/ffmpeg/filters.py: build_overlay_filter consume side_banner_panel_color con la MISMA cascada que side_banner para top + bottom panels de galaxy (no añadir nuevo override key); cuando layout_variant == 'galaxy' dibujar ambos paneles con _build_rounded_panel_source (la helper que ya redondea el footer de side_banner) usando el radius calculado por panels.py. Decisión: aplicar el radio TANTO al top como al bottom (side_banner solo lo aplica al bottom — galaxy redondea ambos).",
+          "modules/rendering/infrastructure/preparation.py: si layout_variant == 'galaxy' llamar el mismo _render_vertical_status_banner que side_banner con los mismos parámetros (banner_x = 77.8% width, banner_y=0, body_height ≈ 32% height, notch inferior). Consumir side_banner_ribbon_background_color con la misma cascada. El asset PNG generado se reutiliza tal cual; cero código duplicado.",
+          "modules/rendering/application/frame_composition.py: la propagación de layout_variant ya es genérica string-based; solo asegurar que el branch galaxy llega intacto a prepare_reel_render_assets + build_filter_complex + build_overlay_layout.",
+          "alembic/versions/20260518_0001_seed_galaxy_render_template.py (nuevo, down_revision='20260517_0001'): INSERT en render_templates con template_id='galaxy', display_name='Galaxy', sort_order=2, layout_variant='galaxy', preview_images='[]'::jsonb, reel_settings='{}'::jsonb, poster_settings='{}'::jsonb, ON CONFLICT DO NOTHING. Downgrade: DELETE WHERE template_id='galaxy' AND layout_variant='galaxy'.",
+          "alembic/versions/20260518_0002_galaxy_render_template_preview.py (nuevo, down_revision='20260518_0001'): UPDATE preview_images = [{kind:'preview', image_url:'/assets/render-templates/galaxy-template.png', alt:'Galaxy template preview'}] WHERE template_id='galaxy'. Downgrade idempotente igual que el de side_banner_preview.",
+          "assets/render-templates/galaxy-template.png (nuevo): preview generado por el implementer durante la iteración visual (el último frame que produzca el rig de iteración tras converger se canoniza como preview asset).",
+          "tests/unit/rendering/test_layout_composition_galaxy.py (nuevo): asserts de geometría top/bottom panel (posiciones %, corner_radius, font_size bounds) y de logo_box anclado a la derecha; replicar la estructura de test_layout_composition_side_banner.py.",
+          "tests/unit/rendering/test_frame_composition_accent_colors_galaxy.py (nuevo): cascade side_banner_panel_color y side_banner_ribbon_background_color a través de PropertyRenderData cuando layout_variant='galaxy'; fallback a accent_background_color y a black@0.38/0.46.",
+          "tests/integration/rendering/test_galaxy_render.py (nuevo): mock prepare/manifest/reel/poster + assert que layout_variant='galaxy' propaga end-to-end y que el ribbon vertical se renderiza (mismo patrón que test_side_banner_render.py).",
+          "tests/integration/configuration/test_render_templates_router.py: extender con test_render_templates_list_includes_galaxy (sort_order=2, display_name='Galaxy', layout_variant='galaxy', preview_images popolated tras migration 0002).",
+          "tests/integration/apps_api/test_render_template_assets.py: extender con test_api_serves_galaxy_render_template_preview_asset.",
+          "tests/integration/rendering/test_galaxy_iter.py (nuevo, opt-in con @pytest.mark.visual_iter): genera un PNG en progress/galaxy_iter_<N>.png vía generate_property_poster_from_data(..., layout_variant='galaxy') usando fixtures build_property_data + build_template existentes en tests/unit/rendering/conftest.py. NO se ejecuta en init.sh (marker excluido); se invoca manualmente por el leader durante el loop de comparación visual."
+        ],
+        "front": [
+          "Ninguno. El selector de templates del frontend ya itera dinámicamente sobre la respuesta de GET /v1/admin/agencies/{id}/render-templates; el nuevo template aparece automáticamente con su preview tras la migration."
+        ],
+        "external": []
+      },
+      "acceptance": [
+        "SUPPORTED_LAYOUT_VARIANTS == frozenset({'classic', 'side_banner', 'galaxy'}).",
+        "alembic upgrade head crea la fila template_id='galaxy', sort_order=2, layout_variant='galaxy' con preview_images poblado tras 20260518_0002; alembic downgrade -1 y -2 limpian sin residuo.",
+        "GET /v1/admin/agencies/{id}/render-templates incluye 'galaxy' como tercer item con preview_images apuntando a /assets/render-templates/galaxy-template.png.",
+        "GET /assets/render-templates/galaxy-template.png devuelve 200 con content-type image/png.",
+        "Rendering: con layout_variant='galaxy' y BrandSettings con primary_color='#0E2F59' + secondary_color='#C9A24B', el top y bottom panel se pintan con #0E2F59 (cascade side_banner_panel_color) y la cinta vertical con #C9A24B (cascade side_banner_ribbon_background_color). Sin esos colores, fallback a accent_background_color de la propiedad y luego a los hardcodes black@0.38 / black@0.46.",
+        "El frame generado por generate_property_poster_from_data(..., layout_variant='galaxy') muestra: panel superior-izquierdo redondeado con OFFERS OVER + price + address + specs, cinta vertical FOR SALE arriba-derecha, footer inferior redondeado con agent photo + contacto + agency logo. Sin el círculo central (omitido por decisión de usuario).",
+        "El asset progress/galaxy_iter_<N>.png producido en la última iteración se aproxima razonablemente a example-template-galaxy.png (criterio cualitativo: layout, proporciones, colores; no pixel-perfect — el logo central queda fuera).",
+        "Baseline pytest: ≥1063 passed (los 3 fails históricos de test_http_surface_contract.py + test_http_transport.py se mantienen como baseline, no se cuentan como regresión) + tests nuevos verdes.",
+        "bash ./init.sh exit 0."
+      ],
+      "verification": [
+        "bash ./init.sh",
+        ".venv/bin/python -m pytest tests/unit/rendering/test_layout_composition_galaxy.py tests/unit/rendering/test_frame_composition_accent_colors_galaxy.py tests/integration/rendering/test_galaxy_render.py tests/integration/configuration/test_render_templates_router.py tests/integration/apps_api/test_render_template_assets.py -q -v",
+        ".venv/bin/python -m apps.api --check",
+        ".venv/bin/python -m apps.worker --check",
+        ".venv/bin/python -m alembic upgrade head && .venv/bin/python -m alembic downgrade -2 && .venv/bin/python -m alembic upgrade head"
+      ],
+      "status": "done"
     }
   ]
 }

@@ -2,25 +2,29 @@
 
 This use case is the application orchestration behind
 ``POST /v1/admin/agencies/{agency_id}/outro/upload`` (feature 33). The
-HTTP layer parses the multipart envelope and enforces the gross size
-cap (the 50MB limit is duplicated here defensively).
+SaaS admin is trusted: the only validations the backend still enforces
+are the MIME allow-list and the "body must not be empty" guard. Size
+and duration limits were removed deliberately so the admin can upload
+outros of any length and weight.
 
 Steps:
 
 1. Validate ``content_type`` against the allowed MIME set
    (``video/mp4`` / ``video/quicktime``).
-2. Validate ``len(body) <= max_upload_bytes`` (50MB).
+2. Validate the body is not empty.
 3. Write the binary to disk atomically via
    :func:`shared.storage.site_layout.resolve_agency_intro_outro_destination`.
-4. Probe duration with ``ffprobe``; reject if outside ``[1, 10]``
-   seconds.
+4. Probe duration with ``ffprobe``. The duration is persisted on the
+   row for downstream features (rendering, defaults endpoint) but it
+   is no longer validated against a range.
 5. Persist the row in ``agency_intro_outro_assets`` via the UoW. Drop
    any prior blob from disk after a successful overwrite so the
    workspace never accumulates orphans.
 
-The HTTP-facing error codes (``INVALID_MIME``, ``FILE_TOO_LARGE``,
-``INVALID_DURATION``) are surfaced as ``ValidationError(code=...)`` so
-the router can translate them to 422 / 413 deterministically.
+The HTTP-facing error codes (``OUTRO_INVALID_MIME``,
+``OUTRO_FILE_EMPTY``, ``OUTRO_PROBE_UNAVAILABLE``,
+``OUTRO_PROBE_FAILED``) are surfaced as ``ValidationError(code=...)``
+so the router can translate them to 422 deterministically.
 """
 
 from __future__ import annotations
@@ -47,10 +51,6 @@ from shared.storage.site_layout import (
 )
 
 logger = logging.getLogger(__name__)
-
-OUTRO_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-OUTRO_MIN_DURATION_SECONDS = 1
-OUTRO_MAX_DURATION_SECONDS = 10
 
 ALLOWED_OUTRO_CONTENT_TYPES: frozenset[str] = frozenset(
     {"video/mp4", "video/quicktime"}
@@ -80,16 +80,16 @@ def validate_outro_upload(
     *,
     content_type: str,
     body: bytes,
-    max_upload_bytes: int = OUTRO_MAX_UPLOAD_BYTES,
 ) -> OutroValidationResult:
-    """Validate MIME + size for an outro upload (pure, no I/O).
+    """Validate MIME + non-empty body for an outro upload (pure, no I/O).
 
-    Duration is validated downstream once the bytes are on disk and
-    ``ffprobe`` can read them.
+    Duration is derived downstream once the bytes are on disk and
+    ``ffprobe`` can read them, but it is no longer validated against a
+    range — the SaaS admin can upload outros of any length.
 
     Raises :class:`shared.errors.ValidationError` with ``code`` set to
-    ``OUTRO_INVALID_MIME`` (HTTP 422) or ``OUTRO_FILE_TOO_LARGE`` (HTTP
-    413) so the router can translate consistently.
+    ``OUTRO_INVALID_MIME`` or ``OUTRO_FILE_EMPTY`` so the router can
+    translate consistently (HTTP 422).
     """
     normalized_ct = (content_type or "").strip().lower()
     if normalized_ct not in ALLOWED_OUTRO_CONTENT_TYPES:
@@ -107,35 +107,10 @@ def validate_outro_upload(
             "Outro upload payload is empty.",
             code="OUTRO_FILE_EMPTY",
         )
-    if len(body) > max_upload_bytes:
-        raise ValidationError(
-            "Outro upload exceeds the 50 MB size limit.",
-            code="OUTRO_FILE_TOO_LARGE",
-            context={
-                "received_bytes": len(body),
-                "max_bytes": max_upload_bytes,
-            },
-        )
     return OutroValidationResult(
         content_type=normalized_ct,
         extension=SUFFIX_BY_OUTRO_CONTENT_TYPE[normalized_ct],
     )
-
-
-def validate_outro_duration(duration_seconds: int) -> int:
-    """Validate that the probed duration falls in the allowed window."""
-    if duration_seconds < OUTRO_MIN_DURATION_SECONDS or duration_seconds > OUTRO_MAX_DURATION_SECONDS:
-        raise ValidationError(
-            "Outro duration must be between 1 and 10 seconds.",
-            code="OUTRO_INVALID_DURATION",
-            hint=(
-                "Trim the outro so its duration is between "
-                f"{OUTRO_MIN_DURATION_SECONDS} and "
-                f"{OUTRO_MAX_DURATION_SECONDS} seconds."
-            ),
-            context={"duration_seconds": int(duration_seconds)},
-        )
-    return int(duration_seconds)
 
 
 class UploadOutroVideoUseCase:
@@ -146,11 +121,9 @@ class UploadOutroVideoUseCase:
         *,
         workspace_dir: Path,
         ffprobe_runner=None,
-        max_upload_bytes: int = OUTRO_MAX_UPLOAD_BYTES,
     ) -> None:
         self._workspace_dir = Path(workspace_dir).expanduser().resolve()
         self._ffprobe_runner = ffprobe_runner or _run_ffprobe_duration
-        self._max_upload_bytes = max_upload_bytes
 
     def execute(
         self,
@@ -162,7 +135,6 @@ class UploadOutroVideoUseCase:
         validation = validate_outro_upload(
             content_type=data.content_type,
             body=data.body,
-            max_upload_bytes=self._max_upload_bytes,
         )
 
         digest = _sha1_hex(data.body)
@@ -206,12 +178,6 @@ class UploadOutroVideoUseCase:
                 hint="Re-encode the video as MP4 or MOV and retry.",
                 context={"error": str(error)},
             )
-
-        try:
-            validate_outro_duration(duration)
-        except ValidationError:
-            _safe_unlink(destination)
-            raise
 
         assert uow.configuration is not None  # invariant: caller opened the UoW
         asset = uow.configuration.intro_outro_assets.upsert_uploaded(
@@ -344,13 +310,9 @@ def _safe_unlink_object_key(workspace_dir: Path, object_key: str) -> None:
 
 __all__ = [
     "ALLOWED_OUTRO_CONTENT_TYPES",
-    "OUTRO_MAX_UPLOAD_BYTES",
-    "OUTRO_MAX_DURATION_SECONDS",
-    "OUTRO_MIN_DURATION_SECONDS",
     "OutroValidationResult",
     "SUFFIX_BY_OUTRO_CONTENT_TYPE",
     "UploadOutroVideoInput",
     "UploadOutroVideoUseCase",
-    "validate_outro_duration",
     "validate_outro_upload",
 ]

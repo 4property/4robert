@@ -71,6 +71,37 @@ def _isoformat(value: object | None) -> str | None:
     return str(value)
 
 
+def _decode_auto_subtitles_snapshot(raw: Any) -> list[dict[str, Any]] | None:
+    """Decode the optional ``reels.auto_subtitles_snapshot`` JSONB column.
+
+    Returns ``None`` for SQL ``NULL``, the empty list ``[]`` or any
+    payload that is not a non-empty list of dicts. Otherwise returns a
+    fresh list of dicts (shallow copies) so downstream consumers can
+    mutate it freely without leaking back into SQLAlchemy row state.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, bytearray)):
+        text_value = bytes(raw).decode("utf-8")
+        return _decode_auto_subtitles_snapshot(text_value)
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return _decode_auto_subtitles_snapshot(parsed)
+    if isinstance(raw, list):
+        coerced: list[dict[str, Any]] = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                coerced.append(dict(entry))
+        return coerced or None
+    return None
+
+
 def _deserialize_text_tuple(value: Any) -> tuple[str, ...]:
     if value is None or value == "":
         return ()
@@ -123,6 +154,13 @@ class AgencyReelSummary:
     revision_metadata_path: str
     revision_artifact_kind: str
     revision_created_at: str
+    # Feature 41: snapshot of the autoCaptions cues the renderer
+    # produced on the most recent render whose ``subtitles_override``
+    # was NULL. ``None`` means "no snapshot yet"; the editor uses this
+    # column as the starting value of the subtitle override before the
+    # user types anything (front reads it as ``publishSubtitlesSnapshot``
+    # — same JSON shape as ``subtitles_override``).
+    auto_subtitles_snapshot: list[dict[str, Any]] | None = None
 
 
 @dataclass(slots=True)
@@ -241,6 +279,7 @@ class ReelQuery(ModuleRepository):
                 "r.last_published_provider_external_id, r.current_revision_id, "
                 "r.created_at AS pipeline_created_at, "
                 "r.updated_at AS pipeline_updated_at, "
+                "r.auto_subtitles_snapshot AS auto_subtitles_snapshot, "
                 "mr.media_path AS revision_media_path, "
                 "mr.metadata_path AS revision_metadata_path, "
                 "mr.artifact_kind AS revision_artifact_kind, "
@@ -291,6 +330,9 @@ class ReelQuery(ModuleRepository):
                 revision_metadata_path=str(row.revision_metadata_path or ""),
                 revision_artifact_kind=str(row.revision_artifact_kind or ""),
                 revision_created_at=_isoformat(row.revision_created_at) or "",
+                auto_subtitles_snapshot=_decode_auto_subtitles_snapshot(
+                    getattr(row, "auto_subtitles_snapshot", None)
+                ),
             )
             for row in rows
         )

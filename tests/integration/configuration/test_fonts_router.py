@@ -30,7 +30,7 @@ def _patch_workspace_with_fonts(workspace_dir: Path) -> None:
         fonts_link.symlink_to(REPO_ROOT / "assets" / "fonts")
 
 
-def test_fonts_list_returns_six_catalogue_entries() -> None:
+def test_fonts_list_returns_seven_catalogue_entries() -> None:
     with temporary_workspace() as workspace_dir:
         _patch_workspace_with_fonts(workspace_dir)
         with temporary_postgres_schema(DATABASE_URL) as database:
@@ -40,8 +40,8 @@ def test_fonts_list_returns_six_catalogue_entries() -> None:
             response = client.get("/v1/admin/fonts", headers=ADMIN_BEARER)
             assert response.status_code == 200, response.text
             payload = response.json()
-            assert payload["count"] == 6
-            assert len(payload["items"]) == 6
+            assert payload["count"] == 7
+            assert len(payload["items"]) == 7
             families = [item["family"] for item in payload["items"]]
             assert families == [
                 "Inter",
@@ -50,6 +50,7 @@ def test_fonts_list_returns_six_catalogue_entries() -> None:
                 "Montserrat",
                 "Poppins",
                 "Roboto",
+                "Barlow Semi Condensed",
             ]
             for item in payload["items"]:
                 assert item["family"] == item["display_name"]

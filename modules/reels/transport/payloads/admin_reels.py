@@ -19,6 +19,10 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from modules.reels.transport.payloads.reel_subtitles_override import (
+    ReelSubtitleCue,
+)
+
 
 class AgencyReelItemPayload(BaseModel):
     """Flat shape for one reel in the admin "Reels" view."""
@@ -51,6 +55,13 @@ class AgencyReelItemPayload(BaseModel):
     revision_metadata_path: str = ""
     revision_artifact_kind: str = ""
     revision_created_at: str = ""
+    # Feature 41: snapshot of the autoCaptions cues the renderer
+    # produced on the most recent render whose ``subtitles_override``
+    # was NULL. The editor (feature 36) reads this column under the
+    # camelCase alias ``publishSubtitlesSnapshot`` as the starting
+    # value of the subtitle override before the user types anything.
+    # ``None`` when the renderer has never produced a snapshot.
+    publish_subtitles_snapshot: list[ReelSubtitleCue] | None = None
 
 
 class ListReelsResponse(BaseModel):

@@ -80,6 +80,47 @@ def test_render_templates_list_includes_side_banner() -> None:
             assert side_banner["selected"] is False
 
 
+def test_render_templates_list_includes_galaxy() -> None:
+    """Feature 42: the galaxy template ships seeded with sort_order=2.
+
+    The migration ``20260518_0002_galaxy_render_template_preview.py``
+    additionally populates ``preview_images`` with the static asset
+    served by the app factory mount.
+    """
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+            client = build_configuration_client(
+                database_url=database.url, workspace_dir=workspace_dir
+            )
+
+            response = client.get(
+                f"/v1/admin/agencies/{seeded.agency_id}/render-templates",
+                headers=ADMIN_BEARER,
+            )
+
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            items_by_id = {item["template_id"]: item for item in payload["items"]}
+            assert "classic" in items_by_id
+            assert "side_banner" in items_by_id
+            assert "galaxy" in items_by_id
+
+            galaxy = items_by_id["galaxy"]
+            assert galaxy["display_name"] == "Century 21"
+            assert galaxy["status"] == "active"
+            assert galaxy["sort_order"] == 2
+            assert galaxy["layout_variant"] == "galaxy"
+            assert galaxy["selected"] is False
+            assert galaxy["preview_images"] == [
+                {
+                    "kind": "preview",
+                    "image_url": "/assets/render-templates/galaxy-template.png",
+                    "alt": "Galaxy template preview",
+                }
+            ]
+
+
 def test_render_template_select_persists_side_banner_on_defaults() -> None:
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
