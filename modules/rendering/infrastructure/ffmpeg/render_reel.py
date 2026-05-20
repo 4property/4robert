@@ -254,6 +254,10 @@ def render_silent_reel(
     # consulted — the colour comes from the agency brand row only.
     # Classic layout keeps the historical ``black@0.38`` /
     # ``black@0.46`` defaults from ``build_overlay_filter``.
+    # Feature 42: galaxy reuses the same panel-colour cascade as
+    # side_banner (brand primary → grey fallback → 0.55 alpha) so the
+    # rounded top and bottom cards stay consistent across the two
+    # full-bleed variants. Classic keeps the historical black overlay.
     from modules.rendering.infrastructure.formatting import apply_alpha_to_hex
     panel_color = (
         apply_alpha_to_hex(
@@ -261,12 +265,12 @@ def render_silent_reel(
             or _SIDE_BANNER_PANEL_DEFAULT,
             alpha=0.55,
         )
-        if layout_variant == "side_banner"
+        if layout_variant in {"side_banner", "galaxy"}
         else None
     )
     text_override = (
         property_data.accent_text_color
-        if layout_variant == "side_banner"
+        if layout_variant in {"side_banner", "galaxy"}
         else None
     )
 
@@ -286,7 +290,7 @@ def render_silent_reel(
             slide_input_paths.append(prepared_assets.ber_icon_path)
         vertical_banner_input_index: int | None = None
         if (
-            layout_variant == "side_banner"
+            layout_variant in {"side_banner", "galaxy"}
             and prepared_assets.vertical_banner_path is not None
         ):
             vertical_banner_input_index = len(slide_input_paths)

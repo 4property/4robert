@@ -217,7 +217,7 @@ def resolve_agency_logo_box_size(settings: PropertyReelTemplate) -> tuple[int, i
     )
 
 
-def format_price(value: str | None) -> str | None:
+def format_price(value: str | None, *, currency_symbol: str = "€") -> str | None:
     if value is None:
         return None
 
@@ -230,7 +230,7 @@ def format_price(value: str | None) -> str | None:
     except ValueError:
         return value.strip()
 
-    return f"€{amount:,}"
+    return f"{currency_symbol}{amount:,}"
 
 
 def clean_text(value: Any) -> str | None:
@@ -567,10 +567,22 @@ def build_similar_required_subtitle(property_data: PropertyRenderData) -> str | 
     return f"Similar required? {site_url}"
 
 
-def build_display_price(property_data: PropertyRenderData) -> str | None:
+def build_display_price(
+    property_data: PropertyRenderData,
+    *,
+    currency_symbol: str = "€",
+) -> str | None:
     if property_data.price_display_text is not None:
-        return clean_text(property_data.price_display_text)
-    return format_price(property_data.price)
+        cleaned = clean_text(property_data.price_display_text)
+        if cleaned is None or currency_symbol == "€":
+            return cleaned
+        # Century 21 polish v2: when the caller asks for a different
+        # currency glyph (galaxy renders "$"), swap any €/EUR markers
+        # baked into the upstream display text so the final overlay
+        # matches the requested currency. Other templates pass the
+        # default "€" and the original text is returned untouched.
+        return cleaned.replace("€", currency_symbol)
+    return format_price(property_data.price, currency_symbol=currency_symbol)
 
 
 def has_positive_price(property_data: PropertyRenderData) -> bool:

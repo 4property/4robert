@@ -67,6 +67,14 @@ def _serialize_agency_reel(item: AgencyReelSummary) -> dict[str, object]:
         "revision_metadata_path": item.revision_metadata_path,
         "revision_artifact_kind": item.revision_artifact_kind,
         "revision_created_at": item.revision_created_at,
+        # Feature 41: surface the persisted autoCaptions snapshot under
+        # the ``publish_subtitles_snapshot`` key so the editor (feature
+        # 36) can use it as the starting value of the subtitle override
+        # before the user types anything. ``None`` when the renderer
+        # has never produced a snapshot (e.g. a brand-new reel that has
+        # never run autoCaptions, or a reel whose only renders had
+        # ``subtitles_override`` set).
+        "publish_subtitles_snapshot": item.auto_subtitles_snapshot,
     }
 
 

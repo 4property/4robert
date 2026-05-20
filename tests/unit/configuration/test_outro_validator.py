@@ -1,8 +1,10 @@
 """Unit tests for the outro upload validator (feature 33).
 
-The validator is the pure side of ``UploadOutroVideoUseCase`` — MIME
-allow-list, size cap and duration window. We exercise it directly so
-the failure paths don't depend on a Postgres or ffprobe round-trip.
+The validator is the pure side of ``UploadOutroVideoUseCase`` — it
+checks the MIME allow-list and rejects empty bodies. Size and duration
+limits were removed: the SaaS admin can upload outros of any length
+and weight, so the validator no longer enforces a 50 MB cap or a
+[1, 10] s window.
 """
 
 from __future__ import annotations
@@ -10,10 +12,6 @@ from __future__ import annotations
 import pytest
 
 from modules.configuration.application.use_cases.upload_outro_video import (
-    OUTRO_MAX_DURATION_SECONDS,
-    OUTRO_MAX_UPLOAD_BYTES,
-    OUTRO_MIN_DURATION_SECONDS,
-    validate_outro_duration,
     validate_outro_upload,
 )
 from shared.errors import ValidationError
@@ -57,34 +55,9 @@ def test_validator_rejects_empty_body() -> None:
     assert excinfo.value.code == "OUTRO_FILE_EMPTY"
 
 
-def test_validator_rejects_payload_over_50mb() -> None:
-    oversized = b"x" * (OUTRO_MAX_UPLOAD_BYTES + 1)
-    with pytest.raises(ValidationError) as excinfo:
-        validate_outro_upload(content_type="video/mp4", body=oversized)
-    assert excinfo.value.code == "OUTRO_FILE_TOO_LARGE"
-    # The context reports the actual received_bytes so the client
-    # can surface the gap to the user.
-    assert int(excinfo.value.context["received_bytes"]) == len(oversized)
-
-
-def test_validate_duration_accepts_range_extremes() -> None:
-    assert validate_outro_duration(OUTRO_MIN_DURATION_SECONDS) == OUTRO_MIN_DURATION_SECONDS
-    assert validate_outro_duration(OUTRO_MAX_DURATION_SECONDS) == OUTRO_MAX_DURATION_SECONDS
-
-
-def test_validate_duration_rejects_zero_seconds() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_outro_duration(0)
-    assert excinfo.value.code == "OUTRO_INVALID_DURATION"
-
-
-def test_validate_duration_rejects_above_max() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_outro_duration(OUTRO_MAX_DURATION_SECONDS + 1)
-    assert excinfo.value.code == "OUTRO_INVALID_DURATION"
-
-
-def test_validate_duration_rejects_negative_value() -> None:
-    with pytest.raises(ValidationError) as excinfo:
-        validate_outro_duration(-3)
-    assert excinfo.value.code == "OUTRO_INVALID_DURATION"
+def test_validator_accepts_payload_well_over_50mb() -> None:
+    """Size limit was removed — a 60 MB payload must pass validation."""
+    oversized = b"x" * (60 * 1024 * 1024)
+    result = validate_outro_upload(content_type="video/mp4", body=oversized)
+    assert result.content_type == "video/mp4"
+    assert result.extension == ".mp4"

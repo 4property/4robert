@@ -31,6 +31,59 @@ from ._property_conversions import (
 )
 
 
+def _contains_n_digits(value: str | None, *, n: int) -> bool:
+    """Return True if *value* contains at least *n* digit characters.
+
+    Helper for the defensive promotion of mis-labelled email payloads to
+    ``agent_mobile`` (see ``Property.from_api_payload``). Kept intentionally
+    private to this module — it is too narrow to belong in ``shared/``.
+    """
+
+    if not value:
+        return False
+    return sum(1 for c in value if c.isdigit()) >= n
+
+
+def _resolve_agent_contact(
+    payload: Mapping[str, Any],
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve ``(agent_mobile, agent_email, agent_number)`` from *payload*.
+
+    Real-world payloads (e.g. Century 21 webhooks) sometimes ship the agent
+    phone under the ``agent_phone`` key — which the historical mapper
+    ignored — and occasionally duplicate that phone into ``agent_email``
+    (also without an ``@``). To keep the renderer's "phone" / "email"
+    lines aligned with reality we apply, in order:
+
+    1. ``agent_mobile`` (explicit) wins; otherwise fall back to
+       ``agent_phone``.
+    2. ``agent_email`` is discarded if it does not contain ``'@'``.
+    3. If after (1) ``agent_mobile`` is still ``None`` *and* the raw
+       ``agent_email`` looked like a phone (no ``@``, 6+ digits), promote
+       it to ``agent_mobile``. This only kicks in when both phone slots
+       were empty — we never overwrite an operator-supplied value.
+    """
+
+    mobile_explicit = to_text(payload.get("agent_mobile"))
+    mobile_fallback = to_text(payload.get("agent_phone"))
+    mobile_candidate = mobile_explicit or mobile_fallback
+
+    email_raw = to_text(payload.get("agent_email"))
+    email_looks_valid = bool(email_raw) and "@" in (email_raw or "")
+
+    if (
+        email_raw is not None
+        and not email_looks_valid
+        and mobile_candidate is None
+        and _contains_n_digits(email_raw, n=6)
+    ):
+        mobile_candidate = email_raw
+
+    agent_email = email_raw if email_looks_valid else None
+    agent_number = to_text(payload.get("agent_number"))
+    return mobile_candidate, agent_email, agent_number
+
+
 @dataclass(slots=True)
 class Property:
     id: int
@@ -123,6 +176,8 @@ class Property:
         if not image_urls and featured_image_url:
             image_urls = (featured_image_url,)
 
+        agent_mobile, agent_email, agent_number = _resolve_agent_contact(payload)
+
         return cls(
             id=property_id,
             slug=normalise_slug(payload.get("slug"), property_id),
@@ -166,9 +221,9 @@ class Property:
             longitude=to_float(payload.get("longitude")),
             agent_name=to_text(payload.get("agent_name")),
             agent_photo_url=to_text(payload.get("agent_photo")),
-            agent_email=to_text(payload.get("agent_email")),
-            agent_mobile=to_text(payload.get("agent_mobile")),
-            agent_number=to_text(payload.get("agent_number")),
+            agent_email=agent_email,
+            agent_mobile=agent_mobile,
+            agent_number=agent_number,
             agent_qualification=to_text(payload.get("agent_qualification")),
             agency_psra=to_text(payload.get("agency_psra")),
             agency_logo_url=to_text(payload.get("agency_logo")),

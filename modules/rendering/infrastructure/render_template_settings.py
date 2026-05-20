@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 CLASSIC_RENDER_TEMPLATE_ID = "classic"
 SIDE_BANNER_RENDER_TEMPLATE_ID = "side_banner"
-SUPPORTED_LAYOUT_VARIANTS = frozenset({"classic", "side_banner"})
+GALAXY_RENDER_TEMPLATE_ID = "galaxy"
+SUPPORTED_LAYOUT_VARIANTS = frozenset({"classic", "side_banner", "galaxy"})
 
 # Renderer-internal keys that ride along inside
 # ``render_template_reel_settings`` / ``render_template_poster_settings`` but
@@ -279,6 +280,7 @@ def _coerce_float(field_name: str, value: Any) -> float:
 
 __all__ = [
     "CLASSIC_RENDER_TEMPLATE_ID",
+    "GALAXY_RENDER_TEMPLATE_ID",
     "ResolvedRenderTemplateSettings",
     "SIDE_BANNER_RENDER_TEMPLATE_ID",
     "SUPPORTED_LAYOUT_VARIANTS",

@@ -5,6 +5,10 @@ Covers ``POST .../outro/upload`` (multipart), ``GET .../outro/file``
 The MP4 fixtures in ``_fixtures/`` are tiny (5s @ 320x240, ~7 KiB) but
 real enough for ffprobe to extract a duration so the use case round-trip
 matches production.
+
+Size (50 MB) and duration ([1, 10] s) restrictions were removed: the
+SaaS admin is trusted to upload outros of any length and weight, so
+the only HTTP-level validations left are MIME and "body not empty".
 """
 
 from __future__ import annotations
@@ -14,8 +18,17 @@ import io
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from apps.api.admin_auth import AdminAccessPolicy
+from apps.api.error_handlers import register_error_handlers
+from modules.configuration.application.use_cases.upload_outro_video import (
+    UploadOutroVideoUseCase,
+)
+from modules.configuration.transport.http.outro_router import create_outro_router
 from settings import DATABASE_URL
+from shared.db import DatabaseUnitOfWork
 from shared.storage.site_layout import safe_site_dirname
 from tests.integration.configuration._client import (
     ADMIN_BEARER,
@@ -207,27 +220,8 @@ def test_outro_upload_rejects_unsupported_mime_with_422() -> None:
             assert response.json()["code"] == "OUTRO_INVALID_MIME"
 
 
-def test_outro_upload_rejects_payload_over_50mb_with_413() -> None:
-    # 51MB of well-formed-looking MP4 prefix bytes — the size guard fires
-    # before we touch ffprobe.
-    oversized = b"\x00\x00\x00\x20ftypisom" + b"0" * (50 * 1024 * 1024 + 16)
-    with temporary_workspace() as workspace_dir:
-        with temporary_postgres_schema(DATABASE_URL) as database:
-            seeded = seed_tenant(database.url, site_id="ckp.ie")
-            client = build_configuration_client(
-                database_url=database.url, workspace_dir=workspace_dir
-            )
-
-            response = client.post(
-                f"/v1/admin/agencies/{seeded.agency_id}/outro/upload",
-                files=_multipart(file_bytes=oversized),
-                headers=ADMIN_BEARER,
-            )
-            assert response.status_code == 413, response.text
-            assert response.json()["code"] == "OUTRO_FILE_TOO_LARGE"
-
-
-def test_outro_upload_rejects_duration_above_10_seconds() -> None:
+def test_outro_upload_accepts_duration_above_10_seconds() -> None:
+    """The [1, 10] s duration window was removed: 15s outros are accepted."""
     fixture = _load_fixture(_OUTRO_LONG_PATH)
     with temporary_workspace() as workspace_dir:
         with temporary_postgres_schema(DATABASE_URL) as database:
@@ -241,9 +235,13 @@ def test_outro_upload_rejects_duration_above_10_seconds() -> None:
                 files=_multipart(file_bytes=fixture),
                 headers=ADMIN_BEARER,
             )
-            assert response.status_code == 422, response.text
-            assert response.json()["code"] == "OUTRO_INVALID_DURATION"
-            # The orphan blob must be cleaned up on duration rejection.
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["outro_source"] == "uploaded"
+            # The fixture is 15 seconds; ffprobe rounds to nearest int.
+            assert payload["outro_duration_seconds"] == 15
+
+            # The blob is persisted (no orphan cleanup since no rejection).
             safe_agency = safe_site_dirname(seeded.agency_id)
             persisted_dir = (
                 workspace_dir
@@ -251,8 +249,57 @@ def test_outro_upload_rejects_duration_above_10_seconds() -> None:
                 / "_agency_outro"
                 / safe_agency
             )
-            if persisted_dir.exists():
-                assert list(persisted_dir.iterdir()) == []
+            assert persisted_dir.exists()
+            assert len(list(persisted_dir.iterdir())) == 1
+
+
+def test_outro_upload_accepts_payload_over_50mb() -> None:
+    """The 50 MB cap was removed: a >50MB upload must succeed (200).
+
+    We inject a stubbed ``ffprobe_runner`` so the test doesn't depend
+    on ffprobe being able to parse the synthetic bytes — the contract
+    we care about here is that the size guard no longer fires.
+    """
+    oversized = b"\x00\x00\x00\x20ftypisom" + b"0" * (50 * 1024 * 1024 + 16)
+    with temporary_workspace() as workspace_dir:
+        with temporary_postgres_schema(DATABASE_URL) as database:
+            seeded = seed_tenant(database.url, site_id="ckp.ie")
+
+            policy = AdminAccessPolicy(
+                enabled=True,
+                base_path="/v1/admin",
+                bearer_token="test-admin-token",
+                disable_auth_for_testing=False,
+            )
+            factory = lambda: DatabaseUnitOfWork(  # noqa: E731
+                database.url, workspace_dir
+            )
+            use_case = UploadOutroVideoUseCase(
+                workspace_dir=workspace_dir,
+                ffprobe_runner=lambda _path: 60,  # 60s outro, well over 10s
+            )
+            app = FastAPI()
+            app.include_router(
+                create_outro_router(
+                    unit_of_work_factory=factory,
+                    admin_access_policy=policy,
+                    workspace_dir=workspace_dir,
+                    upload_outro_video=use_case,
+                )
+            )
+            register_error_handlers(app)
+            client = TestClient(app)
+
+            response = client.post(
+                f"/v1/admin/agencies/{seeded.agency_id}/outro/upload",
+                files=_multipart(file_bytes=oversized),
+                headers=ADMIN_BEARER,
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["outro_source"] == "uploaded"
+            assert payload["outro_duration_seconds"] == 60
+            assert payload["outro_object_key"]
 
 
 def test_outro_upload_replaces_previous_blob() -> None:

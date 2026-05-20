@@ -38,6 +38,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from modules.reels.domain.types import (
@@ -301,17 +302,32 @@ class PersistLocalArtifactsUseCase:
         normalized_external_source_id = str(context.site_id or "").strip().lower()
         media_path_text = _relative_path_text(context.workspace_dir, final_media_path)
         metadata_path_text = _relative_path_text(context.workspace_dir, final_metadata_path)
-        uow.reels.states.save_local_artifacts(
-            agency_id=context.tenant.agency_id,
-            ingestion_source_id=context.tenant.wordpress_source_id,
-            external_source_id=normalized_external_source_id,
-            source_property_id=context.property.id,
-            artifact_kind=rendered_media.artifact_kind,
-            artifact_path=final_media_path,
-            metadata_path=final_metadata_path,
-            render_profile=context.delivery_plan.render_profile,
-            current_revision_id=revision_id,
+        # Feature 41: when the renderer produced fresh autoCaptions
+        # cues for this render (i.e. ``subtitles_override`` was NULL),
+        # forward them so the repository refreshes the snapshot column.
+        # Omitting the kwarg (the historical contract) leaves the
+        # previously-persisted snapshot untouched — the renderer signals
+        # "no new snapshot this render" by leaving
+        # ``RenderedMediaArtifact.auto_subtitles_snapshot`` as ``None``.
+        save_kwargs: dict[str, Any] = {
+            "agency_id": context.tenant.agency_id,
+            "ingestion_source_id": context.tenant.wordpress_source_id,
+            "external_source_id": normalized_external_source_id,
+            "source_property_id": context.property.id,
+            "artifact_kind": rendered_media.artifact_kind,
+            "artifact_path": final_media_path,
+            "metadata_path": final_metadata_path,
+            "render_profile": context.delivery_plan.render_profile,
+            "current_revision_id": revision_id,
+        }
+        rendered_snapshot = getattr(
+            rendered_media, "auto_subtitles_snapshot", None
         )
+        if rendered_snapshot is not None:
+            save_kwargs["auto_subtitles_snapshot"] = [
+                dict(cue) for cue in rendered_snapshot
+            ]
+        uow.reels.states.save_local_artifacts(**save_kwargs)
         uow.reels.revisions.save_revision(
             MediaRevision(
                 revision_id=revision_id,

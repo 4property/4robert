@@ -2800,7 +2800,7 @@
     },
     "/v1/admin/agencies/{agency_id}/intro/upload": {
       "post": {
-        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's intro folder. Validates size (<=50MB) and duration (1..10s via ffprobe). Returns the asset metadata (`intro_object_key`, `intro_duration_seconds`, `intro_source = \"uploaded\"`). Errors: 422 INTRO_INVALID_MIME, 413 INTRO_FILE_TOO_LARGE, 422 INTRO_INVALID_DURATION, 404 ADMIN_AGENCY_NOT_FOUND.",
+        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's intro folder. Validates MIME only; size and duration are intentionally unrestricted so the SaaS admin can upload intros of any length and weight. Returns the asset metadata (`intro_object_key`, `intro_duration_seconds`, `intro_source = \"uploaded\"`). Errors: 422 INTRO_INVALID_MIME, 422 INTRO_FILE_EMPTY, 404 ADMIN_AGENCY_NOT_FOUND.",
         "operationId": "upload_admin_agency_intro_v1_admin_agencies__agency_id__intro_upload_post",
         "parameters": [
           {
@@ -2833,7 +2833,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Upload the agency's intro video (multipart, MP4/MOV, <=50MB, 1-10s)",
+        "summary": "Upload the agency's intro video (multipart, MP4/MOV, unrestricted size/duration)",
         "tags": [
           "Admin · Intro"
         ]
@@ -3257,7 +3257,7 @@
     },
     "/v1/admin/agencies/{agency_id}/outro/upload": {
       "post": {
-        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's outro folder. Validates size (<=50MB) and duration (1..10s via ffprobe). Returns the asset metadata (`outro_object_key`, `outro_duration_seconds`, `outro_source = \"uploaded\"`). Errors: 422 OUTRO_INVALID_MIME, 413 OUTRO_FILE_TOO_LARGE, 422 OUTRO_INVALID_DURATION, 404 ADMIN_AGENCY_NOT_FOUND.",
+        "description": "Accepts a multipart `file` field (MP4 or MOV) and stores it under the agency's outro folder. Validates MIME only; size and duration are intentionally unrestricted so the SaaS admin can upload outros of any length and weight. Returns the asset metadata (`outro_object_key`, `outro_duration_seconds`, `outro_source = \"uploaded\"`). Errors: 422 OUTRO_INVALID_MIME, 422 OUTRO_FILE_EMPTY, 404 ADMIN_AGENCY_NOT_FOUND.",
         "operationId": "upload_admin_agency_outro_v1_admin_agencies__agency_id__outro_upload_post",
         "parameters": [
           {
@@ -3290,7 +3290,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Upload the agency's outro video (multipart, MP4/MOV, <=50MB, 1-10s)",
+        "summary": "Upload the agency's outro video (multipart, MP4/MOV, unrestricted size/duration)",
         "tags": [
           "Admin · Outro"
         ]

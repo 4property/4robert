@@ -17,6 +17,24 @@ from modules.reels.domain import ReelState, build_empty_reel_state
 from shared.db.repository_base import ModuleRepository, utcnow
 
 
+# Feature 41: ``save_local_artifacts`` accepts an optional
+# ``auto_subtitles_snapshot`` kwarg. ``None`` is a legitimate value
+# ("clear the snapshot"), so we cannot use ``None`` to mean "do not
+# touch the existing value". A sentinel object disambiguates the two
+# semantics: callers omit the kwarg (sentinel default) to preserve the
+# existing value, and pass an explicit ``list`` / ``None`` to update.
+class _Unset:
+    """Sentinel type for the ``auto_subtitles_snapshot`` kwarg."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover — debug only
+        return "<UNSET>"
+
+
+_UNSET = _Unset()
+
+
 def _isoformat(value: object | None) -> str | None:
     if value is None:
         return None
@@ -166,6 +184,23 @@ def _manifest_override_to_jsonb_param(
     return json.dumps(list(value), separators=(",", ":"))
 
 
+def _auto_subtitles_snapshot_to_jsonb_param(
+    value: list[dict[str, Any]] | None,
+) -> str | None:
+    """Serialize the optional ``auto_subtitles_snapshot`` to a JSONB bind param.
+
+    Feature 41: the column stores the most recent autoCaptions cues the
+    renderer produced (the same shape as ``subtitles_override``).
+    Returns ``None`` (mapped to SQL ``NULL``) when the snapshot is
+    unset (``None`` or empty list); otherwise returns the compact JSON
+    text. Same shape as the other JSONB params so the persistence
+    contract stays homogeneous.
+    """
+    if not value:
+        return None
+    return json.dumps(list(value), separators=(",", ":"))
+
+
 def _row_to_reel_state(row) -> ReelState:
     return ReelState(
         agency_id=str(row.agency_id or ""),
@@ -211,6 +246,9 @@ def _row_to_reel_state(row) -> ReelState:
         manifest_override=_jsonb_to_optional_list(
             getattr(row, "manifest_override", None)
         ),
+        auto_subtitles_snapshot=_jsonb_to_optional_list(
+            getattr(row, "auto_subtitles_snapshot", None)
+        ),
     )
 
 
@@ -225,7 +263,7 @@ _REEL_COLUMNS = (
     "agency_id, ingestion_source_id, external_source_id, source_property_id, "
     "content_fingerprint, content_snapshot, publish_target_fingerprint, "
     "publish_target_snapshot, descriptions_override, music_id, photos_override, "
-    "subtitles_override, manifest_override, "
+    "subtitles_override, manifest_override, auto_subtitles_snapshot, "
     "render_template_id, "
     "selected_image_folder, artifact_kind, "
     "local_artifact_path, local_metadata_path, render_profile, "
@@ -275,6 +313,7 @@ class ReelStateRepository(ModuleRepository):
                 "CAST(:photos_override AS jsonb), "
                 "CAST(:subtitles_override AS jsonb), "
                 "CAST(:manifest_override AS jsonb), "
+                "CAST(:auto_subtitles_snapshot AS jsonb), "
                 ":render_template_id, "
                 ":selected_image_folder, :artifact_kind, :local_artifact_path, "
                 ":local_metadata_path, "
@@ -294,6 +333,7 @@ class ReelStateRepository(ModuleRepository):
                 "photos_override = EXCLUDED.photos_override, "
                 "subtitles_override = EXCLUDED.subtitles_override, "
                 "manifest_override = EXCLUDED.manifest_override, "
+                "auto_subtitles_snapshot = EXCLUDED.auto_subtitles_snapshot, "
                 "render_template_id = EXCLUDED.render_template_id, "
                 "selected_image_folder = EXCLUDED.selected_image_folder, "
                 "artifact_kind = EXCLUDED.artifact_kind, "
@@ -335,6 +375,9 @@ class ReelStateRepository(ModuleRepository):
                 ),
                 "manifest_override": _manifest_override_to_jsonb_param(
                     state.manifest_override
+                ),
+                "auto_subtitles_snapshot": _auto_subtitles_snapshot_to_jsonb_param(
+                    state.auto_subtitles_snapshot
                 ),
                 "render_template_id": state.render_template_id or "classic",
                 "selected_image_folder": state.selected_image_folder,
@@ -408,6 +451,7 @@ class ReelStateRepository(ModuleRepository):
                 photos_override=existing.photos_override,
                 subtitles_override=existing.subtitles_override,
                 manifest_override=existing.manifest_override,
+                auto_subtitles_snapshot=existing.auto_subtitles_snapshot,
             )
         )
 
@@ -463,6 +507,7 @@ class ReelStateRepository(ModuleRepository):
                 photos_override=existing.photos_override,
                 subtitles_override=existing.subtitles_override,
                 manifest_override=existing.manifest_override,
+                auto_subtitles_snapshot=existing.auto_subtitles_snapshot,
             )
         )
 
@@ -480,6 +525,7 @@ class ReelStateRepository(ModuleRepository):
         current_revision_id: str = "",
         manifest_path: Path | None = None,
         video_path: Path | None = None,
+        auto_subtitles_snapshot: list[dict[str, Any]] | None | _Unset = _UNSET,
     ) -> None:
         if self.base_dir is None:
             raise RuntimeError(
@@ -502,6 +548,16 @@ class ReelStateRepository(ModuleRepository):
             else _relative_to_base(resolved_metadata_path, self.base_dir)
         )
         relative_artifact = _relative_to_base(resolved_artifact_path, self.base_dir)
+        # Feature 41: the renderer signals "the autoCaptions flow ran
+        # this render — refresh the snapshot" by passing an explicit
+        # value (a list of cues, or ``None`` to clear). Callers that do
+        # not touch subtitles leave the sentinel default so the
+        # previously-persisted snapshot is preserved.
+        resolved_snapshot = (
+            existing.auto_subtitles_snapshot
+            if isinstance(auto_subtitles_snapshot, _Unset)
+            else auto_subtitles_snapshot
+        )
         self.save(
             ReelState(
                 agency_id=existing.agency_id or agency_id,
@@ -539,6 +595,7 @@ class ReelStateRepository(ModuleRepository):
                 photos_override=existing.photos_override,
                 subtitles_override=existing.subtitles_override,
                 manifest_override=existing.manifest_override,
+                auto_subtitles_snapshot=resolved_snapshot,
             )
         )
 

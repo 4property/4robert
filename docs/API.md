@@ -657,10 +657,13 @@ with a single `file` field:
 - **Accepted MIME types**: `video/mp4`, `video/quicktime`. The endpoint
   also accepts the common alias `video/x-quicktime` for `.mov`. Anything
   else returns **422 `OUTRO_INVALID_MIME`**.
-- **Maximum payload size**: **50 MB**. Larger uploads return **413
-  `OUTRO_FILE_TOO_LARGE`**.
-- **Duration window**: **1..10 seconds** (measured by `ffprobe`). Out-of-
-  range clips return **422 `OUTRO_INVALID_DURATION`**.
+- **Maximum payload size**: **unrestricted**. The 50 MB cap was removed
+  so the SaaS admin can upload outros of any weight. Empty bodies still
+  return **422 `OUTRO_FILE_EMPTY`**.
+- **Duration window**: **unrestricted**. The `[1, 10]` s window was
+  removed; `ffprobe` is still invoked to derive
+  `outro_duration_seconds` for the response and for downstream
+  rendering, but the duration is no longer validated against a range.
 
 Successful response (200):
 
@@ -701,10 +704,9 @@ Error reference (upload):
 | 200 | — | Outro persisted. Response carries the three `outro_*` fields. |
 | 401 / 403 | (auth) | Missing or invalid admin bearer / agency JWT. |
 | 404 | `ADMIN_AGENCY_NOT_FOUND` | Path agency does not exist. |
-| 413 | `OUTRO_FILE_TOO_LARGE` | Payload exceeded 50 MB. |
 | 415 | `OUTRO_UPLOAD_UNSUPPORTED_TYPE` | Request was not `multipart/form-data`. |
 | 422 | `OUTRO_INVALID_MIME` | `file` content-type was not `video/mp4` or `video/quicktime`. |
-| 422 | `OUTRO_INVALID_DURATION` | Probed duration fell outside `[1s, 10s]`. |
+| 422 | `OUTRO_FILE_EMPTY` | `file` multipart field carried zero bytes. |
 | 422 | `OUTRO_UPLOAD_MALFORMED` | Body could not be parsed as `multipart/form-data`. |
 | 422 | `OUTRO_UPLOAD_MISSING_FIELD` | `file` multipart field absent. |
 
@@ -750,10 +752,13 @@ body with a single `file` field:
 
 - **Accepted MIME types**: `video/mp4`, `video/quicktime`. Anything else
   returns **422 `INTRO_INVALID_MIME`**.
-- **Maximum payload size**: **50 MB**. Larger uploads return **413
-  `INTRO_FILE_TOO_LARGE`**.
-- **Duration window**: **1..10 seconds** (measured by `ffprobe`). Out-of-
-  range clips return **422 `INTRO_INVALID_DURATION`**.
+- **Maximum payload size**: **unrestricted**. The 50 MB cap was removed
+  so the SaaS admin can upload intros of any weight. Empty bodies still
+  return **422 `INTRO_FILE_EMPTY`**.
+- **Duration window**: **unrestricted**. The `[1, 10]` s window was
+  removed; `ffprobe` is still invoked to derive
+  `intro_duration_seconds` for the response and for downstream
+  rendering, but the duration is no longer validated against a range.
 
 Successful response (200):
 
@@ -778,10 +783,9 @@ Error reference (upload) mirrors the outro table — codes start with
 | Status | `code` |
 |---|---|
 | 404 | `ADMIN_AGENCY_NOT_FOUND` |
-| 413 | `INTRO_FILE_TOO_LARGE` |
 | 415 | `INTRO_UPLOAD_UNSUPPORTED_TYPE` |
 | 422 | `INTRO_INVALID_MIME` |
-| 422 | `INTRO_INVALID_DURATION` |
+| 422 | `INTRO_FILE_EMPTY` |
 | 422 | `INTRO_UPLOAD_MALFORMED` |
 | 422 | `INTRO_UPLOAD_MISSING_FIELD` |
 

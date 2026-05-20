@@ -225,6 +225,20 @@ class ReelORM(Base):
     manifest_override: Mapped[list | None] = mapped_column(
         JSONB, nullable=True, server_default=None
     )
+    # Feature 41: snapshot of the autoCaptions cues the renderer
+    # produced on the last render whose ``subtitles_override`` was
+    # NULL. ``NULL`` means "no snapshot yet — the reel was never
+    # rendered without an override". Otherwise the value is the same
+    # shape as ``subtitles_override`` (an ordered JSON array of
+    # ``{"index": int, "text": str, "in_seconds": float,
+    # "out_seconds": float}`` entries) so the editor can use the
+    # snapshot as the starting value of the override before the user
+    # types anything. Refreshed on every render that bypasses the
+    # override, and preserved untouched on renders that consume the
+    # override.
+    auto_subtitles_snapshot: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, server_default=None
+    )
     render_template_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("render_templates.template_id"),
